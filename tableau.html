@@ -106,6 +106,17 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .screen-traffic[hidden]{display:none}
 .project-credits{width:min(1120px,90vw);margin:0 auto 24px;color:var(--sub);font-size:.8rem}
 .project-credits a{color:inherit}
+.preview-section{margin:24px 0}
+.preview-section summary{cursor:pointer;font-weight:650;color:#ffd0dc}
+.preview-section[open] summary{margin-bottom:12px}
+.preview-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,205px),1fr));gap:12px}
+.preview-box{margin:0 0 14px;min-width:0;border:1px solid var(--edge);border-radius:12px;overflow:hidden;background:#100d12}
+.preview-box[hidden],.preview-box img[hidden]{display:none}
+.preview-box img{width:100%;aspect-ratio:16/9;display:block;object-fit:contain;background:#09070a}
+.preview-caption{display:grid;gap:8px;padding:11px;overflow-wrap:anywhere}
+.preview-caption strong{font-size:.88rem}
+.preview-caption .small{margin:0;min-height:1.25em}
+.preview-caption button{justify-self:start;white-space:normal}
 .traffic-interface-label{margin:6px 0 0;overflow-wrap:anywhere;font-size:.8rem}
 #session-time{color:#ffc078;font-variant-numeric:tabular-nums}
 @media(max-width:600px){.traffic-panel{grid-template-columns:1fr}}
@@ -135,10 +146,15 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
     </div>
     <p class="small" id="traffic-help">Trafic total de l’interface sélectionnée, NDI compris lorsque ce PC diffuse.</p>
   </section>
+  <details class="preview-section" id="source-previews">
+    <summary>Aperçu des sources NDI</summary>
+    <p class="small" id="sources-empty">Aucun flux détecté par un lecteur en ligne.</p>
+    <div class="preview-grid" id="preview-grid"></div>
+  </details>
   <p id="message" role="status"></p>
   <div id="screens"></div>
 </main>
-<footer class="project-credits">Auteur : DUVERNOY Matthieu &amp; ChatGPT · Société SoundLive · <a href="mailto:contact@soundlive.fr">contact@soundlive.fr</a></footer>
+<footer class="project-credits">© 2026 Société SoundLive · Auteur : DUVERNOY Matthieu &amp; ChatGPT · <a href="mailto:contact@soundlive.fr">contact@soundlive.fr</a></footer>
 <dialog id="remote-connections" aria-labelledby="connections-title">
   <form method="dialog" class="dialog-body">
     <h2 id="connections-title">Connexions à la régie distante</h2>
@@ -262,6 +278,16 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
     </div>
   </div>
 </dialog>
+<template id="preview-template">
+  <figure class="preview-box">
+    <img alt="" hidden>
+    <figcaption class="preview-caption">
+      <strong></strong>
+      <p class="small" role="status"></p>
+      <button type="button">Capturer un aperçu</button>
+    </figcaption>
+  </figure>
+</template>
 <template id="card">
   <article>
     <div class="card-heading"><h2></h2><span class="badge"></span></div>
@@ -294,6 +320,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       <p class="small traffic-interface-label"></p>
     </section>
     <p class="small current-stream" hidden><span></span><strong></strong></p>
+    <div class="screen-preview" hidden></div>
     <p class="small update-status" hidden></p>
     <details class="screen-controls">
       <summary>Commandes et réglages</summary>
@@ -328,6 +355,9 @@ const connectionsButton = document.querySelector("#open-connections");
 const connectionsDialog = document.querySelector("#remote-connections");
 const dialog = document.querySelector("#pair");
 const cards = new Map();
+const previewGrid = document.querySelector("#preview-grid");
+const previewCards = new Map();
+const previewStates = new Map();
 const confirmation = document.querySelector("#confirm-action");
 const confirmationForm = select(confirmation, "form");
 const confirmTitle = select(confirmation, "#confirm-title");
@@ -476,6 +506,92 @@ async function call(path, data) {
     throw error;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+function createPreview(parent, title) {
+  const element = document.querySelector("#preview-template").content.firstElementChild.cloneNode(true);
+  const button = select(element, "button");
+  const image = select(element, "img");
+  const status = select(element, "p");
+  const view = {element, button, image, status, source:""};
+  select(element, "strong").textContent = title;
+  button.onclick = () => requestSourcePreview(view.source);
+  parent.append(element);
+  return view;
+}
+
+function renderPreview(view) {
+  const result = previewStates.get(view.source);
+  const image = result?.state === "ready" ? result.image : "";
+  if (image) {
+    const url = "data:image/png;base64," + image;
+    if (view.image.getAttribute("src") !== url) view.image.src = url;
+    view.image.alt = "Aperçu du flux " + view.source;
+  } else {
+    view.image.removeAttribute("src");
+  }
+  view.image.hidden = !image;
+  view.button.disabled = !view.source || result?.state === "pending";
+  view.button.textContent = image ? "Actualiser l’aperçu" : "Capturer un aperçu";
+  const message = image ? "Image capturée à " + new Date(result.captured * 1000).toLocaleTimeString("fr-FR") :
+    result?.state === "pending" ? "Capture en cours…" : result?.error || "Image à la demande";
+  if (view.status.textContent !== message) view.status.textContent = message;
+}
+
+function redrawSource(source) {
+  const gallery = previewCards.get(source);
+  if (gallery) renderPreview(gallery);
+  for (const card of cards.values()) if (card.preview.source === source) renderPreview(card.preview);
+}
+
+async function requestSourcePreview(source) {
+  if (!source || previewStates.get(source)?.state === "pending") return;
+  const previous = previewStates.get(source)?.id;
+  previewStates.set(source, {state:"pending"});
+  redrawSource(source);
+  try {
+    let result = await call("/api/preview", {source, previous});
+    const end = Date.now() + 18000;
+    while (result.state === "pending" && Date.now() < end) {
+      await new Promise(resolve => setTimeout(resolve, 950));
+      result = await call("/api/preview?source=" + encodeURIComponent(source));
+    }
+    if (result.state !== "ready" && result.state !== "error") {
+      result = {state:"error", error:"La capture a expiré. Réessaie si le flux est toujours détecté."};
+    }
+    previewStates.set(source, result);
+  } catch (error) {
+    previewStates.set(source, {state:"error", error:error.message});
+  }
+  redrawSource(source);
+}
+
+function renderSourceGallery(rows) {
+  const detected = new Set();
+  for (const row of rows) if (row.paired && row.online) {
+    for (const source of row.report.sources || []) if (source) detected.add(source);
+    if (row.report.active_source) detected.add(row.report.active_source);
+  }
+  document.querySelector("#sources-empty").hidden = detected.size > 0;
+  for (const [name, view] of previewCards) if (!detected.has(name)) {
+    view.element.remove();
+    previewCards.delete(name);
+  }
+  for (const name of previewStates.keys()) {
+    if (!detected.has(name) && previewStates.get(name).state !== "pending") previewStates.delete(name);
+  }
+  let next = previewGrid.firstElementChild;
+  for (const name of [...detected].sort((a, b) => a.localeCompare(b, "fr"))) {
+    if (!previewCards.has(name)) {
+      const view = createPreview(previewGrid, name);
+      view.source = name;
+      previewCards.set(name, view);
+      renderPreview(view);
+    }
+    const element = previewCards.get(name).element;
+    if (element !== next) previewGrid.insertBefore(element, next);
+    next = element.nextElementSibling;
   }
 }
 
@@ -845,6 +961,7 @@ function cardFor(id) {
   const ui = Object.fromEntries(fields.map(key => [key, select(el, "."+key)]));
   const list = select(el, ".detected-sources");
   const card = {el, ui, form, list, dirty:false};
+  card.preview = createPreview(select(el, ".screen-preview"), "Aperçu du flux en cours");
   const controls = select(el, "details");
   try { controls.open = localStorage.getItem("soundlive-controls-" + id) === "open"; }
   catch { /* Storage can be unavailable in private mode. */ }
@@ -956,6 +1073,12 @@ function render(row) {
   const stream = select(el, ".current-stream");
   stream.hidden = !row.options;
   const playing = row.online && row.report.state === "Lecture";
+  const activeSource = playing ? row.report.active_source || "" : "";
+  card.preview.element.parentElement.hidden = !activeSource;
+  if (card.preview.source !== activeSource) {
+    card.preview.source = activeSource;
+    renderPreview(card.preview);
+  }
   select(stream, "span").textContent = playing && row.report.active_source ? "Flux en cours" :
     playing ? "Source configurée · lecture signalée" : "Source configurée";
   select(stream, "strong").textContent = (playing && row.report.active_source) || row.options?.source || "";
@@ -1063,6 +1186,7 @@ async function refreshScreens() {
     for (const [id,card] of cards) if (!ids.has(id)) {card.el.remove();cards.delete(id);}
     for (const row of rows) render(row);
     positionScreens(rows);
+    renderSourceGallery(rows);
     organizerButton.disabled = !rows.length;
     groupOpen.disabled = !rows.some(row => row.paired);
     if (group.open) renderGroupSources();

@@ -3,7 +3,7 @@ SoundLive-NDI
 Auteur : DUVERNOY Matthieu & ChatGPT
 contact@soundlive.fr
 Société SoundLive
-Régie 1.4.8 · Lecteurs 1.4.6
+Régie 1.4.9 · Lecteurs 1.4.7
 
 1. SUR LE PC WINDOWS QUI DIFFUSE AVEC OBS
    Ferme l’ancien tableau et décompresse tout le ZIP dans le dossier de
@@ -234,7 +234,7 @@ RÉGIE SOUS UBUNTU DESKTOP
    Pour tester le push, commence par un seul récepteur déjà équipé pour les
    mises à jour signées. Laisse tourner son ancien client, puis clique sur
    « Mettre à jour le lecteur » sur sa fiche et confirme. Le lecteur doit
-   revenir en ligne avec « v1.4.6 · Dernière version » en vert.
+   revenir en ligne avec « v1.4.7 · Dernière version » en vert.
    Si la fiche indique « Installation locale requise » et que le lecteur
    utilise déjà lancer-client.py, vérifie la présence de ssh-keygen, copie
    regie-update.pub dans ~/.local/share/soundlive-ecrans/ et rouvre la session.
@@ -372,6 +372,15 @@ ORGANISER LES ÉCRANS
 
    Après le push vers le lecteur 1.3.0 ou plus récent, l’écran d’attente affiche sa version.
    Lorsqu’il joint la régie, il indique si elle propose une mise à jour.
+
+APERÇU DES SOURCES NDI
+
+   Ouvre « Aperçu des sources NDI » dans le tableau pour retrouver les flux
+   détectés par les lecteurs en ligne. « Capturer un aperçu » affiche une
+   image du flux à la demande. Sur chaque fiche en lecture, le même bouton
+   cible le flux signalé en cours de lecture. « Actualiser l’aperçu » demande
+   une nouvelle image. La capture nécessite un lecteur à jour qui détecte
+   le flux. Elle se fait à bande passante réduite et sans lecture audio.
 
 VERSIONS PUBLIÉES
 

@@ -5,6 +5,7 @@
 # Société SoundLive
 import configparser
 from concurrent.futures import ThreadPoolExecutor
+from base64 import b64encode
 import json
 import os
 import secrets
@@ -13,12 +14,13 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
-from commun import APP_NAME, DEFAULT_SOURCE, SOFTWARE_VERSION, client_lock, options, release_number
+from commun import APP_NAME, COPYRIGHT, DEFAULT_SOURCE, PREVIEW_LIMIT, SOFTWARE_VERSION, client_lock, options, release_number
 from diagnostic import Diagnostic
 from mise_a_jour import ClientUpdate, LIMIT, RESTART, contents, digest
 
@@ -96,6 +98,104 @@ def waiting_bitmap(matrix):
     rows = [(light * 4 + b"".join(dark if cell == "1" else light for cell in row)
              + light * 4) * scale for row in matrix]
     return side, empty + b"".join(rows) + empty
+
+
+def capture_ndi_preview(source_name):
+    import ctypes as c
+    import struct
+    import zlib
+
+    class Source(c.Structure):
+        _fields_ = [("name", c.c_char_p), ("address", c.c_char_p)]
+
+    class Receiver(c.Structure):
+        _fields_ = [("source", Source), ("color", c.c_int), ("bandwidth", c.c_int),
+                    ("fields", c.c_bool), ("name", c.c_char_p)]
+
+    class Frame(c.Structure):
+        _fields_ = [("width", c.c_int), ("height", c.c_int), ("fourcc", c.c_int),
+                    ("rate_n", c.c_int), ("rate_d", c.c_int), ("aspect", c.c_float),
+                    ("format", c.c_int), ("timecode", c.c_int64), ("data", c.c_void_p),
+                    ("stride", c.c_int), ("metadata", c.c_char_p), ("timestamp", c.c_int64)]
+
+    library = (APP / "Processing.NDI.Lib.x64.dll" if WINDOWS else
+               (APP if UBUNTU else NDI) / "lib/libndi.so.6")
+    ndi = c.CDLL(str(library))
+    for name, returns, args in (
+        ("initialize", c.c_bool, ()),
+        ("destroy", None, ()),
+        ("find_create_v2", c.c_void_p, (c.c_void_p,)),
+        ("find_destroy", None, (c.c_void_p,)),
+        ("find_wait_for_sources", c.c_bool, (c.c_void_p, c.c_uint32)),
+        ("find_get_current_sources", c.POINTER(Source), (c.c_void_p, c.POINTER(c.c_uint32))),
+        ("recv_create_v3", c.c_void_p, (c.POINTER(Receiver),)),
+        ("recv_destroy", None, (c.c_void_p,)),
+        ("recv_capture_v2", c.c_int, (c.c_void_p, c.POINTER(Frame), c.c_void_p, c.c_void_p, c.c_uint32)),
+        ("recv_free_video_v2", None, (c.c_void_p, c.POINTER(Frame))),
+    ):
+        function = getattr(ndi, "NDIlib_" + name)
+        function.restype, function.argtypes = returns, args
+
+    if not ndi.NDIlib_initialize():
+        raise RuntimeError("Le runtime NDI est indisponible.")
+    finder = receiver = None
+    try:
+        finder = ndi.NDIlib_find_create_v2(None)
+        if not finder:
+            raise RuntimeError("La découverte NDI est indisponible.")
+        target = source_name.encode("utf-8")
+        expires = time.monotonic() + 3.3
+        while time.monotonic() < expires:
+            count = c.c_uint32()
+            sources = ndi.NDIlib_find_get_current_sources(finder, c.byref(count))
+            candidate = next((sources[i] for i in range(count.value) if sources[i].name == target), None)
+            if candidate is not None:
+                # Valeurs SDK pour BGRX/BGRA et le mode NDI à bande passante réduite.
+                receiver = ndi.NDIlib_recv_create_v3(c.byref(Receiver(candidate, 0, 0, False, b"SoundLive-NDI Preview")))
+                break
+            ndi.NDIlib_find_wait_for_sources(finder, 180)
+        if not receiver:
+            raise RuntimeError("Source NDI introuvable sur ce lecteur.")
+        expires = time.monotonic() + 3.5
+        while time.monotonic() < expires:
+            frame = Frame()
+            if ndi.NDIlib_recv_capture_v2(receiver, c.byref(frame), None, None, 200) != 1:
+                continue
+            try:
+                formats = (int.from_bytes(b"BGRX", "little"), int.from_bytes(b"BGRA", "little"))
+                if not frame.data or frame.fourcc not in formats or not (1 <= frame.width <= 16384 and 1 <= frame.height <= 16384):
+                    continue
+                stride = frame.stride or frame.width * 4
+                if not frame.width * 4 <= stride <= 131072:
+                    continue
+                aspect = frame.aspect
+                if not .1 <= aspect <= 10:
+                    aspect = frame.width / frame.height
+                width, height = max(1, min(240, int(135 * aspect))), max(1, min(135, int(240 / aspect)))
+                scanlines = bytearray()
+                columns = [4 * (x * frame.width // width) for x in range(width)]
+                for y in range(height):
+                    line = c.string_at(frame.data + (y * frame.height // height) * stride, frame.width * 4)
+                    scanlines.append(0)
+                    for x in columns:
+                        scanlines.extend((line[x + 2], line[x + 1], line[x]))
+
+                def chunk(kind, payload):
+                    return (struct.pack(">I", len(payload)) + kind + payload
+                            + struct.pack(">I", zlib.crc32(kind + payload)))
+
+                return (b"\x89PNG\r\n\x1a\n"
+                        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+                        + chunk(b"IDAT", zlib.compress(scanlines, 1)) + chunk(b"IEND", b""))
+            finally:
+                ndi.NDIlib_recv_free_video_v2(receiver, c.byref(frame))
+        raise RuntimeError("Aucune image reçue sur ce flux.")
+    finally:
+        if receiver:
+            ndi.NDIlib_recv_destroy(receiver)
+        if finder:
+            ndi.NDIlib_find_destroy(finder)
+        ndi.NDIlib_destroy()
 
 
 def waiting_update_message(recommendation):
@@ -237,6 +337,7 @@ class DashboardClient:
         self.updater = ClientUpdate(APP, CLIENT_DIR)
         self.can_update = "SOUNDLIVE_APP" in os.environ and self.updater.public.is_file()
         self.version = digest(contents(CLIENT_DIR))
+        self.preview_job = None
 
     def poll(self, report):
         server = self.identity["server"]
@@ -254,6 +355,12 @@ class DashboardClient:
             self.latency_test = None
             raise
         self.latency_ms = round((time.monotonic() - started) * 1000, 1)
+        preview = reply.get("preview_request")
+        if isinstance(preview, dict) and not (reply.get("reboot") or reply.get("poweroff")):
+            job, source = preview.get("id"), preview.get("source")
+            if isinstance(job, str) and isinstance(source, str) and job != self.preview_job:
+                self.preview_job = job
+                threading.Thread(target=self.send_preview, args=(job, source), daemon=True).start()
         reply.pop("restart_client", None)
         if self.can_update and not (reply.get("reboot") or reply.get("poweroff")):
             job = reply.get("client_update")
@@ -269,6 +376,26 @@ class DashboardClient:
             except (OSError, RuntimeError, ValueError):
                 self.latency_test = dict(id=test, ms=None)
         return reply
+
+    def send_preview(self, job, source):
+        result = {"id": self.identity["id"], "job": job}
+        python = Path(sys.executable)
+        if WINDOWS and python.name.lower() == "pythonw.exe" and python.with_name("python.exe").is_file():
+            python = python.with_name("python.exe")
+        try:
+            probe = subprocess.run(
+                [str(python), "-B", str(Path(__file__).resolve()), "--apercu-ndi", source],
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=9,
+                creationflags=subprocess.CREATE_NO_WINDOW if WINDOWS else 0,
+            )
+            if probe.returncode == 0 and 0 < len(probe.stdout) <= PREVIEW_LIMIT:
+                result["image"] = b64encode(probe.stdout).decode("ascii")
+        except (OSError, subprocess.SubprocessError):
+            pass
+        try:
+            post(self.identity["server"], "/api/preview-result", result, self.identity["token"])
+        except (OSError, RuntimeError, ValueError):
+            pass
 
     def receive_update(self, reply, device, job):
         try:
@@ -374,6 +501,9 @@ def desktop():
             version = Gtk.Label(label=f"Version du lecteur {SOFTWARE_VERSION}")
             version.get_style_context().add_class("reader-version")
             box.pack_start(version, False, False, 0)
+            copyright_label = Gtk.Label(label=COPYRIGHT)
+            copyright_label.get_style_context().add_class("reader-version")
+            box.pack_start(copyright_label, False, False, 0)
             self.update_label = Gtk.Label(no_show_all=True)
             self.update_label.get_style_context().add_class("reader-update")
             self.update_label.set_line_wrap(True)
@@ -658,6 +788,7 @@ def run_windows_screen(tk, log):
     group_label.pack_forget()
     regie_label = label("", 13)
     label(f"Version du lecteur {SOFTWARE_VERSION}", 13, "#dfcbd1")
+    label(COPYRIGHT, 12, "#dfcbd1")
     notice = label("", 14, "#ffc78a")
     qr = label("", 13)
     picture = None
@@ -818,7 +949,9 @@ def run_windows_screen(tk, log):
 
 if __name__ == "__main__":
     try:
-        if len(sys.argv) == 4 and sys.argv[1] == "associer":
+        if len(sys.argv) == 3 and sys.argv[1] == "--apercu-ndi":
+            sys.stdout.buffer.write(capture_ndi_preview(sys.argv[2]))
+        elif len(sys.argv) == 4 and sys.argv[1] == "associer":
             pair(sys.argv[2], sys.argv[3])
         elif len(sys.argv) in (2, 3) and sys.argv[1] == "verifier":
             check_connection(sys.argv[2] if len(sys.argv) == 3 else None)
@@ -827,5 +960,5 @@ if __name__ == "__main__":
         else:
             raise ValueError("Usage : ecran.py associer http://ADRESSE_DU_PC:8765 CODE"
                              " ou ecran.py verifier [http://ADRESSE_DU_PC:8765]")
-    except (OSError, RuntimeError, ValueError) as error:
+    except (OSError, RuntimeError, ValueError, AttributeError) as error:
         sys.exit(str(error))

@@ -4,6 +4,7 @@
 # contact@soundlive.fr
 # Société SoundLive
 import argparse
+from base64 import b64decode
 import hmac
 from html import escape
 from ipaddress import IPv4Address
@@ -21,14 +22,14 @@ from urllib.parse import parse_qs, urlsplit
 
 from acces_regie import (PORT as REMOTE_PORT, SESSION_COOKIE, SESSION_WARNING, USERNAME,
                          RemoteConnections, RemoteDashboard, prepare_access)
-from commun import APP_NAME, SOFTWARE_VERSION as CLIENT_VERSION, options, release_number
+from commun import APP_NAME, PREVIEW_LIMIT, SOFTWARE_VERSION as CLIENT_VERSION, options, release_number
 from diagnostic import NetworkRates, network_info
 from mise_a_jour import SAFE_ID, contents, digest, package, prepare_key
 from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.8"
+SOFTWARE_VERSION = "1.4.9"
 DATA = ROOT / "ecrans.json"
 REMOTE_ACCESS = ROOT / ".soundlive-acces"
 PAGE = ((ROOT / "tableau.html").read_bytes()
@@ -52,7 +53,77 @@ UPDATE_AGE = 120
 UPDATE_KEY = ROOT / ".soundlive-update" / "regie"
 UPDATE_FILES = contents(ROOT)
 UPDATE_DIGEST = digest(UPDATE_FILES)
-RECEIVER_PATHS = {"/api/enroll", "/api/poll", "/api/client-package"}
+RECEIVER_PATHS = {"/api/enroll", "/api/poll", "/api/client-package", "/api/preview-result"}
+PREVIEWS = {}
+PREVIEW_WAIT = 16
+PREVIEW_FRESH = 20
+PREVIEW_CLIENT = (1, 4, 7)
+
+
+def preview_prune(now):
+    for source in [source for source, job in PREVIEWS.items() if job["until"] <= now]:
+        del PREVIEWS[source]
+
+
+def preview_status(job):
+    public = {"id": job["id"], "state": job["state"]}
+    for field in ("image", "error", "captured"):
+        if field in job:
+            public[field] = job[field]
+    return public
+
+
+def request_preview(data, now):
+    preview_prune(now)
+    source = safe_text(data["source"], 256)
+    online = [
+        (key, row["report"]) for key, row in SCREENS.items()
+        if row.get("token") and now - row.get("report", {}).get("seen", 0) < ONLINE_AGE
+        and (source in row["report"].get("sources", []) or source == row["report"].get("active_source"))
+    ]
+    existing = PREVIEWS.get(source)
+    if not online:
+        return 409, {"error": "Ce flux n’est plus détecté par les lecteurs."}
+    if existing and (existing["state"] != "ready" or existing["id"] != data.get("previous")):
+        return 200, preview_status(existing)
+    supported = [(key, report) for key, report in online
+                 if release_number(report.get("client_release")) >= PREVIEW_CLIENT]
+    if not supported:
+        return 409, {"error": "Mets à jour un lecteur qui détecte ce flux pour afficher son aperçu."}
+    busy = {job["reader"] for job in PREVIEWS.values() if job["state"] == "pending"}
+    available = [(key, report) for key, report in supported if key not in busy]
+    if not available or len(busy) >= 4:
+        return 429, {"error": "Captures en cours. Réessaie dans quelques secondes."}
+    device, _ = min(available, key=lambda item: item[1].get("active_source") != source)
+    if len(PREVIEWS) >= 24:
+        expired_first = min((name for name in PREVIEWS if PREVIEWS[name]["state"] != "pending"),
+                            key=lambda name: PREVIEWS[name]["until"])
+        del PREVIEWS[expired_first]
+    job = dict(id=secrets.token_hex(12), reader=device, source=source, state="pending", until=now + PREVIEW_WAIT)
+    PREVIEWS[source] = job
+    return 200, preview_status(job)
+
+
+def finish_preview(reader, data, now):
+    preview_prune(now)
+    job = next((item for item in PREVIEWS.values() if item["id"] == data.get("job")
+                and item["reader"] == reader and item["state"] == "pending"), None)
+    if job is None:
+        return 409, {"error": "Cette capture n’est plus demandée."}
+    image = data.get("image")
+    if isinstance(image, str) and 0 < len(image) <= 4 * ((PREVIEW_LIMIT + 2) // 3):
+        try:
+            raw = b64decode(image, validate=True)
+        except ValueError:
+            raw = b""
+        if (33 <= len(raw) <= PREVIEW_LIMIT and raw.startswith(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+                and 1 <= int.from_bytes(raw[16:20], "big") <= 240
+                and 1 <= int.from_bytes(raw[20:24], "big") <= 135
+                and raw[24:29] == b"\x08\x02\x00\x00\x00"):
+            job.update(state="ready", image=image, captured=now, until=now + PREVIEW_FRESH)
+            return 200, {"ok": True}
+    job.update(state="error", error="Ce lecteur n’a pas pu capturer une image NDI.", until=now + 4)
+    return 200, {"ok": True}
 
 
 def waiting_access(address, port):
@@ -102,6 +173,8 @@ def remove_screens(targets):
     for key in targets:
         LATENCY_TESTS.pop(key, None)
         CLIENT_UPDATES.pop(key, None)
+    for source in [source for source, job in PREVIEWS.items() if job["reader"] in targets]:
+        del PREVIEWS[source]
 
 
 def queue_power(row, operation, now):
@@ -496,6 +569,17 @@ class Request(BaseHTTPRequestHandler):
             self.reply(200, self.server.interface_traffic.read())
         elif path == "/api/regie-version":
             self.reply(200, self.server.publication_status.read())
+        elif path == "/api/preview":
+            try:
+                source = parse_qs(url.query, max_num_fields=4).get("source", [""])[0]
+            except ValueError:
+                self.reply(400, {"error": "Source NDI invalide."})
+                return
+            with LOCK:
+                preview_prune(time.time())
+                job = PREVIEWS.get(source)
+                value = preview_status(job) if job else {"state": "empty"}
+            self.reply(200, value)
         elif path == "/api/remote-connections":
             connections = getattr(self.server, "remote_connections", None)
             self.reply(200, dict(enabled=connections is not None,
@@ -528,7 +612,8 @@ class Request(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             length = 0
-        if not 0 < length <= 16384:
+        limit = 4 * ((PREVIEW_LIMIT + 2) // 3) + 1024 if path == "/api/preview-result" else 16384
+        if not 0 < length <= limit:
             self.reply(400, {"error": "Requête invalide."})
             return
         payload = self.rfile.read(length)
@@ -572,6 +657,8 @@ class Request(BaseHTTPRequestHandler):
 
     def apply(self, path, data):
         now = time.time()
+        if path == "/api/preview":
+            return request_preview(data, now)
         if path in ("/api/group", "/api/client-updates", "/api/screen-groups"):
             return batch(path, data, now)
         if path == "/api/pair":
@@ -607,10 +694,12 @@ class Request(BaseHTTPRequestHandler):
         if not isinstance(key, str) or key not in SCREENS:
             return 404, {"error": "Écran inconnu.", "code": "screen_unknown"}
         row = SCREENS[key]
-        if path in ("/api/poll", "/api/client-package"):
+        if path in ("/api/poll", "/api/client-package", "/api/preview-result"):
             token = row.get("token")
             if not token or not token_matches(self.headers.get("Authorization"), "Bearer " + token):
                 return 403, {"error": "Réassocie le récepteur depuis le tableau.", "code": "association_invalid"}
+            if path == "/api/preview-result":
+                return finish_preview(key, data, now)
             if path == "/api/client-package":
                 job = CLIENT_UPDATES.get(key)
                 nonce = data.get("nonce")
@@ -677,7 +766,11 @@ class Request(BaseHTTPRequestHandler):
             operation = power.get("operation") if pending else None
             availability = update_availability(row["report"], now, UPDATE_KEY.is_file())
             recommendation = dict(version=CLIENT_VERSION, state=availability)
+            preview_prune(now)
+            preview = next((dict(id=item["id"], source=item["source"]) for item in PREVIEWS.values()
+                            if item["reader"] == key and item["state"] == "pending"), None)
             return 200, dict(options=row["options"],
+                             preview_request=preview,
                              waiting=dict(name=row["name"], group=row.get("group"),
                                           qr=getattr(self.server, "waiting_qr", None)),
                              reader_update=recommendation,
@@ -738,6 +831,7 @@ class Regie:
                 SCREENS.update(screens)
                 CLIENT_UPDATES.clear()
                 LATENCY_TESTS.clear()
+                PREVIEWS.clear()
             if remote_enabled:
                 self.connections = RemoteConnections(REMOTE_ACCESS / "adresses-bloquees.json")
                 self.remote = RemoteDashboard(REMOTE_ACCESS, Request, self.server.server_port)

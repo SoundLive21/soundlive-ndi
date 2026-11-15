@@ -17,7 +17,7 @@ from tkinter import filedialog, messagebox, ttk
 import traceback
 import webbrowser
 
-from commun import APP_NAME
+from commun import APP_NAME, COPYRIGHT
 
 
 def qr_bitmap(modules):
@@ -122,6 +122,7 @@ class Launcher:
         self.blocked_button = ttk.Button(moderation, text="Adresses bloquées", command=self.show_blocked)
         for button in (self.disconnect_button, self.block_button, self.blocked_button):
             button.pack(side="left", padx=(0, 8))
+        ttk.Label(panel, text=COPYRIGHT).grid(sticky="w", pady=(8, 0))
         self.list.bind("<<TreeviewSelect>>", lambda _event: self.moderation_controls())
         window.protocol("WM_DELETE_WINDOW", self.close)
         if not tableau.DATA.exists():
