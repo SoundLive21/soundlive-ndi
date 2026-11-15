@@ -1,0 +1,565 @@
+# SoundLive-NDI
+# Auteur : DUVERNOY Matthieu & ChatGPT
+# contact@soundlive.fr
+# Société SoundLive
+"""Lanceur graphique de la régie SoundLive-NDI."""
+from datetime import datetime
+import json
+import os
+from pathlib import Path
+from queue import Empty, Queue
+import secrets
+import subprocess
+import sys
+import threading
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+import traceback
+import webbrowser
+
+from commun import APP_NAME
+
+
+def qr_bitmap(modules):
+    scale = 4
+    width = (len(modules) + 8) * scale
+    white = b"\xff" * (3 * scale)
+    black = b"\0" * (3 * scale)
+    border = b"\xff" * (width * 3 * 4 * scale)
+    rows = [(white * 4 + b"".join(black if dark == "1" else white for dark in row) + white * 4) * scale
+            for row in modules]
+    return f"P6\n{width} {width}\n255\n".encode("ascii") + border + b"".join(rows) + border
+
+
+class Launcher:
+    def __init__(self, window, tableau, access):
+        self.window = window
+        self.tableau = tableau
+        self.access = access
+        self.regie = None
+        self.busy = False
+        self.closing = False
+        self.results = Queue()
+        self.interfaces = []
+        self.remote = tk.BooleanVar(value=(tableau.REMOTE_ACCESS / "acces.json").is_file())
+        self.visible = tk.BooleanVar()
+        self.password = tk.StringVar()
+        self.interface = tk.StringVar()
+        self.status = tk.StringVar(value="Prêt à démarrer")
+        self.remote_address = tk.StringVar(value="—")
+        self.connection_status = tk.StringVar(value="Accès distant arrêté")
+
+        window.title(f"{APP_NAME} · Régie {tableau.SOFTWARE_VERSION}")
+        window.minsize(620, 510)
+        window.columnconfigure(0, weight=1)
+        window.rowconfigure(0, weight=1)
+        panel = ttk.Frame(window, padding=(22, 16))
+        panel.grid(sticky="nsew")
+        panel.columnconfigure(0, weight=1)
+        panel.rowconfigure(6, weight=1)
+        ttk.Label(panel, text=f"{APP_NAME} · Régie", font=("Segoe UI", 19, "bold")).grid(sticky="w")
+        ttk.Label(panel, textvariable=self.status).grid(sticky="w", pady=(2, 14))
+
+        setup = ttk.LabelFrame(panel, text="Accès distant HTTPS", padding=10)
+        setup.grid(sticky="ew")
+        setup.columnconfigure(1, weight=1)
+        self.enabled = ttk.Checkbutton(setup, text="Activer l’accès distant", variable=self.remote, command=self.controls)
+        self.enabled.grid(row=0, columnspan=3, sticky="w")
+        ttk.Label(setup, text="Interface réseau").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=6)
+        self.selector = ttk.Combobox(setup, textvariable=self.interface, state="readonly")
+        self.selector.grid(row=1, column=1, sticky="ew")
+        self.reload = ttk.Button(setup, text="Actualiser", command=self.load_interfaces)
+        self.reload.grid(row=1, column=2, padx=(8, 0))
+        ttk.Label(setup, text="Mot de passe").grid(row=2, column=0, sticky="w", pady=6)
+        self.entry = ttk.Entry(setup, textvariable=self.password, show="•")
+        self.entry.grid(row=2, column=1, sticky="ew")
+        self.reveal = ttk.Checkbutton(setup, text="Afficher", variable=self.visible, command=self.reveal_password)
+        self.reveal.grid(row=2, column=2, sticky="w", padx=(8, 0))
+        ttk.Label(setup, text="Compte regie. À IP identique, laisse le champ vide pour conserver le mot de passe.",
+                  wraplength=550).grid(
+            row=3, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        self.generate = ttk.Button(setup, text="Générer un nouveau mot de passe", command=self.generate_password)
+        self.generate.grid(row=4, column=1, sticky="w", pady=(8, 0))
+
+        actions = ttk.Frame(panel)
+        actions.grid(sticky="ew", pady=12)
+        self.start_button = ttk.Button(actions, text="Démarrer la régie", command=self.start)
+        self.stop_button = ttk.Button(actions, text="Arrêter la régie", command=self.stop)
+        self.open_button = ttk.Button(actions, text="Ouvrir le tableau", command=self.open_dashboard)
+        self.release_button = ttk.Button(actions, text="Versions publiées", command=self.publications)
+        for button in (self.start_button, self.stop_button, self.open_button):
+            button.pack(side="left", padx=(0, 8))
+        self.release_button.pack(side="left")
+        address = ttk.Frame(panel)
+        address.grid(sticky="ew", pady=(0, 10))
+        ttk.Label(address, textvariable=self.remote_address).pack(side="left")
+        self.copy_button = ttk.Button(address, text="Copier l’adresse", command=self.copy_address)
+        self.copy_button.pack(side="right")
+        self.certificate_button = ttk.Button(address, text="Dossier du certificat", command=self.open_certificate_folder)
+        self.certificate_button.pack(side="right", padx=(0, 8))
+        self.qr = ttk.Label(panel, text="Scanner pour ouvrir le tableau · accès HTTPS", compound="left")
+        self.qr.grid(row=5, column=0, sticky="w", pady=(0, 10))
+        self.qr.grid_remove()
+
+        connections = ttk.LabelFrame(panel, text="Connexions à distance", padding=10)
+        connections.grid(sticky="nsew")
+        connections.columnconfigure(0, weight=1)
+        connections.rowconfigure(1, weight=1)
+        ttk.Label(connections, textvariable=self.connection_status).grid(sticky="w", pady=(0, 6))
+        self.list = ttk.Treeview(connections, columns=("ip", "seen", "browser"), show="headings", height=4,
+                                 selectmode="browse")
+        for key, label, width in (("ip", "Adresse IP", 130), ("seen", "Dernière activité", 120), ("browser", "Navigateur", 260)):
+            self.list.heading(key, text=label)
+            self.list.column(key, width=width, stretch=key == "browser")
+        self.list.grid(row=1, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(connections, orient="vertical", command=self.list.yview)
+        scrollbar.grid(row=1, column=1, sticky="ns")
+        self.list.configure(yscrollcommand=scrollbar.set)
+        moderation = ttk.Frame(connections)
+        moderation.grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self.disconnect_button = ttk.Button(moderation, text="Déconnecter", command=self.disconnect_remote)
+        self.block_button = ttk.Button(moderation, text="Bloquer l’IP", command=self.block_remote)
+        self.blocked_button = ttk.Button(moderation, text="Adresses bloquées", command=self.show_blocked)
+        for button in (self.disconnect_button, self.block_button, self.blocked_button):
+            button.pack(side="left", padx=(0, 8))
+        self.list.bind("<<TreeviewSelect>>", lambda _event: self.moderation_controls())
+        window.protocol("WM_DELETE_WINDOW", self.close)
+        if not tableau.DATA.exists():
+            self.status.set("Aucun écran associé dans ce dossier de régie")
+        self.load_interfaces()
+        self.tick()
+        self.check_saved_repository()
+
+    def load_interfaces(self):
+        current = self.interface.get()
+        try:
+            settings = json.loads((self.tableau.REMOTE_ACCESS / "acces.json").read_text(encoding="utf-8"))
+            configured_ip = settings.get("ip")
+        except (OSError, ValueError, AttributeError):
+            configured_ip = None
+        self.interfaces = [(f"{row['label']} — {row['ip']}", row["ip"])
+                           for row in self.tableau.local_addresses() if self.access.is_local_ip(row["ip"])]
+        self.selector.configure(values=[label for label, _ in self.interfaces])
+        labels = dict(self.interfaces)
+        preferred = next((label for label, ip in self.interfaces if ip == configured_ip), "")
+        self.interface.set(current if current in labels else preferred or next(iter(labels), ""))
+        self.controls()
+
+    def reveal_password(self):
+        self.entry.configure(show="" if self.visible.get() else "•")
+
+    def generate_password(self):
+        self.password.set(secrets.token_urlsafe(18))
+        self.visible.set(True)
+        self.reveal_password()
+
+    def controls(self):
+        stopped = self.regie is None and not self.busy
+        editable = stopped and self.remote.get()
+        self.enabled.configure(state="normal" if stopped else "disabled")
+        self.selector.configure(state="readonly" if editable else "disabled")
+        for widget in (self.reload, self.entry, self.reveal, self.generate):
+            widget.configure(state="normal" if editable else "disabled")
+        self.start_button.configure(state="normal" if stopped else "disabled")
+        self.stop_button.configure(state="normal" if self.regie and not self.busy else "disabled")
+        self.open_button.configure(state="normal" if self.regie and not self.busy else "disabled")
+        remote = self.regie and self.regie.remote_url and not self.busy
+        self.copy_button.configure(state="normal" if remote else "disabled")
+        self.certificate_button.configure(state="normal" if remote else "disabled")
+        self.release_button.configure(state="normal" if stopped else "disabled")
+        self.moderation_controls()
+
+    def remote_connections(self):
+        if self.regie and self.regie.remote_url and not self.busy:
+            return self.regie.connections
+        return None
+
+    def moderation_controls(self):
+        connections = self.remote_connections()
+        selected = bool(connections and self.list.selection())
+        self.disconnect_button.configure(state="normal" if selected else "disabled")
+        self.block_button.configure(state="normal" if selected else "disabled")
+        self.blocked_button.configure(state="normal" if connections else "disabled")
+
+    def disconnect_remote(self):
+        connections = self.remote_connections()
+        selection = self.list.selection()
+        if not connections or not selection:
+            return
+        address = self.list.set(selection[0], "ip")
+        if messagebox.askyesno("Déconnecter cette session",
+                f"Fermer la session du navigateur à l’adresse {address} ?",
+                default=messagebox.NO, parent=self.window):
+            connections.disconnect(selection[0])
+            self.refresh_remote_list()
+
+    def block_remote(self):
+        connections = self.remote_connections()
+        selection = self.list.selection()
+        if not connections or not selection:
+            return
+        address = self.list.set(selection[0], "ip")
+        if not messagebox.askyesno("Bloquer l’accès distant",
+                f"Bloquer {address} ? Tous les navigateurs utilisant cette adresse seront déconnectés.",
+                parent=self.window):
+            return
+        try:
+            connections.change_block(address, True)
+        except (OSError, ValueError) as error:
+            messagebox.showerror("Blocage impossible", str(error), parent=self.window)
+        self.refresh_remote_list()
+
+    def show_blocked(self):
+        connections = self.remote_connections()
+        if not connections:
+            return
+        dialog = tk.Toplevel(self.window)
+        dialog.title("Adresses bloquées")
+        dialog.transient(self.window)
+        content = ttk.Frame(dialog, padding=14)
+        content.pack(fill="both", expand=True)
+        addresses = tk.Listbox(content, height=8, width=36, exportselection=False)
+        addresses.pack(fill="both", expand=True)
+
+        def refresh():
+            addresses.delete(0, tk.END)
+            for address in connections.blocked_addresses():
+                addresses.insert(tk.END, address)
+            unblock.configure(state="disabled")
+
+        def release_address():
+            selection = addresses.curselection()
+            if not selection:
+                return
+            try:
+                connections.change_block(addresses.get(selection[0]), False)
+            except (OSError, ValueError) as error:
+                messagebox.showerror("Déblocage impossible", str(error), parent=dialog)
+            refresh()
+
+        actions = ttk.Frame(content)
+        actions.pack(fill="x", pady=(8, 0))
+        unblock = ttk.Button(actions, text="Débloquer l’IP", command=release_address)
+        unblock.pack(side="left")
+        ttk.Button(actions, text="Fermer", command=dialog.destroy).pack(side="right")
+        addresses.bind("<<ListboxSelect>>", lambda _event:
+                       unblock.configure(state="normal" if addresses.curselection() else "disabled"))
+        refresh()
+        dialog.grab_set()
+
+    def start(self):
+        enabled = self.remote.get()
+        address = dict(self.interfaces).get(self.interface.get())
+        if enabled and not address:
+            messagebox.showerror("Interface introuvable", "Choisis l’interface du réseau des écrans.", parent=self.window)
+            return
+        password = self.password.get() or None
+        self.busy = True
+        self.status.set("Démarrage de la régie…")
+        self.controls()
+
+        def launch():
+            try:
+                regie = self.tableau.Regie()
+                try:
+                    generated, certificate = (
+                        self.access.prepare_access(self.tableau.REMOTE_ACCESS, address, password)
+                        if enabled else (None, None)
+                    )
+                except Exception:
+                    regie.server.server_close()
+                    raise
+                regie.start(enabled)
+                self.results.put(("started", regie, generated, certificate))
+            except Exception as error:
+                self.results.put(("error", str(error)))
+
+        threading.Thread(target=launch, daemon=True).start()
+
+    def stop(self):
+        if self.regie is None or self.busy:
+            return
+        self.busy = True
+        self.status.set("Arrêt de la régie…")
+        self.controls()
+        regie = self.regie
+
+        def close_servers():
+            try:
+                regie.close()
+            finally:
+                self.results.put(("stopped",))
+
+        threading.Thread(target=close_servers, daemon=True).start()
+
+    def tick(self):
+        try:
+            result = self.results.get_nowait()
+        except Empty:
+            result = None
+        if result:
+            self.busy = False
+            if result[0] == "started":
+                _, self.regie, generated, certificate = result
+                self.status.set(f"Régie en cours · {self.regie.local_url}")
+                self.remote_address.set(self.regie.remote_url or "Accès distant désactivé")
+                if self.regie.remote_url:
+                    self.show_qr(self.regie.server.waiting_qr)
+                if certificate and (generated or self.password.get()):
+                    if generated:
+                        self.generated_credentials(generated)
+                    else:
+                        messagebox.showinfo("Accès distant",
+                            "Le mot de passe du compte regie a été enregistré.",
+                            parent=self.window)
+                    self.password.set("")
+                    self.visible.set(False)
+                    self.reveal_password()
+                if self.closing:
+                    self.stop()
+            elif result[0] == "stopped":
+                self.regie = None
+                self.status.set("Régie arrêtée")
+                self.remote_address.set("—")
+                self.qr.grid_remove()
+            else:
+                self.status.set("La régie n’a pas démarré")
+                messagebox.showerror("Démarrage impossible", result[1], parent=self.window)
+            self.controls()
+        if self.closing and not self.busy and self.regie is None:
+            self.window.destroy()
+            return
+        self.refresh_remote_list()
+        self.window.after(1500, self.tick)
+
+    def refresh_remote_list(self):
+        connections = self.remote_connections()
+        rows = connections.snapshot() if connections else []
+        self.connection_status.set(f"{len(rows)} navigateur(s) actif(s)" if self.regie and self.regie.remote_url
+                                   else "Accès distant arrêté")
+        current = {row["id"] for row in rows}
+        obsolete = [identifier for identifier in self.list.get_children() if identifier not in current]
+        if obsolete:
+            self.list.delete(*obsolete)
+        for index, row in enumerate(rows):
+            identifier = row["id"]
+            last_seen = datetime.fromtimestamp(row["seen"]).strftime("%H:%M:%S")
+            values = (row["ip"], last_seen, row["agent"])
+            if self.list.exists(identifier):
+                self.list.item(identifier, values=values)
+                if self.list.index(identifier) != index:
+                    self.list.move(identifier, "", index)
+            else:
+                self.list.insert("", index, iid=identifier, values=values)
+        self.moderation_controls()
+
+    def close(self):
+        self.closing = True
+        if self.regie is not None:
+            self.stop()
+        elif not self.busy:
+            self.window.destroy()
+
+    def open_dashboard(self):
+        webbrowser.open(self.regie.local_url)
+
+    def check_saved_repository(self):
+        config = self.tableau.ROOT / "source-publications.json"
+        if not config.is_file():
+            return
+        result = Queue()
+
+        def lookup():
+            from versions_regie import latest
+            try:
+                name = json.loads(config.read_text(encoding="utf-8"))["repository"]
+                result.put(latest(name, self.tableau.SOFTWARE_VERSION))
+            except Exception:
+                result.put(None)
+
+        def receive():
+            try:
+                available = result.get_nowait()
+            except Empty:
+                self.window.after(250, receive)
+                return
+            if available:
+                self.release_button.configure(text=f"Version {available[0]} disponible")
+
+        threading.Thread(target=lookup, daemon=True).start()
+        self.window.after(250, receive)
+
+    def publications(self):
+        import versions_regie as versions
+
+        root = self.tableau.ROOT
+        config = root / "source-publications.json"
+        trusted = root / "publication.pub"
+        try:
+            current = json.loads(config.read_text(encoding="utf-8"))
+            if not isinstance(current, dict):
+                current = {}
+        except (OSError, ValueError):
+            current = {}
+        form = tk.Toplevel(self.window)
+        form.title("Versions publiées")
+        form.transient(self.window)
+        pane = ttk.Frame(form, padding=18)
+        pane.pack(fill="both", expand=True)
+        repo = tk.StringVar(form, value=current.get("repository", ""))
+        outcome = tk.StringVar(form, value=f"Version installée · {self.tableau.SOFTWARE_VERSION}")
+        selected = None
+        answers = Queue()
+        ttk.Label(pane, text="Dépôt public GitHub · propriétaire/dépôt").pack(anchor="w")
+        ttk.Entry(pane, textvariable=repo, width=52).pack(fill="x", pady=(4, 10))
+
+        def select_key():
+            name = filedialog.askopenfilename(parent=form, title="Clé publique de l’éditeur",
+                                              filetypes=[("Clé publique OpenSSH", "*.pub")])
+            if name:
+                try:
+                    key = Path(name).read_bytes()
+                    if len(key) > 4096 or not key.startswith(b"ssh-ed25519 "):
+                        raise ValueError("Sélectionne une clé publique Ed25519.")
+                    trusted.write_bytes(key)
+                    key_button.configure(text="Remplacer la clé publique de l’éditeur")
+                except (OSError, ValueError) as error:
+                    outcome.set(str(error))
+
+        key_button = ttk.Button(pane, command=select_key, text=(
+            "Remplacer la clé publique de l’éditeur" if trusted.is_file() else "Importer la clé publique de l’éditeur"))
+        key_button.pack(anchor="w")
+        ttk.Label(pane, textvariable=outcome, wraplength=420).pack(anchor="w", pady=12)
+        buttons = ttk.Frame(pane)
+        buttons.pack(anchor="e")
+
+        def task(callback, installing=False):
+            check.configure(state="disabled")
+            apply.configure(state="disabled")
+            key_button.configure(state="disabled")
+            close.configure(state="disabled")
+            form.protocol("WM_DELETE_WINDOW", lambda: None)
+
+            def run():
+                try:
+                    answers.put((True, callback()))
+                except Exception as error:
+                    answers.put((False, str(error)))
+
+            def receive():
+                nonlocal selected
+                try:
+                    ok, value = answers.get_nowait()
+                except Empty:
+                    form.after(120, receive)
+                    return
+                check.configure(state="normal")
+                close.configure(state="normal")
+                key_button.configure(state="normal")
+                form.protocol("WM_DELETE_WINDOW", form.destroy)
+                selected = value if ok and not installing else None
+                if not ok:
+                    outcome.set(value)
+                elif installing:
+                    messagebox.showinfo("Mise à jour installée",
+                        "Rouvre le lanceur, démarre la régie puis lance le push sur les lecteurs.", parent=form)
+                    self.window.destroy()
+                elif selected:
+                    outcome.set(f"Version {selected[0]} disponible.")
+                    if trusted.is_file():
+                        apply.configure(state="normal")
+                    else:
+                        outcome.set(f"Version {selected[0]} disponible. Importe la clé de l’éditeur puis vérifie de nouveau.")
+                else:
+                    outcome.set("La régie est à jour.")
+
+            threading.Thread(target=run, daemon=True).start()
+            form.after(120, receive)
+
+        def check_release():
+            try:
+                name = versions.repository(repo.get())
+                config.write_text(json.dumps({"repository": name}), encoding="utf-8")
+            except (ValueError, OSError) as error:
+                outcome.set(str(error))
+                return
+            outcome.set("Vérification de la dernière version…")
+            task(lambda: versions.latest(name, self.tableau.SOFTWARE_VERSION))
+
+        def apply_release():
+            if not selected or self.regie is not None:
+                return
+            if not messagebox.askyesno("Installer la mise à jour",
+                    f"Installer la version {selected[0]} et fermer le lanceur ?", parent=form):
+                return
+            outcome.set("Téléchargement et vérification de la signature…")
+            task(lambda: versions.install(root, selected, trusted), installing=True)
+
+        check = ttk.Button(buttons, text="Vérifier", command=check_release)
+        apply = ttk.Button(buttons, text="Installer", command=apply_release, state="disabled")
+        close = ttk.Button(buttons, text="Fermer", command=form.destroy)
+        for button in (check, apply, close):
+            button.pack(side="left", padx=3)
+        form.grab_set()
+
+    def copy_address(self):
+        self.window.clipboard_clear()
+        self.window.clipboard_append(self.regie.remote_url)
+
+    def generated_credentials(self, generated):
+        box = tk.Toplevel(self.window)
+        box.title("Mot de passe généré")
+        box.transient(self.window)
+        panel = ttk.Frame(box, padding=18)
+        panel.pack(fill="both", expand=True)
+        ttk.Label(panel, text="Compte regie · conserve ce mot de passe").pack(anchor="w")
+        entry = ttk.Entry(panel, width=34)
+        entry.insert(0, generated)
+        entry.configure(state="readonly")
+        entry.pack(fill="x", pady=8)
+
+        def copy():
+            self.window.clipboard_clear()
+            self.window.clipboard_append(generated)
+
+        ttk.Button(panel, text="Copier le mot de passe", command=copy).pack(side="left")
+        ttk.Button(panel, text="Fermer", command=box.destroy).pack(side="right")
+        box.grab_set()
+        self.window.wait_window(box)
+
+    def open_certificate_folder(self):
+        folder = self.tableau.REMOTE_ACCESS
+        try:
+            if sys.platform == "win32":
+                os.startfile(folder)
+            else:
+                subprocess.Popen(["xdg-open", str(folder)])
+        except OSError as error:
+            messagebox.showerror("Dossier du certificat", f"{folder}\n{error}", parent=self.window)
+
+    def show_qr(self, modules):
+        self.qr_image = tk.PhotoImage(master=self.window, data=qr_bitmap(modules), format="PPM")
+        self.qr.configure(image=self.qr_image)
+        self.qr.grid()
+
+
+def main():
+    try:
+        window = tk.Tk()
+    except tk.TclError as error:
+        raise SystemExit(f"Ouvre le lanceur depuis une session graphique. {error}") from error
+    try:
+        import acces_regie
+        import tableau
+        Launcher(window, tableau, acces_regie)
+    except Exception as error:
+        window.withdraw()
+        Path(__file__).with_name("regie-demarrage.log").write_text(traceback.format_exc(), encoding="utf-8")
+        messagebox.showerror("Démarrage impossible", str(error), parent=window)
+        window.destroy()
+        return
+    window.mainloop()
+
+
+if __name__ == "__main__":
+    main()

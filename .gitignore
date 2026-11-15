@@ -1,0 +1,23 @@
+# SoundLive-NDI
+# Auteur : DUVERNOY Matthieu & ChatGPT
+# contact@soundlive.fr
+# Société SoundLive
+ecrans.json
+ecrans.tmp
+.soundlive-*/
+.versions/
+association.json
+*.pub
+*.pem
+*.key
+*.cer
+*.sig
+*.log
+source-publications.json
+__pycache__/
+*.pyc
+*.dll
+*.so
+*.so.*
+*.zip
+dist/

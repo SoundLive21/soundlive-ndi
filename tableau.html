@@ -1,0 +1,1386 @@
+<!doctype html>
+<!-- SoundLive-NDI
+     Auteur : DUVERNOY Matthieu & ChatGPT
+     contact@soundlive.fr
+     Société SoundLive -->
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SoundLive-NDI · Régie</title>
+<style>
+:root{color-scheme:dark;--bg:#100e12;--panel:#1b171e;--edge:#39303e;--text:#fff5f7;--sub:#c0b3c3;--red:#ee4560;--green:#8de0ad;font-family:"Segoe UI",system-ui,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 92% 0%,#30151f 0%,var(--bg) 44%);color:var(--text);min-height:100vh}
+header{border-bottom:1px solid var(--edge);background:#130f15;padding:17px 6vw;display:flex;align-items:center;gap:13px;flex-wrap:wrap}
+.mark{width:12px;height:24px;border-radius:4px;background:var(--red)}header strong{font-size:1.14rem}header #count{color:var(--sub);font-size:.88rem;margin-left:auto}
+.release{font-size:.82rem;color:var(--sub);font-variant-numeric:tabular-nums}
+.release[data-state="current"]{color:var(--green)}
+.release[data-state="available"]{color:#ffc078}
+main{width:min(1120px,90vw);margin:55px auto 80px}h1{margin:0;font-size:clamp(2.2rem,6vw,4rem);letter-spacing:-.06em;line-height:1}
+.heading{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:22px}
+#message{min-height:1.5em;margin:0 0 14px;color:var(--sub)}#message[data-error="true"]{color:#ff8fa0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,330px),1fr));gap:16px;align-items:start}
+.screen-group+.screen-group{margin-top:30px}.screen-group-title{margin:0 0 10px;font-size:1.16rem}
+.screen-group-title small{font-size:.8rem;color:var(--sub);font-weight:400;margin-left:8px}
+article{border:1px solid var(--edge);border-radius:16px;background:var(--panel);padding:22px;min-width:0}
+.card-heading,.row{display:flex;gap:12px;align-items:center;justify-content:space-between}
+h2{margin:0;font-size:1.24rem;overflow-wrap:anywhere}.badge{flex:none;border-radius:20px;background:#382b36;color:#f5d1df;padding:5px 10px;font-size:.82rem}.badge.online{background:#20362a;color:var(--green)}
+.address{color:var(--sub);font-family:monospace;margin:8px 0 18px}.small{font-size:.88rem;color:var(--sub)}label[hidden]{display:none}label{display:grid;gap:6px;font-size:.88rem;color:#e1d6e2;margin:12px 0}
+input,select,button{font:inherit;border-radius:8px;border:1px solid var(--edge);color:inherit}input:not([type=checkbox]):not([type=range]),select{padding:10px;background:#100d12;width:100%}input[type=range]{accent-color:var(--red);width:100%}input[type=checkbox]{accent-color:var(--red)}
+button{padding:9px 13px;cursor:pointer;background:#2b222f;font-weight:600;white-space:nowrap}button.primary{background:#df3453;color:#fff;border-color:#df3453}button:disabled{opacity:.44;cursor:default}button:hover:not(:disabled){filter:brightness(1.18)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.actions .remove{margin-left:auto;color:#efacb7}.check{display:flex;align-items:center;gap:6px}
+.empty{padding:38px;border:1px dashed var(--edge);border-radius:14px;color:var(--sub)}
+dialog{width:min(480px,90vw);border:1px solid var(--edge);border-radius:14px;background:var(--panel);color:var(--text);padding:24px}dialog::backdrop{background:#0009}
+code{display:block;padding:11px;background:#100d12;border-radius:7px;overflow-wrap:anywhere;white-space:normal}
+@media(max-width:460px){main{margin-top:35px}header #count{display:none}article{padding:16px}.heading{align-items:flex-start}}
+.device-meta{display:flex;align-items:center;gap:8px;min-height:20px;margin:8px 0 15px;color:var(--sub);font-size:.82rem;flex-wrap:wrap}
+.address{margin:0}.device-kind:empty{display:none}
+.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 18px}
+.metrics[hidden]{display:none}
+.metric{--tone:#c6b7c8;display:grid;grid-template-columns:16px minmax(0,1fr);align-items:center;text-align:left;gap:5px 6px;padding:9px 8px;min-width:0;background:#17131a;border:1px solid var(--edge);border-radius:9px}
+.metric[data-level="good"],.test-result[data-level="good"]{--tone:#8de0ad}
+.metric[data-level="warn"],.test-result[data-level="warn"]{--tone:#ffc078}
+.metric[data-level="bad"],.test-result[data-level="bad"]{--tone:#ff8598}
+.metric span{font-size:.74rem;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.metric strong{grid-column:1/-1;color:var(--tone);font-size:.94rem;white-space:nowrap;font-variant-numeric:tabular-nums}
+.metric svg{color:var(--tone);width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linejoin:round;stroke-linecap:round}
+.metric.connection:hover:not(:disabled){border-color:var(--tone)}
+dialog{padding:0;max-height:90vh;max-height:90dvh;overflow:auto;border-color:#544151;box-shadow:0 24px 80px #0009}
+dialog::backdrop{background:#08060bc9;backdrop-filter:blur(4px)}
+.dialog-body{padding:24px}.dialog-body>p{color:var(--sub);line-height:1.55;overflow-wrap:anywhere}
+.dialog-heading{display:flex;align-items:flex-start;gap:14px}
+.dialog-heading svg{width:34px;height:34px;padding:7px;border-radius:9px;background:#3b202b;color:#ff91a5;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.dialog-heading h2{line-height:1.45}
+.dialog-body .actions{justify-content:flex-end}.dialog-body .actions button{white-space:normal}
+dialog#diagnostics{width:min(570px,92vw)}
+.facts{display:grid;grid-template-columns:minmax(85px,1fr) minmax(0,2.2fr);margin:18px 0;gap:0}
+.facts dt,.facts dd{padding:8px 0;border-bottom:1px solid var(--edge);margin:0;font-size:.88rem;overflow-wrap:anywhere}
+.facts dt{color:var(--sub);padding-right:10px}.facts dd{font-variant-numeric:tabular-nums}
+.network-title{font-size:.95rem;margin:14px 0 8px}.interfaces{padding-left:18px;margin:8px 0;color:var(--sub);font-size:.88rem}
+.interfaces li{margin:6px 0;overflow-wrap:anywhere}.test-result{color:var(--tone,var(--sub));font-size:.88rem}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #ff91a5;outline-offset:3px}
+@media(max-width:460px){.heading button{white-space:normal}.dialog-body{padding:18px}.metric span{font-size:.7rem}}
+#confirm-action[data-state="success"] .dialog-heading svg{background:#20362a;color:var(--green)}
+#confirm-action .dialog-heading path{display:none}
+#confirm-action[data-state="confirm"] .icon-confirm,
+#confirm-action[data-state="busy"] .icon-busy,
+#confirm-action[data-state="success"] .icon-success,
+#confirm-action[data-state="error"] .icon-error{display:inline}
+#confirm-action .icon-busy{transform-origin:12px 12px;animation:action-spin .9s linear infinite}
+@keyframes action-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){#confirm-action .icon-busy{animation:none}}
+.heading-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+@media(max-width:540px){.heading{flex-direction:column;align-items:flex-start}.heading-actions{justify-content:flex-start}}
+#group{width:min(575px,92vw)}
+.group-targets{border:1px solid var(--edge);border-radius:9px;margin:16px 0;padding:10px 12px}
+.group-controls{display:flex;gap:8px;flex-wrap:wrap}
+.group-controls button{font-size:.8rem}
+#group-screens{max-height:220px;overflow:auto}
+#group-screens label{overflow-wrap:anywhere}
+#confirm-detail{white-space:pre-wrap}
+.update-status{margin:0 0 10px;color:var(--sub)}
+.update-status[data-state="current"]{color:var(--green)}
+.update-status[data-state="failed"],.update-status[data-state="expired"]{color:#ff8fa0}
+.update-status[data-state="available"]{color:#ffc078}
+.current-stream{display:grid;gap:4px;margin:0 0 14px;overflow-wrap:anywhere}
+.current-stream[hidden]{display:none}
+.current-stream strong{color:var(--text);font-weight:600}
+.screen-controls{border-top:1px solid var(--edge);margin-top:12px;padding-top:10px}
+.screen-controls summary{cursor:pointer;color:#ffd0dc;font-size:.9rem;font-weight:600}
+.screen-controls summary:focus-visible{outline:2px solid #ff91a5;outline-offset:3px}
+.manage-screens-list{max-height:240px;overflow:auto}
+.manage-screens-list label{overflow-wrap:anywhere}
+#logout{font-size:.85rem}
+#count + #logout{margin-left:auto}
+#count:not([hidden]) + #logout{margin-left:0}
+.traffic-panel{display:grid;grid-template-columns:minmax(190px,1fr) minmax(230px,1fr);gap:12px 24px;padding:18px 20px;margin:0 0 16px;background:var(--panel);border:1px solid var(--edge);border-radius:14px}
+.traffic-panel h2{grid-column:1/-1;font-size:1rem}
+.traffic-panel label{margin:0}
+.traffic-readings{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.traffic-readings .metric strong{white-space:normal}
+.metric[data-level="rx"]{--tone:#9adcf7}
+.metric[data-level="tx"]{--tone:#d9baff}
+.metric.rate-tile:hover:not(:disabled){border-color:var(--tone)}
+#traffic-help{grid-column:1/-1;margin:0}
+.screen-traffic{margin:-8px 0 16px}
+.screen-traffic[hidden]{display:none}
+.project-credits{width:min(1120px,90vw);margin:0 auto 24px;color:var(--sub);font-size:.8rem}
+.project-credits a{color:inherit}
+.traffic-interface-label{margin:6px 0 0;overflow-wrap:anywhere;font-size:.8rem}
+#session-time{color:#ffc078;font-variant-numeric:tabular-nums}
+@media(max-width:600px){.traffic-panel{grid-template-columns:1fr}}
+@media(max-width:460px){#count + #logout{margin-left:auto}}
+</style>
+</head>
+<body>
+<header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release" id="regie-version" aria-live="polite">v<span id="regie-release">__SOFTWARE_VERSION__</span><span id="regie-version-status"></span></span><span id="count">Écrans connectés</span><button id="logout" type="button" __REMOTE_ONLY__>Me déconnecter</button></header>
+<main>
+  <div class="heading"><h1>Écrans NDI</h1><div class="heading-actions"><button id="open-connections" hidden>Accès distant</button><button id="manage-screens" disabled>Organiser les écrans</button><button id="open-group" disabled>Actions de groupe</button><button id="add" class="primary">Ajouter un écran</button></div></div>
+  <section class="traffic-panel" aria-labelledby="traffic-title">
+    <h2 id="traffic-title">Débit réseau de la régie</h2>
+    <label>Interface à mesurer
+      <select id="traffic-interface" aria-describedby="traffic-help" disabled>
+        <option value="">Recherche des interfaces…</option>
+      </select>
+    </label>
+    <div class="traffic-readings">
+      <div class="metric" id="traffic-tx" data-level="tx">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V3m-5 5 5-5 5 5M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
+        <span>Émission</span><strong>—</strong>
+      </div>
+      <div class="metric" id="traffic-rx" data-level="rx">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v13m-5-5 5 5 5-5M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
+        <span>Réception</span><strong>—</strong>
+      </div>
+    </div>
+    <p class="small" id="traffic-help">Trafic total de l’interface sélectionnée, NDI compris lorsque ce PC diffuse.</p>
+  </section>
+  <p id="message" role="status"></p>
+  <div id="screens"></div>
+</main>
+<footer class="project-credits">Auteur : DUVERNOY Matthieu &amp; ChatGPT · Société SoundLive · <a href="mailto:contact@soundlive.fr">contact@soundlive.fr</a></footer>
+<dialog id="remote-connections" aria-labelledby="connections-title">
+  <form method="dialog" class="dialog-body">
+    <h2 id="connections-title">Connexions à la régie distante</h2>
+    <p id="connections-empty">Aucun navigateur distant actif.</p>
+    <ul class="interfaces" id="connections-list"></ul>
+    <div class="actions"><button type="submit">Fermer</button></div>
+  </form>
+</dialog>
+<dialog id="session-warning" aria-labelledby="session-title" aria-describedby="session-detail">
+  <div class="dialog-body">
+    <h2 id="session-title">Ta session va expirer</h2>
+    <p id="session-detail">Il te reste <strong id="session-time"></strong>. Tu peux prolonger ta session pour continuer à piloter les écrans.</p>
+    <p id="session-error" role="alert" hidden></p>
+    <div class="actions">
+      <button type="button" id="session-logout">Me déconnecter</button>
+      <button type="button" class="primary" id="session-renew" autofocus>Prolonger la session</button>
+    </div>
+  </div>
+</dialog>
+<dialog id="pair" aria-labelledby="pair-title">
+  <form id="pair-form" class="dialog-body">
+    <h2 id="pair-title">Ajouter un écran</h2>
+    <label>Type de récepteur<select name="kind"><option value="pi">Raspberry Pi</option><option value="ubuntu">PC Ubuntu</option><option value="windows">PC Windows</option></select></label>
+    <label>Nom de l’écran<input name="name" maxlength="80" placeholder="Écran salle 1" required></label>
+    <div class="actions"><button type="submit" class="primary">Créer un code</button><button type="button" id="close">Fermer</button></div>
+  </form>
+</dialog>
+<dialog id="screen-groups" aria-labelledby="screen-groups-title">
+  <form class="dialog-body">
+    <h2 id="screen-groups-title">Organiser les écrans</h2>
+    <fieldset class="group-targets">
+      <legend>Écrans à déplacer</legend>
+      <div class="manage-screens-list"></div>
+    </fieldset>
+    <label>Groupe
+      <select name="target"></select>
+    </label>
+    <label class="new-screen-group">Nom du nouveau groupe
+      <input name="new-group" maxlength="80" placeholder="Ex. Salle principale">
+    </label>
+    <p class="small organize-error" role="status" hidden></p>
+    <div class="actions">
+      <button type="button" class="close-organizer">Fermer</button>
+      <button type="submit" class="primary">Enregistrer</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="group" aria-labelledby="group-title">
+  <form id="group-form" class="dialog-body">
+    <h2 id="group-title">Actions de groupe</h2>
+    <fieldset class="group-targets">
+      <legend>Écrans</legend>
+      <div class="group-controls">
+        <button type="button" id="select-all">Tout sélectionner</button>
+        <button type="button" id="select-none">Tout désélectionner</button>
+      </div>
+      <div id="group-screens"></div>
+    </fieldset>
+    <label>Action<select name="operation">
+      <option value="source">Changer la source NDI</option>
+      <option value="mute">Couper le son</option>
+      <option value="unmute">Rétablir le son</option>
+      <option value="stop">Arrêter la diffusion</option>
+      <option value="play">Reprendre la diffusion</option>
+      <option value="volume">Régler le volume</option>
+      <option value="bandwidth">Régler la qualité NDI</option>
+      <option value="update">Pousser la mise à jour client</option>
+      <option value="reboot">Redémarrer les récepteurs</option>
+      <option value="poweroff">Éteindre les récepteurs</option>
+      <option value="remove">Retirer les écrans du tableau</option>
+    </select></label>
+    <div id="group-source">
+      <label>Sources NDI détectées<select id="group-sources"></select></label>
+      <label>Nom complet de la source NDI<input name="source" maxlength="256"></label>
+    </div>
+    <label id="group-volume" hidden>
+      <span>Volume <output id="group-volume-value" for="group-volume-input">50 %</output></span>
+      <input id="group-volume-input" name="volume" type="range" min="0" max="100" value="50" disabled>
+    </label>
+    <label id="group-bandwidth" hidden>Qualité<select name="bandwidth" disabled><option value="0">High (720p)</option><option value="1">Low (360p)</option></select></label>
+    <p class="small" id="group-help"></p>
+    <div class="actions"><button type="button" id="group-close">Fermer</button><button type="submit" class="primary" id="group-submit">Continuer</button></div>
+  </form>
+</dialog>
+<dialog id="confirm-action" aria-labelledby="confirm-title" aria-describedby="confirm-detail">
+  <form class="dialog-body" method="dialog">
+    <div class="dialog-heading">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path class="icon-confirm" d="M12 3 2.8 20h18.4L12 3Z M12 9v4 m0 3h.01"/>
+        <path class="icon-busy" d="M21 12a9 9 0 1 1-9-9"/>
+        <path class="icon-success" d="m5 12 4 4L19 6"/>
+        <path class="icon-error" d="M6 6l12 12M18 6 6 18"/>
+      </svg>
+      <h2 id="confirm-title"></h2>
+    </div>
+    <p id="confirm-detail" role="status"></p>
+    <div class="actions">
+      <button name="cancel" value="cancel" autofocus>Annuler</button>
+      <button value="accept" class="primary" id="confirm-accept"></button>
+    </div>
+  </form>
+</dialog>
+<dialog id="diagnostics" aria-labelledby="diagnostics-title">
+  <div class="dialog-body">
+    <div class="dialog-heading">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4m-6-9h3l2-4 2 5 2-2h3"/></svg>
+      <h2 id="diagnostics-title">Informations du récepteur</h2>
+    </div>
+    <p id="diagnostics-state"></p>
+    <dl class="facts"></dl>
+    <h3 class="network-title">Interfaces réseau</h3>
+    <label id="receiver-interface-label" hidden>Interface pour le débit affiché sur la fiche
+      <select id="receiver-interface"></select>
+    </label>
+    <ul class="interfaces"></ul>
+    <p class="small">Débit total de chaque interface. Latence HTTP entre le récepteur et la régie.</p>
+    <div class="test-result" role="status"></div>
+    <div class="actions">
+      <button type="button" id="latency-run">Tester la latence</button>
+      <form method="dialog"><button autofocus>Fermer</button></form>
+    </div>
+  </div>
+</dialog>
+<template id="card">
+  <article>
+    <div class="card-heading"><h2></h2><span class="badge"></span></div>
+    <div class="device-meta"><span class="device-kind"></span><span class="address"></span><span class="client-release"></span></div>
+    <div class="metrics" hidden>
+      <button type="button" class="metric connection" aria-label="Informations réseau et test de latence">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9a15 15 0 0 1 18 0M6 13a10 10 0 0 1 12 0m-9 4a5 5 0 0 1 6 0m-3 3h.01"/></svg>
+        <span>Réseau</span><strong>—</strong>
+      </button>
+      <div class="metric cpu">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 3v3m6-3v3M9 18v3m6-3v3M3 9h3m-3 6h3m12-6h3m-3 6h3"/></svg>
+        <span>CPU</span><strong>—</strong>
+      </div>
+      <div class="metric ram">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="7" width="20" height="10" rx="2"/><path d="M6 10v4m4-4v4m4-4v4m4-4v4M5 17v3m5-3v3m5-3v3m4-3v3"/></svg>
+        <span>RAM</span><strong>—</strong>
+      </div>
+    </div>
+    <section class="screen-traffic" aria-label="Débit réseau du lecteur" hidden>
+      <div class="traffic-readings">
+        <button type="button" class="metric rate-tile rate-rx" aria-haspopup="dialog">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v13m-5-5 5 5 5-5M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
+          <span>Réception</span><strong>—</strong>
+        </button>
+        <button type="button" class="metric rate-tile rate-tx" aria-haspopup="dialog">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V3m-5 5 5-5 5 5M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
+          <span>Émission</span><strong>—</strong>
+        </button>
+      </div>
+      <p class="small traffic-interface-label"></p>
+    </section>
+    <p class="small current-stream" hidden><span></span><strong></strong></p>
+    <p class="small update-status" hidden></p>
+    <details class="screen-controls">
+      <summary>Commandes et réglages</summary>
+      <section class="pending"></section>
+      <form class="config">
+      <label>Sources NDI détectées<select class="detected-sources"></select></label>
+      <label>Source NDI<input class="source" maxlength="256" required></label>
+      <label>Qualité<select class="bandwidth"><option value="0">High (720p)</option><option value="1">Low (360p)</option></select></label>
+      <label><span>Volume <output></output></span><input class="volume" type="range" min="0" max="100"></label>
+      <label class="check"><input type="checkbox" class="muted"> Couper le son</label>
+      <div class="actions"><button class="primary" type="submit">Appliquer</button><button class="toggle" type="button"></button><button class="reboot" type="button">Redémarrer</button><button class="poweroff" type="button">Éteindre</button></div>
+      </form>
+      <p class="small error"></p>
+      <div class="actions"><button class="info" type="button" hidden>Informations</button><button class="client-upgrade" type="button" hidden>Mettre à jour le lecteur</button><button class="remove" type="button">Retirer</button></div>
+    </details>
+  </article>
+</template>
+<script>
+const select = (root, query) => root.querySelector(query);
+const holder = document.querySelector("#screens");
+const screenSections = new Map();
+const organizerButton = document.querySelector("#manage-screens");
+const organizer = document.querySelector("#screen-groups");
+const organizerForm = select(organizer, "form");
+const organizerTarget = organizerForm.elements.namedItem("target");
+const organizerName = organizerForm.elements.namedItem("new-group");
+const organizerList = select(organizer, ".manage-screens-list");
+const organizerError = select(organizer, ".organize-error");
+const clientRelease = "__CLIENT_VERSION__";
+const message = document.querySelector("#message");
+const connectionsButton = document.querySelector("#open-connections");
+const connectionsDialog = document.querySelector("#remote-connections");
+const dialog = document.querySelector("#pair");
+const cards = new Map();
+const confirmation = document.querySelector("#confirm-action");
+const confirmationForm = select(confirmation, "form");
+const confirmTitle = select(confirmation, "#confirm-title");
+const confirmDetail = select(confirmation, "#confirm-detail");
+const confirmAccept = select(confirmation, "#confirm-accept");
+const confirmCancel = select(confirmation, 'button[name="cancel"]');
+let pendingAction = null;
+const diagnostics = document.querySelector("#diagnostics");
+const testButton = select(diagnostics, "#latency-run");
+const receiverInterface = select(diagnostics, "#receiver-interface");
+const receiverInterfaceLabel = select(diagnostics, "#receiver-interface-label");
+const trafficPreferenceKey = "soundlive-receiver-interfaces";
+let receiverTrafficPreferences = {};
+try {
+  const stored = JSON.parse(localStorage.getItem(trafficPreferenceKey));
+  if (stored && typeof stored === "object" && !Array.isArray(stored)) receiverTrafficPreferences = stored;
+} catch {}
+const deviceLabels = { pi:"Raspberry Pi", ubuntu:"PC Ubuntu", windows:"PC Windows" };
+const latencyLimits = [30, 100];
+const loadLimits = [65, 85];
+let inspectedId = null;
+let refreshing = null;
+let network = null;
+let receiverPort = location.protocol === "http:" ? (location.port || 80) : null;
+let networkLoading = false;
+let organizing = false;
+function isIPv4(value) {
+  return /^(?:0|[1-9]\d{0,2})(?:\.(?:0|[1-9]\d{0,2})){3}$/.test(value) &&
+         value.split(".").every(part => Number(part) <= 255) &&
+         !/^(?:0\.|127\.)/.test(value) && Number(value.split(".")[0]) < 224;
+}
+async function loadNetwork() {
+  if (networkLoading) return;
+  networkLoading = true;
+  try {
+    const settings = await call("/api/network");
+    network = settings.addresses;
+    receiverPort = settings.port || receiverPort;
+  }
+  catch { network = []; }
+  finally { networkLoading = false; }
+  for (const card of cards.values()) if (card.data && !card.data.paired) renderPairing(card);
+}
+function renderPairing(card) {
+  const row = card.data;
+  const panel = card.ui.pending;
+  const revision = JSON.stringify([row.pairing, row.kind, network, receiverPort]);
+  if (card.pairingRevision === revision) return;
+  card.pairingRevision = revision;
+  panel.replaceChildren();
+  const text = document.createElement("p");
+  text.className = "small";
+  panel.append(text);
+  if (!row.pairing) {
+    text.textContent = "Code expiré. Retire cette fiche puis ajoute un nouvel écran.";
+    return;
+  }
+  const installer = row.kind === "windows" ? ".\\installer-client.cmd" :
+    "bash installer-client.sh --plateforme " + (row.kind || "pi");
+  text.textContent = "Lance cette commande sur le récepteur depuis le dossier du kit.";
+  const code = document.createElement("code");
+  const label = document.createElement("label");
+  label.textContent = "Adresse du PC de régie";
+  const addresses = (network || []).filter(item => isIPv4(item.ip));
+  const input = document.createElement("input");
+  input.placeholder = network === null ? "Détection en cours…" : "Adresse IPv4 du PC";
+  input.inputMode = "decimal";
+  input.value = card.pairingAddress || addresses[0]?.ip || "";
+  let interfaces;
+  if (addresses.length) {
+    interfaces = document.createElement("select");
+    const manual = document.createElement("option");
+    manual.value = "";
+    manual.textContent = "Saisir une autre IPv4";
+    interfaces.append(manual);
+    for (const item of addresses) {
+      const option = document.createElement("option");
+      option.value = item.ip;
+      option.textContent = item.label + " · " + item.ip +
+                           (item.ip.startsWith("169.254.") ? " (adresse automatique)" : "");
+      interfaces.append(option);
+    }
+    interfaces.value = card.manualAddress ? "" :
+      addresses.some(item => item.ip === input.value) ? input.value : "";
+    label.append(interfaces);
+  }
+  const manualLabel = document.createElement("label");
+  manualLabel.textContent = addresses.length ? "IPv4 saisie manuellement" : label.textContent;
+  manualLabel.append(input);
+  const help = document.createElement("p");
+  help.className = "small";
+  function updateCommand() {
+    const ip = (interfaces?.value || input.value).trim();
+    manualLabel.hidden = Boolean(interfaces?.value);
+    card.manualAddress = !interfaces?.value && (input.value !== "" || Boolean(interfaces));
+    card.pairingAddress = ip;
+    help.textContent = ip.startsWith("169.254.") ?
+      "Adresse automatique. Vérifie que le récepteur est joignable sur ce réseau avant de l’associer." : "";
+    if (isIPv4(ip) && receiverPort) {
+      code.textContent = installer + " http://" + ip + ":" + receiverPort + " " + row.pairing;
+    } else if (isIPv4(ip)) {
+      code.textContent = network === null ? "Recherche du port des récepteurs…" :
+        "Port des récepteurs indisponible. Actualise la page pour réessayer.";
+    } else {
+      code.textContent = network === null ? "Recherche de l’adresse du PC…" : "Renseigne l’IPv4 du PC pour afficher la commande.";
+    }
+  }
+  input.addEventListener("input", updateCommand);
+  interfaces?.addEventListener("change", () => {
+    input.value = interfaces.value;
+    updateCommand();
+  });
+  if (interfaces) panel.append(label);
+  panel.append(manualLabel, code, help);
+  updateCommand();
+}
+function notice(text, error=false) {
+  message.textContent = text;
+  message.dataset.error = String(error);
+}
+let remoteSessionEnded = false;
+function endRemoteSession(destination) {
+  if (remoteSessionEnded) return;
+  remoteSessionEnded = true;
+  location.replace(destination);
+}
+async function call(path, data) {
+  if (remoteSessionEnded) throw Error("Session distante fermée.");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6000);
+  try {
+    const res = await fetch(path, data === undefined ? {signal:controller.signal} : {
+      method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data),
+      signal:controller.signal
+    });
+    const result = await res.json();
+    if (result.code === "remote_blocked") {
+      endRemoteSession("/connexion");
+    } else if (res.status === 401 && result.code === "remote_disconnected") {
+      endRemoteSession("/connexion?etat=expiree");
+    }
+    if (!res.ok) throw Error(result.error || "Erreur du serveur.");
+    return result;
+  } catch (error) {
+    if (error.name === "AbortError") throw Error("Le tableau de régie ne répond pas.");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const logoutButton = document.querySelector("#logout");
+const sessionDialog = document.querySelector("#session-warning");
+const sessionLogout = document.querySelector("#session-logout");
+const sessionRenew = document.querySelector("#session-renew");
+const sessionError = document.querySelector("#session-error");
+const sessionTime = document.querySelector("#session-time");
+let sessionDeadline = null;
+let sessionWarningMs = 0;
+let sessionBusy = false;
+let sessionAction = 0;
+
+function showSessionError(text="") {
+  sessionError.textContent = text;
+  sessionError.hidden = !text;
+  if (text && !sessionDialog.open) notice(text, true);
+}
+function updateSessionCountdown() {
+  if (remoteSessionEnded || sessionDeadline === null) return;
+  const remaining = Math.max(0, Math.ceil((sessionDeadline - performance.now()) / 1000));
+  if (remaining * 1000 > sessionWarningMs) {
+    if (sessionDialog.open) sessionDialog.close();
+    return;
+  }
+  const value = Math.floor(remaining / 60) + " min " + String(remaining % 60).padStart(2, "0") + " s";
+  if (sessionTime.textContent !== value) sessionTime.textContent = value;
+  if (!sessionDialog.open && !confirmation.open) sessionDialog.showModal();
+}
+function setSessionTiming(result) {
+  sessionDeadline = performance.now() + result.remaining_ms;
+  sessionWarningMs = result.warning_ms;
+  updateSessionCountdown();
+}
+async function checkSession() {
+  if (sessionBusy || sessionRenew.disabled || remoteSessionEnded) return;
+  sessionBusy = true;
+  const requestAction = sessionAction;
+  try {
+    const result = await call("/api/session");
+    if (requestAction === sessionAction && !remoteSessionEnded) setSessionTiming(result);
+  } catch (error) {
+    if (sessionDialog.open) showSessionError(error.message);
+  } finally {
+    sessionBusy = false;
+  }
+}
+async function prolongSession() {
+  if (remoteSessionEnded || sessionRenew.disabled) return;
+  sessionAction++;
+  sessionRenew.disabled = sessionLogout.disabled = logoutButton.disabled = true;
+  showSessionError();
+  try {
+    setSessionTiming(await call("/api/session/prolonger", {}));
+    notice("Session prolongée.");
+  } catch (error) {
+    if (!remoteSessionEnded) showSessionError(error.message);
+  } finally {
+    sessionRenew.disabled = sessionLogout.disabled = logoutButton.disabled = false;
+  }
+}
+function confirmLogout() {
+  showAction({
+    title:"Me déconnecter",
+    detail:"Tu reviendras à la page de connexion de la régie.",
+    label:"Me déconnecter",
+    successTitle:"Session fermée",
+    async perform() {
+      await call("/api/session/deconnexion", {});
+      endRemoteSession("/connexion?etat=fermee");
+      return "Retour à la page de connexion…";
+    }
+  });
+}
+if (!logoutButton.hidden) {
+  logoutButton.onclick = sessionLogout.onclick = confirmLogout;
+  sessionRenew.onclick = prolongSession;
+  sessionDialog.addEventListener("cancel", event => event.preventDefault());
+  checkSession();
+  setInterval(checkSession, 5000);
+  setInterval(updateSessionCountdown, 1000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) checkSession(); });
+}
+
+const trafficInterface = document.querySelector("#traffic-interface");
+const trafficTx = document.querySelector("#traffic-tx");
+const trafficRx = document.querySelector("#traffic-rx");
+const trafficFormat = new Intl.NumberFormat("fr-FR", {maximumFractionDigits:2});
+function rateText(rate) {
+  return Number.isFinite(rate) ? trafficFormat.format(rate) + " Mbit/s" : "—";
+}
+let interfaceSelection = "";
+let trafficRows = [];
+let trafficBusy = false;
+try { interfaceSelection = localStorage.getItem("soundlive-traffic-interface") || ""; } catch {}
+function displayTraffic() {
+  const row = trafficRows.find(item => item.id === trafficInterface.value);
+  renderRate(trafficTx, row?.tx_mbps, "tx");
+  renderRate(trafficRx, row?.rx_mbps, "rx");
+}
+function updateTrafficInterfaces(rows, available) {
+  const labels = rows.map(row => [row.id, [row.name, ...row.addresses].join(" · ")]);
+  const placeholder = available ?
+    (labels.length ? "Choisir l’interface" : "Aucune interface active") : "Mesure indisponible";
+  const entries = [["", placeholder], ...labels];
+  if (JSON.stringify(entries) !== JSON.stringify(Array.from(trafficInterface.options, option => [option.value, option.text]))) {
+    trafficInterface.replaceChildren(...entries.map(([id, label]) => new Option(label, id)));
+  }
+  trafficInterface.disabled = !labels.length;
+  const selected = labels.find(([id]) => id === interfaceSelection);
+  trafficInterface.value = selected?.[0] || (labels.length === 1 ? labels[0][0] : "");
+  trafficRows = rows;
+  displayTraffic();
+}
+async function refreshTraffic() {
+  if (trafficBusy || remoteSessionEnded || document.hidden) return;
+  trafficBusy = true;
+  try {
+    const {interfaces, available} = await call("/api/interface-traffic");
+    updateTrafficInterfaces(interfaces, available);
+  } catch {
+    updateTrafficInterfaces([], false);
+  } finally {
+    trafficBusy = false;
+  }
+}
+trafficInterface.onchange = () => {
+  interfaceSelection = trafficInterface.value;
+  try { localStorage.setItem("soundlive-traffic-interface", interfaceSelection); } catch {}
+  displayTraffic();
+};
+function action(run) {
+  return async event => {
+    event.preventDefault();
+    try { await run(event); }
+    catch (error) { notice(error.message, true); }
+  };
+}
+function showAction({title, detail, label, successTitle, perform}) {
+  if (confirmation.open) return;
+  pendingAction = {title, successTitle, perform};
+  confirmation.dataset.state = "confirm";
+  confirmTitle.textContent = title + " ?";
+  confirmDetail.textContent = detail;
+  confirmAccept.textContent = label;
+  confirmAccept.disabled = false;
+  confirmCancel.hidden = false;
+  confirmCancel.disabled = false;
+  confirmation.showModal();
+  confirmCancel.focus();
+}
+confirmation.addEventListener("cancel", event => {
+  if (confirmation.dataset.state === "busy") event.preventDefault();
+});
+confirmationForm.onsubmit = async event => {
+  const state = confirmation.dataset.state;
+  if (state === "busy") {
+    event.preventDefault();
+    return;
+  }
+  if (state !== "confirm" || event.submitter !== confirmAccept) return;
+  event.preventDefault();
+  const {title, successTitle, perform} = pendingAction;
+  confirmation.dataset.state = "busy";
+  confirmTitle.textContent = title;
+  confirmDetail.textContent = "Action en cours…";
+  confirmCancel.disabled = confirmAccept.disabled = true;
+  try {
+    confirmDetail.textContent = await perform();
+    confirmTitle.textContent = successTitle;
+    confirmation.dataset.state = "success";
+  } catch (error) {
+    confirmTitle.textContent = "Action impossible";
+    confirmDetail.textContent = error.message;
+    confirmation.dataset.state = "error";
+  }
+  confirmCancel.hidden = true;
+  confirmAccept.textContent = "Fermer";
+  confirmAccept.disabled = false;
+  confirmAccept.focus();
+};
+function severity(value, [low, high]) {
+  return !Number.isFinite(value) ? "unknown" : value < low ? "good" : value < high ? "warn" : "bad";
+}
+function metric(element, value, level) {
+  element.dataset.level = level;
+  const display = select(element, "strong");
+  if (display.textContent !== value) display.textContent = value;
+}
+function renderRate(element, value, direction) {
+  metric(element, rateText(value), Number.isFinite(value) ? direction : "unknown");
+}
+function percent(value) {
+  return Number.isFinite(value) ? Math.round(value) + " %" : "—";
+}
+function memoryLoad(data) {
+  return data?.ram_total > 0 && Number.isFinite(data.ram_used) ?
+    100 * data.ram_used / data.ram_total : null;
+}
+function latencyText(value) {
+  return Number.isFinite(value) ? Math.round(value) + " ms" : "—";
+}
+function renderMetrics({data, ui}) {
+  ui.info.hidden = ui.metrics.hidden = !data.paired;
+  if (!data.paired) return;
+  const latency = data.report.latency_ms;
+  const stats = data.online ? data.report.diagnostic : null;
+  const connection = data.online ? latencyText(latency) : "Hors ligne";
+  metric(ui.connection, connection, data.online ? severity(latency, latencyLimits) : "bad");
+  ui.connection.setAttribute("aria-label", "Réseau " + connection + ". Informations et test de latence");
+  metric(ui.cpu, percent(stats?.cpu_pct), severity(stats?.cpu_pct, loadLimits));
+  const ram = memoryLoad(stats);
+  metric(ui.ram, percent(ram), severity(ram, loadLimits));
+}
+function receiverChoices(row) {
+  return (row.report.diagnostic?.interfaces || []).filter(item => item.connected);
+}
+function renderReceiverTraffic({data:row, ui}) {
+  ui["screen-traffic"].hidden = !row.paired;
+  if (!row.paired) return;
+  const choices = receiverChoices(row);
+  const chosen = receiverTrafficPreferences[row.id];
+  const current = row.online && (choices.find(item => item.id === chosen) ||
+    choices.find(item => item.to_regie) || choices[0]);
+  const rx = current?.rx_mbps, tx = current?.tx_mbps;
+  renderRate(ui["rate-rx"], rx, "rx");
+  renderRate(ui["rate-tx"], tx, "tx");
+  const context = !row.online ? "Hors ligne" :
+    (current?.name ? current.name + " · " : "") +
+    (Number.isFinite(rx) || Number.isFinite(tx) ? "Trafic total" : "Mesure indisponible");
+  if (ui["traffic-interface-label"].textContent !== context) ui["traffic-interface-label"].textContent = context;
+  for (const [key, label, value] of [["rate-rx", "Réception", rx], ["rate-tx", "Émission", tx]]) {
+    ui[key].setAttribute("aria-label", label + " " + rateText(value) + " · " + context + " · Diagnostic réseau");
+  }
+}
+function gib(bytes) {
+  return Number.isFinite(bytes) ? (bytes / 2**30).toLocaleString("fr-FR", {maximumFractionDigits:2}) + " Gio" : "—";
+}
+function renderDiagnostics(card) {
+  const row = card.data;
+  const report = row.report;
+  const data = report.diagnostic || {};
+  select(diagnostics, "h2").textContent = row.name;
+  select(diagnostics, "#diagnostics-state").textContent = row.online ?
+    (report.diagnostic ? report.state : "Mets à jour ce récepteur pour recevoir ses informations système.") :
+    (report.diagnostic ? "Hors ligne · dernières informations reçues" : "Hors ligne");
+  const facts = [
+    ["Récepteur", deviceLabels[row.kind] || "—"],
+    ["Système", data.os || "—"],
+    ["Architecture", data.architecture || "—"],
+    ["Modèle", data.model || "—"],
+    ["Processeur", [data.cpu, data.cores ? data.cores + " cœurs logiques" : ""].filter(Boolean).join(" · ") || "—"],
+    ["Mémoire", data.ram_total > 0 ? gib(data.ram_used) + " utilisée sur " + gib(data.ram_total) : "—"],
+    ["Disque système", data.disk_total > 0 ? gib(data.disk_free) + " libre sur " + gib(data.disk_total) : "—"],
+  ];
+  select(diagnostics, ".facts").replaceChildren(...facts.flatMap(([label, value]) => {
+    const dt = document.createElement("dt");
+    const dd = document.createElement("dd");
+    dt.textContent = label;
+    dd.textContent = value;
+    return [dt, dd];
+  }));
+  const interfaces = data.interfaces || [];
+  const choices = receiverChoices(row);
+  receiverInterfaceLabel.hidden = !row.online || choices.length < 2;
+  const entries = [["", "Automatique"], ...choices.map(item =>
+    [item.id, [item.name, ...item.addresses].join(" · ")])];
+  if (JSON.stringify(entries) !== JSON.stringify(Array.from(receiverInterface.options, option => [option.value, option.text]))) {
+    receiverInterface.replaceChildren(...entries.map(([id, label]) => new Option(label, id)));
+  }
+  const preference = receiverTrafficPreferences[row.id];
+  receiverInterface.value = choices.some(item => item.id === preference) ? preference : "";
+  const lines = interfaces.map(item => {
+    const kind = {wifi:"Wi-Fi", ethernet:"Ethernet", other:"Autre"}[item.kind] || "Autre";
+    const rate = row.online && (item.rx_mbps != null || item.tx_mbps != null) ?
+      "Réception " + rateText(item.rx_mbps) + " · Émission " + rateText(item.tx_mbps) : "";
+    return [kind, item.name, item.connected ? "Connectée" : "Déconnectée",
+            item.to_regie ? "Vers la régie" : "", ...item.addresses, rate].filter(Boolean).join(" · ");
+  });
+  if (!lines.length) lines.push(data.interfaces ? "Aucune interface détectée." : "Informations réseau indisponibles.");
+  select(diagnostics, ".interfaces").replaceChildren(...lines.map(line => {
+    const li = document.createElement("li");
+    li.textContent = line;
+    return li;
+  }));
+
+  const result = select(diagnostics, ".test-result");
+  const measurement = report.latency_test;
+  const test = card.latencyTest;
+  const completed = !!test?.id && measurement?.id === test.id;
+  const pending = row.online && !!test && !completed && performance.now() < test.deadline;
+  testButton.disabled = !row.online || !report.diagnostic || pending;
+  delete result.dataset.level;
+  if (!row.online) result.textContent = "Test indisponible hors ligne.";
+  else if (!report.diagnostic) result.textContent = "";
+  else if (pending) result.textContent = "Test en cours…";
+  else if (test && !completed) {
+    result.textContent = test.error || "Aucune réponse au test.";
+    result.dataset.level = "bad";
+  }
+  else if (measurement) {
+    const ms = measurement.ms;
+    result.textContent = Number.isFinite(ms) ? "Dernier test : " + latencyText(ms) : "Le test n’a pas abouti.";
+    result.dataset.level = Number.isFinite(ms) ? severity(ms, latencyLimits) : "bad";
+  } else {
+    result.textContent = "Latence actuelle : " + latencyText(report.latency_ms);
+    result.dataset.level = severity(report.latency_ms, latencyLimits);
+  }
+}
+receiverInterface.onchange = () => {
+  const card = cards.get(inspectedId);
+  if (!card) return;
+  if (receiverInterface.value) receiverTrafficPreferences[inspectedId] = receiverInterface.value;
+  else delete receiverTrafficPreferences[inspectedId];
+  try { localStorage.setItem(trafficPreferenceKey, JSON.stringify(receiverTrafficPreferences)); } catch {}
+  renderReceiverTraffic(card);
+};
+function showDiagnostics(id) {
+  inspectedId = id;
+  renderDiagnostics(cards.get(id));
+  diagnostics.showModal();
+}
+testButton.onclick = action(() => {
+  const card = cards.get(inspectedId);
+  if (!card) return;
+  showAction({
+    title:"Tester la latence de " + card.data.name,
+    detail:"Le récepteur mesurera l’aller-retour HTTP jusqu’à la régie.",
+    label:"Lancer le test",
+    successTitle:"Test terminé",
+    async perform() {
+      const test = {deadline:performance.now() + 20000};
+      card.latencyTest = test;
+      renderDiagnostics(card);
+      try {
+        test.id = (await call("/api/latency", {id:card.data.id})).id;
+        while (performance.now() < test.deadline) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          await refresh();
+          const row = cards.get(card.data.id)?.data;
+          if (!row?.online) throw Error("Le récepteur est hors ligne.");
+          const result = row.report.latency_test;
+          if (result?.id !== test.id) continue;
+          if (!Number.isFinite(result.ms)) throw Error("La mesure n’a pas abouti.");
+          return card.data.name + " · " + latencyText(result.ms);
+        }
+        throw Error("Aucune réponse au test.");
+      } catch (error) {
+        test.error = error.message;
+        test.deadline = 0;
+        throw error;
+      } finally {
+        await refresh();
+      }
+    }
+  });
+});
+
+function cardFor(id) {
+  if (cards.has(id)) return cards.get(id);
+  const el = document.querySelector("#card").content.firstElementChild.cloneNode(true);
+  const form = select(el, ".config");
+  const fields = ["source","bandwidth","volume","muted","toggle","reboot","poweroff",
+                  "pending","badge","address","error","remove","info","metrics","connection","cpu","ram",
+                  "screen-traffic","rate-rx","rate-tx","traffic-interface-label"];
+  const ui = Object.fromEntries(fields.map(key => [key, select(el, "."+key)]));
+  const list = select(el, ".detected-sources");
+  const card = {el, ui, form, list, dirty:false};
+  const controls = select(el, "details");
+  try { controls.open = localStorage.getItem("soundlive-controls-" + id) === "open"; }
+  catch { /* Storage can be unavailable in private mode. */ }
+  controls.addEventListener("toggle", () => {
+    try { localStorage.setItem("soundlive-controls-" + id, controls.open ? "open" : "closed"); }
+    catch { /* The open state remains usable without storage. */ }
+  });
+  list.addEventListener("change", () => {
+    if (!list.value) return;
+    ui.source.value = list.value;
+    card.dirty = true;
+  });
+  ui.source.addEventListener("input", () => syncSourceChoice(card));
+  form.addEventListener("input", () => {
+    card.dirty = true;
+    select(el,"output").value = ui.volume.value + " %";
+  });
+  form.onsubmit = action(() => {
+    const settings = {source:ui.source.value, bandwidth:ui.bandwidth.value, volume:Number(ui.volume.value),
+                      muted:ui.muted.checked, enabled:card.data.options.enabled};
+    const version = card.editVersion;
+    const quality = ui.bandwidth.selectedOptions[0].textContent;
+    const volume = settings.muted ? "Son coupé" : "Volume " + settings.volume + " %";
+    showAction({
+      title:"Appliquer les réglages à " + card.data.name,
+      detail:settings.source + " · " + quality + " · " + volume,
+      label:"Appliquer",
+      successTitle:"Réglages enregistrés",
+      async perform() {
+        await call("/api/update", {id, version, options:settings});
+        card.dirty = false;
+        card.editVersion = version + 1;
+        await refresh(true);
+        return "Le récepteur « " + card.data.name + " » appliquera les réglages au prochain échange avec la régie.";
+      }
+    });
+  });
+  ui.toggle.onclick = action(() => {
+    const current = card.data.options;
+    const version = card.data.version;
+    showAction({
+      title:(current.enabled ? "Arrêter la diffusion sur " : "Reprendre la diffusion sur ") + card.data.name,
+      detail:current.enabled ? "Le récepteur restera allumé et affichera l’écran d’attente." :
+        "Le récepteur attendra la source NDI enregistrée si elle est indisponible.",
+      label:current.enabled ? "Arrêter" : "Reprendre",
+      successTitle:current.enabled ? "Arrêt demandé" : "Reprise demandée",
+      async perform() {
+        await call("/api/update", {id, version, options:{...current, enabled:!current.enabled}});
+        if (card.dirty) card.editVersion = version + 1;
+        await refresh(true);
+        return "La demande pour " + card.data.name + " est enregistrée.";
+      }
+    });
+  });
+  function deviceAction(button, path, label, detail, successTitle) {
+    button.onclick = action(() => showAction({
+      title:label + " " + card.data.name, detail, label, successTitle,
+      async perform() {
+        await call(path, {id});
+        await refresh(true);
+        return "Écran « " + card.data.name + " ».";
+      }
+    }));
+  }
+  deviceAction(ui.reboot, "/api/reboot", "Redémarrer",
+    "La diffusion sera interrompue pendant le redémarrage du récepteur.", "Redémarrage demandé");
+  deviceAction(ui.poweroff, "/api/poweroff", "Éteindre",
+    "La diffusion s’arrêtera. Le récepteur devra être rallumé sur place.", "Extinction demandée");
+  deviceAction(ui.remove, "/api/remove", "Retirer",
+    "Un nouveau code sera nécessaire pour associer cet écran à nouveau.", "Écran retiré");
+  select(el, ".client-upgrade").onclick = action(() => showAction({
+    title:"Mettre à jour " + card.data.name,
+    detail:"Le lecteur va redémarrer avec la version " + clientRelease + ". La diffusion sera brièvement interrompue.",
+    label:"Lancer la mise à jour", successTitle:"Demande traitée",
+    async perform() {
+      const {results} = await call("/api/client-updates", {ids:[id]});
+      await refresh(true);
+      if (results[0].state !== "queued" && results[0].state !== "current") {
+        throw Error(updateStates[results[0].state]);
+      }
+      return updateStates[results[0].state] + " · Suis le résultat sur la fiche de l’écran.";
+    }
+  }));
+  ui.info.onclick = () => showDiagnostics(id);
+  ui.connection.onclick = () => showDiagnostics(id);
+  ui["rate-rx"].onclick = ui["rate-tx"].onclick = () => showDiagnostics(id);
+  cards.set(id,card);
+  return card;
+}
+function syncSourceChoice({ui, list}) {
+  list.value = Array.from(list.options).some(option => option.value === ui.source.value) ?
+    ui.source.value : "";
+}
+function render(row) {
+  const card = cardFor(row.id);
+  const {el, ui, form, list} = card;
+  card.data = row;
+  select(el,"h2").textContent = row.name;
+  ui.badge.textContent = row.online ? row.report.state : row.paired ? "Hors ligne" : "À associer";
+  ui.badge.classList.toggle("online",row.online);
+  select(el, ".device-kind").textContent = deviceLabels[row.kind] || "";
+  ui.address.textContent = row.report.ip || "";
+  const currentVersion = row.update_availability === "current" && row.report.client_release;
+  select(el, ".client-release").textContent = row.paired && !currentVersion ?
+    row.report.client_release ? "Lecteur v" + row.report.client_release :
+      row.online ? "Version du lecteur non communiquée" : "" : "";
+  renderMetrics(card);
+  renderReceiverTraffic(card);
+  const stream = select(el, ".current-stream");
+  stream.hidden = !row.options;
+  const playing = row.online && row.report.state === "Lecture";
+  select(stream, "span").textContent = playing && row.report.active_source ? "Flux en cours" :
+    playing ? "Source configurée · lecture signalée" : "Source configurée";
+  select(stream, "strong").textContent = (playing && row.report.active_source) || row.options?.source || "";
+  ui.error.textContent = row.report.error || "";
+  const updateStatus = select(el, ".update-status");
+  const update = row.client_update?.state === "updated" ? null : row.client_update;
+  const availability = row.update_availability;
+  const canInstall = availability === "available" && !["queued","installing"].includes(update?.state);
+  select(el, ".client-upgrade").hidden = !canInstall;
+  updateStatus.dataset.state = currentVersion ? "current" : update?.state || availability || "";
+  updateStatus.textContent = currentVersion ? "v" + currentVersion + " · Dernière version" :
+    update ?
+    [updateStates[update.state], update.message].filter(Boolean).join(" · ") :
+    availability === "available" ? "Version " + clientRelease + " disponible" :
+    ["current","unsupported","key_required","newer"].includes(availability) ? updateStates[availability] : "";
+  updateStatus.hidden = !updateStatus.textContent;
+  form.hidden = !row.options;
+  ui.pending.hidden = row.paired;
+  if (!row.paired) {
+    if (row.pairing && !card.pairingRevision) select(el, "details").open = true;
+    renderPairing(card);
+    return;
+  }
+  const sources = row.report.sources || [];
+  const signature = JSON.stringify([row.online, sources]);
+  if (signature !== card.sources) {
+    const hint = document.createElement("option");
+    hint.value = "";
+    hint.disabled = true;
+    hint.textContent = sources.length ? "Choisir une source" :
+      row.online ? "Aucune source détectée" : "Récepteur hors ligne";
+    list.replaceChildren(hint, ...sources.map(source => {
+      const option = document.createElement("option");
+      option.value = source;
+      option.textContent = source;
+      return option;
+    }));
+    list.disabled = !sources.length;
+    card.sources = signature;
+  }
+  if (!card.dirty && !form.contains(document.activeElement)) {
+    for (const field of ["source","bandwidth","volume"]) ui[field].value = row.options[field];
+    ui.muted.checked = row.options.muted;
+    select(el,"output").value = row.options.volume + " %";
+    card.editVersion = row.version;
+  }
+  syncSourceChoice(card);
+  ui.toggle.textContent = row.options.enabled ? "Stop" : "Reprendre";
+  ui.reboot.disabled = !row.online || row.report.can_reboot === false;
+  ui.poweroff.disabled = !row.online || !row.report.can_poweroff;
+  ui.poweroff.title = row.online && !row.report.can_poweroff ? "Extinction distante indisponible sur ce lecteur." : "";
+}
+function positionScreens(rows) {
+  const sections = new Map();
+  for (const row of rows) {
+    const name = row.group || "";
+    if (!sections.has(name)) sections.set(name, []);
+    sections.get(name).push(row);
+  }
+  const names = [...sections.keys()].sort((a, b) => Number(!a) - Number(!b) || a.localeCompare(b, "fr"));
+  let nextSection = holder.firstElementChild;
+  for (const name of names) {
+    if (!screenSections.has(name)) {
+      const el = document.createElement("section");
+      el.className = "screen-group";
+      const title = document.createElement("h2");
+      title.className = "screen-group-title";
+      const count = document.createElement("small");
+      title.append(name || "Sans groupe", count);
+      const grid = document.createElement("div");
+      grid.className = "grid";
+      el.append(title, grid);
+      screenSections.set(name, {el, count, grid});
+    }
+    const {el, count, grid} = screenSections.get(name);
+    if (el !== nextSection) holder.insertBefore(el, nextSection);
+    nextSection = el.nextElementSibling;
+    const members = sections.get(name);
+    count.textContent = members.length + (members.length === 1 ? " écran" : " écrans");
+    let nextCard = grid.firstElementChild;
+    for (const row of members) {
+      const card = cards.get(row.id).el;
+      if (card !== nextCard) grid.insertBefore(card, nextCard);
+      nextCard = card.nextElementSibling;
+    }
+  }
+  for (const [name, section] of screenSections) {
+    if (!sections.has(name)) {
+      section.el.remove();
+      screenSections.delete(name);
+    }
+  }
+}
+function refresh(afterAction = false) {
+  if (refreshing) return afterAction ? refreshing.then(() => refresh()) : refreshing;
+  refreshing = refreshScreens().finally(() => { refreshing = null; });
+  return refreshing;
+}
+async function refreshScreens() {
+  try {
+    const rows = await call("/api/screens");
+    notice("");
+    document.querySelector("#count").textContent = rows.filter(x => x.online).length + " en ligne";
+    const ids = new Set(rows.map(row => row.id));
+    for (const [id,card] of cards) if (!ids.has(id)) {card.el.remove();cards.delete(id);}
+    for (const row of rows) render(row);
+    positionScreens(rows);
+    organizerButton.disabled = !rows.length;
+    groupOpen.disabled = !rows.some(row => row.paired);
+    if (group.open) renderGroupSources();
+    if (diagnostics.open) {
+      const inspected = cards.get(inspectedId);
+      if (inspected) renderDiagnostics(inspected);
+      else diagnostics.close();
+    }
+    const empty = select(holder,".empty");
+    if (rows.length && empty) empty.remove();
+    if (!rows.length && !empty) {
+      const box = document.createElement("div");
+      box.className = "empty";
+      box.textContent = "Aucun écran associé. Après une mise à jour, vérifie que ecrans.json est à côté de tableau.py.";
+      holder.append(box);
+    }
+  } catch (error) { notice(error.message,true); }
+}
+function organizerFields() {
+  const isNew = organizerTarget.value === "new";
+  organizerName.required = isNew;
+  organizerName.closest("label").hidden = !isNew;
+  select(organizerForm, '[type="submit"]').disabled = organizing || !organizerList.querySelector("input:checked");
+}
+organizerButton.onclick = () => {
+  const rows = [...cards.values()].map(card => card.data);
+  const names = [...new Set(rows.map(row => row.group).filter(Boolean))].sort((a, b) => a.localeCompare(b, "fr"));
+  organizerTarget.replaceChildren(new Option("Créer un groupe", "new"), new Option("Sans groupe", ""));
+  for (const name of names) organizerTarget.add(new Option(name, "group:" + name));
+  organizerName.value = "";
+  organizerError.hidden = true;
+  organizerList.replaceChildren(...rows.map(row => {
+    const label = document.createElement("label");
+    label.className = "check";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = row.id;
+    label.append(input, row.name + (row.group ? " · " + row.group : ""));
+    return label;
+  }));
+  organizerFields();
+  organizer.showModal();
+};
+organizerForm.addEventListener("change", organizerFields);
+select(organizer, ".close-organizer").onclick = () => organizer.close();
+organizerForm.onsubmit = async event => {
+  event.preventDefault();
+  if (organizing) return;
+  const ids = [...organizerList.querySelectorAll("input:checked")].map(input => input.value);
+  if (!ids.length) return;
+  organizing = true;
+  organizerFields();
+  organizerError.hidden = true;
+  try {
+    const value = organizerTarget.value;
+    const name = value === "new" ? organizerName.value.trim() : value.slice(6);
+    if (value === "new" && !name) throw Error("Saisis un nom pour le nouveau groupe.");
+    await call("/api/screen-groups", {ids, group:name});
+    organizer.close();
+    await refresh(true);
+  } catch (error) {
+    organizerError.textContent = error.message;
+    organizerError.hidden = false;
+  } finally {
+    organizing = false;
+    organizerFields();
+  }
+};
+document.querySelector("#add").onclick = () => {
+  dialog.showModal();
+  loadNetwork();
+};
+document.querySelector("#close").onclick = () => dialog.close();
+const pairForm = document.querySelector("#pair-form");
+pairForm.onsubmit = action(() => {
+  const inputs = new FormData(pairForm);
+  const name = String(inputs.get("name")).trim();
+  const kind = inputs.get("kind");
+  showAction({
+    title:"Créer un code pour " + name,
+    detail:"Le code d’association " + deviceLabels[kind] + " sera valable 15 minutes.",
+    label:"Créer le code",
+    successTitle:"Code créé",
+    async perform() {
+      await call("/api/pair", {name, kind});
+      pairForm.reset();
+      dialog.close();
+      await refresh(true);
+      return "La commande d’installation est affichée sur la fiche « " + name + " ».";
+    }
+  });
+});
+const group = document.querySelector("#group");
+const groupForm = select(group, "form");
+const groupScreens = select(group, "#group-screens");
+const groupSubmit = select(group, "#group-submit");
+const groupOperation = select(group, 'select[name="operation"]');
+const groupOpen = document.querySelector("#open-group");
+const groupActions = {
+  source:["Changer la source", "source"], mute:["Couper le son", "muted", true],
+  unmute:["Rétablir le son", "muted", false], stop:["Arrêter la diffusion", "enabled", false],
+  play:["Reprendre la diffusion", "enabled", true], volume:["Régler le volume", "volume"],
+  bandwidth:["Régler la qualité NDI", "bandwidth"], update:["Pousser la mise à jour"],
+};
+const groupDeviceActions = {
+  reboot: {title:"Redémarrer les récepteurs", label:"Redémarrer", result:"Redémarrage demandé",
+           detail:"La diffusion sera interrompue pendant le redémarrage. Les récepteurs hors ligne seront ignorés."},
+  poweroff: {title:"Éteindre les récepteurs", label:"Éteindre", result:"Extinction demandée",
+             detail:"Les récepteurs éteints devront être rallumés sur place. Les récepteurs hors ligne seront ignorés."},
+  remove: {title:"Retirer les écrans du tableau", label:"Retirer", result:"Écran retiré",
+           detail:"Les écrans seront désassociés, même hors ligne. Il faudra un nouveau code pour les ajouter à nouveau."},
+};
+const groupSources = select(group, "#group-sources");
+const groupSourceInput = groupForm.elements.namedItem("source");
+let groupSourcesSignature;
+function renderGroupSources() {
+  const counts = new Map();
+  const selected = new Set(groupSelection());
+  const online = Array.from(cards.values(), card => card.data).filter(row => row.paired && row.online);
+  const selectedOnline = online.filter(row => selected.has(row.id)).length;
+  for (const row of online) {
+    for (const source of new Set(row.report.sources || [])) {
+      const count = counts.get(source) || 0;
+      counts.set(source, count + Number(selected.has(row.id)));
+    }
+  }
+  const items = Array.from(counts).sort(([a], [b]) => a.localeCompare(b, "fr"));
+  const signature = JSON.stringify([selectedOnline, items]);
+  if (signature !== groupSourcesSignature) {
+    groupSourcesSignature = signature;
+    const hint = document.createElement("option");
+    hint.value = "";
+    hint.textContent = items.length ? "Choisir une source détectée" : "Aucune source NDI détectée";
+    groupSources.replaceChildren(hint, ...items.map(([source, count]) => {
+      const option = document.createElement("option");
+      option.value = source;
+      option.textContent = selectedOnline ? source + " · " + count + "/" + selectedOnline + " sélectionné(s) en ligne" : source;
+      return option;
+    }));
+  }
+  groupSources.value = counts.has(groupSourceInput.value) ? groupSourceInput.value : "";
+  groupSources.disabled = groupOperation.value !== "source" || !items.length;
+}
+groupSources.onchange = () => {
+  if (groupSources.value) groupSourceInput.value = groupSources.value;
+};
+groupSourceInput.oninput = renderGroupSources;
+const updateStates = {
+  queued:"Mise à jour en attente",
+  installing:"Installation en cours",
+  updated:"Mise à jour confirmée",
+  failed:"Échec de la mise à jour",
+  expired:"Mise à jour non confirmée",
+  current:"Déjà à jour",
+  offline:"Hors ligne",
+  unsupported:"Installation locale requise",
+  key_required:"Clé de signature absente sur la régie",
+  newer:"Version du lecteur plus récente que la régie",
+};
+function groupSelection() {
+  return Array.from(groupScreens.querySelectorAll('input:checked'), input => input.value);
+}
+const groupVolume = groupForm.elements.namedItem("volume");
+const groupVolumeValue = select(group, "#group-volume-value");
+function renderGroupVolume() {
+  groupVolumeValue.value = groupVolume.value + " %";
+}
+groupVolume.addEventListener("input", renderGroupVolume);
+function groupFields() {
+  const operation = groupOperation.value;
+  for (const name of ["source", "volume", "bandwidth"]) {
+    const label = select(group, "#group-" + name);
+    const field = groupForm.elements.namedItem(name);
+    label.hidden = field.disabled = operation !== name;
+    field.required = operation === name;
+  }
+  const count = groupSelection().length;
+  const help = groupDeviceActions[operation]?.detail || (operation === "update" ?
+    "Sélectionne des récepteurs en ligne équipés de la clé de régie. Le client se relancera après vérification du paquet." :
+    "Les écrans hors ligne recevront ce réglage à leur prochaine connexion.");
+  select(group, "#group-help").textContent = count + " sélectionné(s) · " + help;
+  groupSubmit.disabled = count === 0;
+  renderGroupSources();
+}
+groupOpen.onclick = () => {
+  groupForm.reset();
+  renderGroupVolume();
+  const rows = Array.from(cards.values(), card => card.data).filter(row => row.paired);
+  groupScreens.replaceChildren(...rows.map(row => {
+    const label = document.createElement("label");
+    label.className = "check";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = row.id;
+    input.checked = true;
+    const status = row.online ? "En ligne" : "Hors ligne";
+    label.append(input, row.name + " · " + status);
+    return label;
+  }));
+  groupFields();
+  group.showModal();
+};
+for (const [id, checked] of [["select-all", true], ["select-none", false]]) {
+  select(group, "#" + id).onclick = () => {
+    for (const input of groupScreens.querySelectorAll("input")) input.checked = checked;
+    groupFields();
+  };
+}
+select(group, "#group-close").onclick = () => group.close();
+groupForm.addEventListener("change", groupFields);
+groupForm.onsubmit = action(() => {
+  const ids = groupSelection();
+  if (!ids.length) return;
+  const form = new FormData(groupForm);
+  const operation = form.get("operation");
+  const deviceAction = groupDeviceActions[operation];
+  const summary = ids.length + " écran(s) · " + ids.map(id => cards.get(id)?.data.name || id).join(", ");
+  if (deviceAction) {
+    showAction({
+      title:deviceAction.title, detail:summary + "\n" + deviceAction.detail, label:deviceAction.label,
+      successTitle:"Résultat par écran",
+      async perform() {
+        const {results} = await call("/api/group", {ids, operation});
+        group.close();
+        await refresh(true);
+        return results.map(item => {
+          const status = {requested:deviceAction.result, removed:deviceAction.result,
+                          offline:"Ignoré · hors ligne", unsupported:"Ignoré · client à mettre à jour"};
+          return item.name + " · " + status[item.state];
+        }).join("\n");
+      }
+    });
+    return;
+  }
+  const [label, field, preset] = groupActions[operation];
+  const raw = field && preset === undefined ? form.get(field) : null;
+  const value = preset ?? (field === "volume" ? Number(raw) : raw);
+  let detail = summary;
+  if (raw !== null) detail += "\n" + (field === "bandwidth" ? groupForm.elements.namedItem(field).selectedOptions[0].textContent :
+    field === "volume" ? value + " %" : value);
+  showAction({
+    title:label, detail, label:"Confirmer",
+    successTitle:operation === "update" ? "État des demandes de mise à jour" : "Réglages de groupe enregistrés",
+    async perform() {
+      const result = operation === "update" ?
+        await call("/api/client-updates", {ids}) :
+        await call("/api/group", {ids, changes:{[field]:value}});
+      group.close();
+      await refresh(true);
+      if (operation === "update") {
+        return result.results.map(item => item.name + " · " + updateStates[item.state]).join("\n");
+      }
+      return result.results.map(item => item.name + (item.online ? " · Enregistré" : " · À la reconnexion")).join("\n");
+    }
+  });
+});
+
+let refreshingConnections = false;
+async function refreshConnections() {
+  if (refreshingConnections) return;
+  refreshingConnections = true;
+  const empty = select(connectionsDialog, "#connections-empty");
+  const list = select(connectionsDialog, "#connections-list");
+  try {
+    const {enabled, connections} = await call("/api/remote-connections");
+    connectionsButton.hidden = !enabled;
+    connectionsButton.textContent = "Accès distant · " + connections.length;
+    if (!connectionsDialog.open) return;
+    empty.hidden = connections.length > 0;
+    empty.textContent = enabled ? "Aucun navigateur distant actif." : "Accès distant désactivé.";
+    list.replaceChildren(...connections.map(({ip, agent, seen}) => {
+      const item = document.createElement("li");
+      const address = document.createElement("strong");
+      address.textContent = ip + " · " + new Date(seen * 1000).toLocaleTimeString("fr-FR");
+      item.append(address);
+      if (agent) item.append(document.createElement("br"), agent);
+      return item;
+    }));
+  } catch {
+    list.replaceChildren();
+    empty.hidden = false;
+    empty.textContent = "Connexions indisponibles.";
+  } finally { refreshingConnections = false; }
+}
+connectionsButton.onclick = () => {
+  connectionsDialog.showModal();
+  refreshConnections();
+};
+async function refreshRegieVersion() {
+  if (remoteSessionEnded) return;
+  const badge = document.querySelector("#regie-version");
+  const label = document.querySelector("#regie-version-status");
+  try {
+    const {state, version} = await call("/api/regie-version");
+    const status = {
+      current:"Dernière version",
+      available:"v" + version + " disponible",
+      unavailable:"Vérification indisponible",
+      unconfigured:"Dépôt de versions non configuré",
+      checking:"Vérification…"
+    }[state];
+    badge.dataset.state = state;
+    const value = status ? " · " + status : "";
+    if (label.textContent !== value) label.textContent = value;
+  } catch {
+    badge.dataset.state = "unavailable";
+    label.textContent = " · Vérification indisponible";
+  }
+}
+refresh();
+loadNetwork();
+refreshConnections();
+refreshRegieVersion();
+refreshTraffic();
+setInterval(refresh,2000);
+setInterval(refreshTraffic,2000);
+setInterval(refreshConnections,5000);
+setInterval(refreshRegieVersion,10000);
+</script>
+</body>
+</html>

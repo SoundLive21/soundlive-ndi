@@ -1,0 +1,382 @@
+SoundLive-NDI
+
+Auteur : DUVERNOY Matthieu & ChatGPT
+contact@soundlive.fr
+Société SoundLive
+Régie 1.4.8 · Lecteurs 1.4.6
+
+1. SUR LE PC WINDOWS QUI DIFFUSE AVEC OBS
+   Ferme l’ancien tableau et décompresse tout le ZIP dans le dossier de
+   la régie. Garde ecrans.json, .soundlive-update et .soundlive-acces.
+   Double-clique sur SoundLive-NDI.exe (Windows 64 bits). Le lanceur
+   utilise Python 3 déjà installé, avec le composant Tcl/Tk. Il permet
+   de démarrer et d’arrêter la régie, puis d’ouvrir le tableau local.
+   Pour le lancer depuis PowerShell : py -3 regie-windows.py
+
+   Démarrage en console :
+   Décompresse le ZIP. Installe Python 3 si nécessaire (https://www.python.org/downloads/windows/).
+   Double-clique sur demarrer-windows.bat et ouvre http://127.0.0.1:8765 sur ce PC.
+   Garde la fenêtre ouverte. Si Windows affiche une alerte pare-feu, autorise
+   Python sur le réseau privé utilisé pour les Pi. Si les Pi ne joignent pas
+   le PC, vérifie que le port TCP 8765 est autorisé sur ce réseau.
+   L'adresse des Pi et la source apparaîtront après leur association.
+
+RÉGIE SOUS UBUNTU DESKTOP
+
+   Depuis la session graphique, décompresse le même ZIP, ouvre un terminal
+   dans le dossier SoundLive-NDI et lance ces commandes.
+
+     sudo apt install python3-tk python3-cryptography openssh-client
+     bash demarrer-regie-ubuntu.sh
+
+   Le lanceur utilise le port TCP 8765 pour les récepteurs et le tableau
+   local, et le port 8766 pour l’accès HTTPS. Si tu changes de PC de régie,
+   copie ecrans.json et .soundlive-update si tu veux conserver les écrans
+   associés et la clé de signature. Si l’adresse de la régie change,
+   adapte l’adresse enregistrée sur les récepteurs et installe le nouveau
+   certificat HTTPS sur les appareils de commande.
+
+   Démarrage en console sur Ubuntu : python3 tableau.py
+
+2. AJOUTER UN ÉCRAN
+   Le nouveau point d’entrée est installer-client.sh sous Linux et
+   installer-client.cmd sous Windows. Le tableau indique la commande selon
+   la plateforme. Consulte README.md pour installer le SDK NDI sur un Pi neuf
+   et compiler le lecteur Windows x64 avant sa première installation.
+
+   Clique sur « Ajouter un écran », donne-lui un nom et sélectionne
+   « Raspberry Pi » ou « PC Ubuntu ». Le tableau affiche la commande adaptée,
+   avec un code valable 15 minutes. Copie le dossier extrait sur le récepteur.
+   Ouvre un terminal dans ce dossier depuis le compte qui affichera la vidéo
+   (soundlive sur le Pi), puis colle la commande. Si le tableau propose plusieurs
+   adresses du PC de régie, choisis celle du réseau des écrans.
+   Le tableau doit tourner au moment de l’association.
+
+   L'installateur reprend le lecteur FFplay NDI dans /opt/ndi-pi et lit
+   le fichier ecran.ini existant lors de la première association. Il configure
+   le lancement à l'ouverture de la session et la commande de redémarrage.
+   Vérifie la connexion automatique au bureau soundlive dans la configuration
+   du Pi, puis lance sudo reboot.
+
+3. PILOTER LA DIFFUSION
+   Choisis dans « Sources NDI détectées » ou saisis le nom complet
+   dans « Source NDI ». La liste des sources arrive après quelques
+   secondes. Le menu Qualité affiche High (720p) pour la source réglée
+   en 720p et Low (360p) pour l’aperçu NDI standard en 16:9. « Appliquer » enregistre la source,
+   la qualité, le volume et l'état muet. Le changement relance FFplay, avec une
+   courte coupure. Le volume ne change que celui du lecteur.
+   « Stop » laisse le Pi en marche et affiche « Diffusion arrêtée ».
+   « Reprendre » attend la source si elle est absente. « Redémarrer »
+   redémarre ce Pi. Après le reboot, l’écran reprend le dernier réglage.
+   « Éteindre » arrête complètement le système après confirmation.
+   Le Pi reste dans le tableau et passe hors ligne. Il doit être rallumé sur place.
+   Les actions du tableau ouvrent une fenêtre de confirmation. Après validation,
+   cette fenêtre affiche la progression et le résultat, ou le motif d’échec.
+   Le test de latence suit le même principe et affiche la mesure en millisecondes.
+   Sur un Pi déjà associé, copie le kit à jour et lance :
+     bash installer-pi.sh --mettre-a-jour
+   Puis lance sudo reboot. L’association et les réglages sont conservés.
+   Sur le PC, remplace les fichiers du kit dans le dossier existant et garde
+   ecrans.json. Le chemin du fichier utilisé s’affiche au démarrage du tableau.
+   Si l’IP du PC a changé, indique l’adresse de sa carte Ethernet reliée au
+   réseau des Pi. Exemple à adapter :
+     bash installer-pi.sh --mettre-a-jour http://192.168.10.20:8765
+   Le client vérifie l’association à cette adresse avant de l’enregistrer.
+   Si le tableau est fermé, le Pi garde son dernier réglage local. Un Pi
+   hors ligne récupère les réglages enregistrés quand il se reconnecte.
+
+4. DÉPLOYER UN NOUVEAU PI
+   Clone la microSD d'un Pi opérationnel pour récupérer l'OS, FFplay NDI,
+   le Wi-Fi et l'ouverture automatique du bureau. Donne au clone un nom
+   distinct avec raspi-config, puis utilise « Ajouter un écran », choisis « Raspberry Pi » et installe
+   le kit sur le clone avec son nouveau code. Le numéro de série du Raspberry est
+   vérifié pour qu'une microSD clonée ne se présente pas comme le Pi d'origine.
+   Répète l'association une fois par Pi. Le tableau n'écrit pas l'image de la
+   microSD et nécessite un premier démarrage de chaque nouvelle carte.
+
+5. ACCÈS ET DÉPANNAGE
+   Sur le PC de régie, ouvre http://127.0.0.1:8765. Pour commander depuis
+   un autre appareil, active l’accès distant décrit à la fin de ce guide.
+   Les Pi utilisent l'adresse IP locale de ce PC pour recevoir les commandes.
+   Utilise le réseau local de la prestation : le lien entre le PC et les Pi
+   est en HTTP. Ne redirige pas le port 8765 sur Internet.
+   Sur le Pi, pour vérifier la connexion et l’association depuis le compte soundlive :
+     python3 ~/.local/share/soundlive-ecrans/ecran.py verifier
+   HTTP 404 « Écran inconnu » ou HTTP 403 « Réassocie le récepteur » : cherche le
+   fichier ecrans.json du tableau d’origine et redémarre le tableau avec ce fichier.
+   Si la vérification réussit et que le Pi reste hors ligne après redémarrage,
+   vérifie que le bureau s’ouvre automatiquement avec le compte soundlive.
+   Pour lire le journal : tail -n 25 ~/.local/state/soundlive-ndi/gestion.log
+   Pour restaurer le lancement précédent, si la sauvegarde existe :
+     cp ~/.config/autostart/ndi-ecran.desktop.avant-tableau ~/.config/autostart/ndi-ecran.desktop
+   Les écrans associés et leurs réglages sont dans ecrans.json, à côté de
+   tableau.py. Garde ce fichier avec le PC de régie.
+
+6. AJOUTER UN PORTABLE UBUNTU COMME RÉCEPTEUR NDI
+   Ce mode est prévu pour Ubuntu 26.04 Desktop 64 bits, sur le portable
+   branché à la TV. Le PC de régie continue d’émettre avec OBS et d’héberger
+   le tableau SoundLive-NDI. Le serveur existant accepte ce récepteur.
+
+   Branche la TV en HDMI et relie le portable au réseau des écrans.
+   Dans Paramètres > Écrans, active uniquement la TV pour que l’image
+   d’attente et la vidéo s’ouvrent sur elle. Dans Paramètres > Son, sélectionne
+   la sortie HDMI et teste-la. Désactive la veille automatique sur secteur
+   si le portable doit afficher le flux en continu.
+
+   Dans « Ajouter un écran », choisis « PC Ubuntu » pour la fiche de la TV.
+   Choisis l’IPv4 du PC de régie sur le réseau des écrans. Copie le kit sur
+   le portable et utilise la commande affichée. Exemple à adapter :
+     bash installer-ubuntu.sh http://192.168.10.20:8765 CODE
+   Le script installe les dépendances et récupère le SDK NDI 6 officiel.
+   Accepte la licence affichée si ses conditions te conviennent.
+   Si le téléchargement échoue, télécharge le SDK Linux depuis
+   https://ndi.video/for-developers/ndi-sdk/download/ puis lance, par exemple :
+     NDI_SDK_ARCHIVE="$HOME/Téléchargements/Install_NDI_SDK_v6_Linux.tar.gz" bash installer-ubuntu.sh http://192.168.10.20:8765 CODE
+
+   Pour lancer tout de suite, depuis le bureau du portable :
+     ~/.local/share/soundlive-ecrans/demarrer-ubuntu
+   Pour démarrer avec le PC, active « Connexion automatique » pour ce compte
+   dans Paramètres > Système > Utilisateurs. Le kit lance le lecteur à
+   l’ouverture de sa session graphique.
+
+   Sélectionne le flux dans le tableau. Le portable démarre en High et garde
+   ses réglages en cas de coupure du tableau. Stop affiche « Diffusion arrêtée ».
+   Un flux absent affiche « En attente du flux vidéo » et revient automatiquement
+   quand la source est détectée. Le bouton « Éteindre » sur la fiche de cette
+   TV éteint le portable.
+   Échap permet de quitter l’écran d’attente depuis le portable.
+
+   Si le lecteur NDI fonctionne déjà, mets à jour le client et les diagnostics :
+     bash installer-ubuntu.sh --mettre-a-jour-client
+   Pour mettre à jour aussi le lecteur NDI et ses dépendances :
+     bash installer-ubuntu.sh --mettre-a-jour
+   Pour corriger l’adresse de la régie, ajoute sa nouvelle URL à la commande.
+   Ouvre ensuite une nouvelle session pour charger la mise à jour.
+   Journal : tail -n 25 ~/.local/state/soundlive-ndi/gestion.log
+
+
+7. DIAGNOSTIC DU RÉCEPTEUR
+   Les cartes du tableau affichent la latence réseau, la charge CPU totale et
+   l’utilisation de la mémoire. Le réseau est vert sous 30 ms, orange de
+   30 à moins de 100 ms et rouge à partir de 100 ms ou hors ligne.
+   Le CPU et la RAM sont verts sous 65 %, orange de 65 à moins de 85 % et
+   rouges à partir de 85 %. Une valeur inconnue s’affiche en gris.
+
+   Clique sur « Réseau » ou « Informations » pour voir le système, le modèle,
+   le processeur, la mémoire, le disque système et les interfaces réseau.
+   « Vers la régie » indique l’interface choisie par la route du récepteur
+   pour l’adresse IP de régie.
+
+   La section « Débit réseau de la régie » affiche le trafic total de la
+   carte réseau sélectionnée. Sur chaque fiche, les tuiles « Réception »
+   et « Émission » affichent les débits en Mbit/s. Clique sur une tuile pour
+   ouvrir le diagnostic et choisir une autre interface.
+   Les mesures par écran nécessitent le lecteur 1.4.3.
+ « Tester la latence » déclenche une mesure
+   d’aller-retour HTTP entre le récepteur et le tableau de régie.
+
+   Pour mettre à jour la régie, ferme son tableau et remplace tableau.py,
+   tableau.html et commun.py dans son dossier d’installation. Garde ecrans.json,
+   puis relance le tableau. Depuis le dossier du nouveau kit, utilise
+   installer-pi.sh --mettre-a-jour sur le Pi ou installer-ubuntu.sh
+   --mettre-a-jour-client sur le portable Ubuntu déjà installé.
+   Ouvre une nouvelle session graphique ou redémarre le récepteur.
+
+8. ACTIONS DE GROUPE
+   Ouvre « Actions de groupe ». Les écrans associés sont cochés au départ.
+   Tu peux choisir seulement certains écrans, puis changer la source, couper
+   ou rétablir le son, arrêter ou reprendre la diffusion, régler le volume ou
+   la qualité. Le tableau enregistre uniquement le réglage choisi. Les écrans
+   hors ligne le récupèrent à leur prochaine connexion.
+   « Arrêter la diffusion » commande Stop et laisse le récepteur allumé.
+   « Changer la source NDI » affiche les sources signalées par les récepteurs
+   en ligne. Elles se mettent à jour pendant que la fenêtre est ouverte.
+   La liste indique combien de récepteurs sélectionnés et en ligne voient
+   chaque source. Tu peux aussi saisir le nom complet manuellement.
+   Redémarrer et éteindre ciblent les récepteurs en ligne. Le résultat indique
+   les récepteurs ignorés. Retirer désassocie les écrans, même hors ligne.
+
+9. MISES À JOUR DEPUIS LA RÉGIE
+   La version 1.1.1 corrige le format de la signature envoyée
+   aux clients OpenSSH 9.2. Pour corriger un échec de signature,
+   installe ce kit uniquement sur la régie, en conservant les clés,
+   puis relance le tableau et retente le push sur un seul écran.
+
+   Sur le PC de régie, garde ecrans.json et installe les fichiers du nouveau kit
+   dans le dossier où tu lances le tableau. Depuis ce dossier, crée la clé :
+
+     py -3 tableau.py --preparer-mises-a-jour       (Windows)
+     python3 tableau.py --preparer-mises-a-jour     (Linux)
+
+   Cette commande utilise ssh-keygen (client OpenSSH récent avec signatures -Y).
+   Copie uniquement regie-update.pub dans le dossier du kit sur les récepteurs.
+   Garde le dossier .soundlive-update sur la régie : il contient la clé privée.
+   Une nouvelle exécution de la commande réexporte la clé publique existante.
+
+   Une dernière installation locale équipe chaque récepteur avec le vérificateur
+   et la clé. Dans son dossier du kit, depuis le compte de la session graphique :
+
+     bash installer-pi.sh --mettre-a-jour
+     bash installer-ubuntu.sh --mettre-a-jour-client
+
+   Redémarre chaque récepteur ou rouvre sa session graphique pour activer le
+   lanceur. Sur les nouveaux écrans, place la clé publique dans le kit avant
+   de lancer la commande d’association habituelle.
+
+   Pour déployer une version, ferme le tableau, copie le nouveau kit complet
+   dans son dossier, puis relance-le. Garde ecrans.json, .soundlive-update
+   et .soundlive-acces. Le tableau affiche sa version en haut de page et la
+   version du lecteur sur chaque fiche, si le lecteur la communique.
+   Le bandeau de la régie affiche « Dernière version » en vert après
+   vérification du dépôt configuré dans « Versions publiées ». La fiche
+   du lecteur indique si celui-ci correspond au paquet de cette régie.
+
+   Pour tester le push, commence par un seul récepteur déjà équipé pour les
+   mises à jour signées. Laisse tourner son ancien client, puis clique sur
+   « Mettre à jour le lecteur » sur sa fiche et confirme. Le lecteur doit
+   revenir en ligne avec « v1.4.6 · Dernière version » en vert.
+   Si la fiche indique « Installation locale requise » et que le lecteur
+   utilise déjà lancer-client.py, vérifie la présence de ssh-keygen, copie
+   regie-update.pub dans ~/.local/share/soundlive-ecrans/ et rouvre la session.
+   Pour un lecteur sans lanceur, amorce la mise à jour distante avec l’ancien
+   kit et la clé publique via les instructions d’installation ci-dessus.
+   Installer directement le nouveau client en local le met déjà à jour.
+
+   Pour plusieurs écrans, utilise « Actions de groupe » puis
+   « Pousser la mise à jour client ». Le tableau signe le paquet à la demande
+   de chaque appareil. La fiche indique
+   l’attente, la confirmation, le refus ou l’expiration. Les appareils hors ligne
+   peuvent être sélectionnés lors d’un nouvel envoi à leur retour.
+   Le récepteur relance son client graphique avec la version reçue. Si la version
+   ne démarre pas correctement ou ne rejoint pas le tableau, le lanceur reprend
+   la précédente. L’envoi à distance porte sur le client Python, y compris les
+   diagnostics. Pour remplacer le lanceur, le binaire NDI ou les dépendances,
+   utilise l’installateur local correspondant.
+
+PILOTER LE TABLEAU DEPUIS UN AUTRE PC, UNE TABLETTE OU UN TÉLÉPHONE
+
+   Dans le lanceur Windows ou Ubuntu, coche « Activer l’accès distant » et
+   choisis l’interface sur le réseau des écrans, puis démarre la régie.
+   Sur la même IP, un champ vide conserve le mot de passe et le certificat.
+   Saisis un mot de passe pour le changer au démarrage suivant. Lors
+   d’une première activation ou d’un changement d’IP, le lanceur crée
+   un certificat et génère un mot de passe si le champ est vide. La
+   création du certificat utilise cryptography, déjà présent si tu as
+   activé l’accès HTTPS précédemment. Sinon, installe-le une fois avec
+   py -3 -m pip install cryptography
+
+   Quand l’accès distant est démarré, le lanceur affiche un QR code qui
+   ouvre l’URL HTTPS du tableau. Le QR contient uniquement cette URL.
+   La fenêtre du lanceur et le bouton « Accès distant » du tableau
+   listent les pages distantes authentifiées, avec leur IP, leur
+   navigateur et l’heure de leur dernière activité. Une page disparaît
+   après 20 secondes sans actualisation. Les onglets d’un même profil
+   de navigateur partagent la session. Le port HTTPS est TCP 8766.
+
+   La page de connexion demande le compte regie et le mot de passe choisi.
+   La session dure 30 minutes. Le tableau affiche un avertissement deux
+   minutes avant son expiration. « Prolonger la session » redonne 30 minutes.
+   « Me déconnecter » ouvre une confirmation. Après validation, le
+   navigateur ferme la session et revient à la page de connexion.
+
+   Dans le lanceur, sélectionne une session et clique sur « Déconnecter »
+   puis confirme pour couper son accès. Le navigateur peut rouvrir une session en
+   cliquant sur « Se reconnecter ». « Bloquer l’IP » refuse toutes les
+   connexions HTTPS de l’adresse choisie, même après un redémarrage.
+   Le navigateur affiche « Accès bloqué » lorsque la page est rechargée.
+   Utilise « Adresses bloquées » pour annuler un blocage. Les lecteurs
+   restent joignables par le protocole d’association sur TCP 8765.
+
+   Pour activer l’accès distant depuis la console, suis ces étapes.
+
+1. Sur le PC de régie, copie les fichiers du ZIP dans le dossier déjà installé.
+   Garde ecrans.json et le dossier .soundlive-update si tu utilises les mises
+   à jour des récepteurs. Ouvre une invite de commandes dans ce dossier.
+
+2. Installe la dépendance qui sert à créer le certificat, puis active le HTTPS.
+   Remplace 192.168.10.20 par l’IPv4 du PC de régie sur le réseau des écrans
+   (sur Windows, lance ipconfig et regarde la carte Ethernet de ce réseau).
+
+     py -3 -m pip install cryptography
+     py -3 tableau.py --activer-acces-distant 192.168.10.20
+
+   Sur une régie Ubuntu, utilise python3 à la place de py -3. Le paquet
+   python3-cryptography peut s’installer avec sudo apt install python3-cryptography.
+
+   Note le mot de passe affiché pour le compte regie. Ferme et relance
+   demarrer-windows.bat. Le port de commande est TCP 8766. Si le pare-feu
+   le bloque, autorise ce port sur le réseau privé de la régie.
+   Garde l’accès sur le réseau local de la prestation.
+
+3. Copie uniquement le fichier .soundlive-acces/autorite-soundlive.cer
+   créé sur la régie vers tes appareils de commande. Vérifie que ce fichier
+   vient bien de ta régie, puis installe-le une fois sur chaque appareil.
+
+   Windows : double-clique sur le fichier, clique sur « Installer un certificat »,
+   sélectionne « Utilisateur actuel » et le magasin « Autorités de certification
+   racines de confiance ».
+   iPhone ou iPad : ouvre le fichier sur l’appareil, installe le profil dans
+   Réglages, puis active la confiance dans Réglages > Général > Informations >
+   Réglages de confiance des certificats.
+   Android : recherche « Installer un certificat » dans les paramètres, puis
+   sélectionne « Certificat CA ». L’intitulé peut varier selon la marque.
+   Sur un autre système, importe le fichier dans les autorités de confiance
+   du système ou du navigateur utilisé.
+
+4. Relie l’appareil de commande au Wi-Fi des écrans, puis ouvre l’adresse
+   affichée sur la régie, par exemple https://192.168.10.20:8766. Identifie-toi
+   avec le compte regie. Les commandes, diagnostics et actions de groupe sont
+   disponibles dans le navigateur. Si la page ne répond pas, vérifie le port
+   dans le pare-feu et l’accès au LAN depuis ce Wi-Fi, notamment l’isolation
+   des clients du point d’accès.
+
+   Les récepteurs existants continuent à utiliser leur adresse habituelle en
+   HTTP. L’ouverture du tableau sur le PC de régie reste à l’adresse locale
+   habituelle. Aucun changement à faire sur les récepteurs.
+
+   Si l’IPv4 de la régie change, si le mot de passe est perdu ou si le
+   certificat arrive à expiration après un an, relance l’activation avec
+   l’IPv4 actuelle. Elle crée un nouveau mot de passe et un nouveau certificat.
+   Installe le nouveau certificat et retire l’ancien des appareils de commande.
+   Pour désactiver l’accès distant, exécute la commande suivante et relance
+   le tableau. Tu peux ensuite retirer le certificat des appareils.
+
+     py -3 tableau.py --desactiver-acces-distant
+
+ÉCRAN D’ATTENTE
+
+   L’écran affiche le nom du lecteur et son groupe, s’il en a un, sous
+   le nom. Un changement de groupe apparaît au prochain contact avec la régie.
+   L’état du rattachement figure sous l’état de la diffusion. En cas
+   d’indisponibilité de la régie, le lecteur conserve son association
+   locale. Si la régie refuse celle-ci, l’écran demande une réassociation.
+
+   Lorsqu’un flux est absent ou arrêté, l’écran affiche un QR code si l’accès
+   HTTPS est activé. Le code contient uniquement l’adresse HTTPS du tableau.
+   Le navigateur demande les identifiants habituels. Utilise le Wi-Fi des
+   écrans et un appareil sur lequel le certificat de la régie est installé.
+   Le récepteur mémorise ces informations après sa première connexion afin
+   de les afficher aussi lorsqu’il attend le retour de la régie.
+
+ORGANISER LES ÉCRANS
+
+   Les fiches sont compactes par défaut. Elles affichent le réseau, le CPU,
+   la RAM, la version du lecteur et le flux actif quand le lecteur le signale.
+   En attente, hors ligne ou avec un ancien lecteur, la fiche indique la
+   source configurée. Déplie « Commandes et réglages » pour agir. Le navigateur
+   mémorise les fiches ouvertes.
+
+   Ouvre « Organiser les écrans », sélectionne les fiches et crée un groupe,
+   choisis un groupe existant ou « Sans groupe ». Les groupes sont enregistrés
+   dans ecrans.json et visibles sur tous les navigateurs de la régie.
+
+   Après le push vers le lecteur 1.3.0 ou plus récent, l’écran d’attente affiche sa version.
+   Lorsqu’il joint la régie, il indique si elle propose une mise à jour.
+
+VERSIONS PUBLIÉES
+
+   Consulte README.md pour préparer un dépôt public GitHub et signer ses
+   releases. Pour mettre à jour la régie, arrête-la dans le lanceur, ouvre
+   « Versions publiées », indique le dépôt et importe la clé publique de
+   l’éditeur. Après installation, relance le lanceur et la régie, puis déploie
+   le nouveau client sur les récepteurs avec le push signé.
