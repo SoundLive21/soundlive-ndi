@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.9** et le client **1.4.7**.
+Ce kit contient la régie **1.4.10** et le client **1.4.7**.
 
 ## Installer et lancer la régie
 
@@ -225,13 +225,17 @@ remonter les mesures par écran.
 ### Afficher un aperçu NDI
 
 Ouvre **Aperçu des sources NDI** pour retrouver les flux signalés par les
-lecteurs en ligne. Clique sur **Capturer un aperçu** pour afficher une image
-du flux. Sur la fiche d’un écran en lecture, le même bouton capture le flux
-signalé en cours de lecture. **Actualiser l’aperçu** relance la capture.
+lecteurs en ligne. Le tableau rafraîchit les aperçus visibles de la galerie
+et des écrans en lecture, avec un délai d’au moins **20 secondes par flux**.
+Les captures automatiques se font l’une après l’autre. Elles se mettent en
+pause quand l’onglet passe en arrière-plan. L’option **Actualiser
+automatiquement les aperçus visibles** permet de désactiver ce mode.
+**Capturer un aperçu** et **Actualiser l’aperçu** restent disponibles.
 
 La régie demande une seule image à un lecteur à la fois pour un même flux et
-partage cette image entre les fiches concernées. La capture se fait à bande
-passante réduite, à la demande, sans lecture audio ni capture du bureau.
+partage cette image entre les fiches concernées. Pendant l’actualisation, la
+dernière image reste affichée avec son heure de capture. La capture se fait
+à bande passante réduite, sans lecture audio ni capture du bureau.
 Il faut au moins un lecteur **1.4.7** ou ultérieur en ligne qui détecte le flux.
 
 ## Mettre à jour les lecteurs depuis la régie
@@ -285,7 +289,7 @@ privée utilisée par la régie pour signer le push des lecteurs reste distincte
 ```bash
 ssh-keygen -t ed25519 -f /chemin/prive/soundlive-publication
 python3 publier-version.py --cle /chemin/prive/soundlive-publication
-gh release create v1.4.9 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.9' --generate-notes
+gh release create v1.4.10 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.10' --generate-notes
 ```
 
 Adapte le tag au numéro de `SOFTWARE_VERSION` dans `tableau.py`. La version

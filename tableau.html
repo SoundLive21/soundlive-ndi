@@ -109,6 +109,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .preview-section{margin:24px 0}
 .preview-section summary{cursor:pointer;font-weight:650;color:#ffd0dc}
 .preview-section[open] summary{margin-bottom:12px}
+.preview-auto{margin:0 0 12px;color:var(--sub)}
 .preview-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,205px),1fr));gap:12px}
 .preview-box{margin:0 0 14px;min-width:0;border:1px solid var(--edge);border-radius:12px;overflow:hidden;background:#100d12}
 .preview-box[hidden],.preview-box img[hidden]{display:none}
@@ -148,6 +149,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
   </section>
   <details class="preview-section" id="source-previews">
     <summary>Aperçu des sources NDI</summary>
+    <label class="check preview-auto"><input type="checkbox" id="preview-auto" checked> Actualiser automatiquement les aperçus visibles</label>
     <p class="small" id="sources-empty">Aucun flux détecté par un lecteur en ligne.</p>
     <div class="preview-grid" id="preview-grid"></div>
   </details>
@@ -358,6 +360,11 @@ const cards = new Map();
 const previewGrid = document.querySelector("#preview-grid");
 const previewCards = new Map();
 const previewStates = new Map();
+const previewAuto = document.querySelector("#preview-auto");
+const previewSection = document.querySelector("#source-previews");
+const previewInterval = Number("__PREVIEW_INTERVAL__") * 1000;
+let automaticCapture = false;
+try { previewAuto.checked = localStorage.getItem("soundlive-preview-auto") !== "off"; } catch {}
 const confirmation = document.querySelector("#confirm-action");
 const confirmationForm = select(confirmation, "form");
 const confirmTitle = select(confirmation, "#confirm-title");
@@ -499,7 +506,11 @@ async function call(path, data) {
     } else if (res.status === 401 && result.code === "remote_disconnected") {
       endRemoteSession("/connexion?etat=expiree");
     }
-    if (!res.ok) throw Error(result.error || "Erreur du serveur.");
+    if (!res.ok) {
+      const error = Error(result.error || "Erreur du serveur.");
+      error.status = res.status;
+      throw error;
+    }
     return result;
   } catch (error) {
     if (error.name === "AbortError") throw Error("Le tableau de régie ne répond pas.");
@@ -522,8 +533,9 @@ function createPreview(parent, title) {
 }
 
 function renderPreview(view) {
-  const result = previewStates.get(view.source);
-  const image = result?.state === "ready" ? result.image : "";
+  const state = previewStates.get(view.source);
+  const snapshot = state?.snapshot;
+  const image = snapshot?.image;
   if (image) {
     const url = "data:image/png;base64," + image;
     if (view.image.getAttribute("src") !== url) view.image.src = url;
@@ -532,10 +544,12 @@ function renderPreview(view) {
     view.image.removeAttribute("src");
   }
   view.image.hidden = !image;
-  view.button.disabled = !view.source || result?.state === "pending";
+  view.button.disabled = !view.source || Boolean(state?.pending);
   view.button.textContent = image ? "Actualiser l’aperçu" : "Capturer un aperçu";
-  const message = image ? "Image capturée à " + new Date(result.captured * 1000).toLocaleTimeString("fr-FR") :
-    result?.state === "pending" ? "Capture en cours…" : result?.error || "Image à la demande";
+  const timestamp = image ? "Image capturée à " + new Date(snapshot.captured * 1000).toLocaleTimeString("fr-FR") : "";
+  const progress = state?.pending ? (image ? "Actualisation…" : "Capture en cours…") : state?.error;
+  const message = [timestamp, progress].filter(Boolean).join(" · ") ||
+    (previewAuto.checked ? "En attente d’un aperçu…" : "Image à la demande");
   if (view.status.textContent !== message) view.status.textContent = message;
 }
 
@@ -545,27 +559,77 @@ function redrawSource(source) {
   for (const card of cards.values()) if (card.preview.source === source) renderPreview(card.preview);
 }
 
-async function requestSourcePreview(source) {
-  if (!source || previewStates.get(source)?.state === "pending") return;
-  const previous = previewStates.get(source)?.id;
-  previewStates.set(source, {state:"pending"});
+async function requestSourcePreview(source, automatic = false) {
+  if (!source || remoteSessionEnded || previewStates.get(source)?.pending) return;
+  const state = previewStates.get(source) || {};
+  state.pending = true;
+  state.error = "";
+  previewStates.set(source, state);
   redrawSource(source);
   try {
-    let result = await call("/api/preview", {source, previous});
+    let result = await call("/api/preview", {source, previous:state.snapshot?.id, automatic});
     const end = Date.now() + 18000;
     while (result.state === "pending" && Date.now() < end) {
       await new Promise(resolve => setTimeout(resolve, 950));
       result = await call("/api/preview?source=" + encodeURIComponent(source));
     }
-    if (result.state !== "ready" && result.state !== "error") {
-      result = {state:"error", error:"La capture a expiré. Réessaie si le flux est toujours détecté."};
+    if (result.state === "ready") {
+      state.snapshot = result;
+    } else {
+      throw Error(result.error || "La capture a expiré. Réessaie si le flux est toujours détecté.");
     }
-    previewStates.set(source, result);
+    state.nextAuto = Date.now() + previewInterval;
   } catch (error) {
-    previewStates.set(source, {state:"error", error:error.message});
+    state.error = error.message;
+    state.nextAuto = Date.now() + (error.status === 429 ? 4000 : 30000);
+  } finally {
+    state.pending = false;
+    redrawSource(source);
   }
-  redrawSource(source);
 }
+
+function previewVisible(view) {
+  if (!view.source) return false;
+  const rect = view.element.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 &&
+    rect.top < window.innerHeight && rect.left < window.innerWidth;
+}
+
+async function refreshVisiblePreviews() {
+  if (!previewAuto.checked || document.hidden || automaticCapture || remoteSessionEnded) return;
+  const visible = new Set();
+  if (previewSection.open) {
+    for (const view of previewCards.values()) if (previewVisible(view)) visible.add(view.source);
+  }
+  for (const card of cards.values()) if (previewVisible(card.preview)) visible.add(card.preview.source);
+  const now = Date.now();
+  let nextSource = "";
+  let oldest = now;
+  for (const source of visible) {
+    const state = previewStates.get(source);
+    const due = state?.nextAuto || 0;
+    if (!state?.pending && due <= oldest) {
+      nextSource = source;
+      oldest = due;
+    }
+  }
+  if (!nextSource) return;
+  automaticCapture = true;
+  try {
+    await requestSourcePreview(nextSource, true);
+  } finally {
+    automaticCapture = false;
+  }
+}
+
+previewAuto.addEventListener("change", () => {
+  try { localStorage.setItem("soundlive-preview-auto", previewAuto.checked ? "on" : "off"); } catch {}
+  for (const view of previewCards.values()) renderPreview(view);
+  for (const card of cards.values()) renderPreview(card.preview);
+  refreshVisiblePreviews();
+});
+previewSection.addEventListener("toggle", refreshVisiblePreviews);
+document.addEventListener("visibilitychange", refreshVisiblePreviews);
 
 function renderSourceGallery(rows) {
   const detected = new Set();
@@ -579,7 +643,7 @@ function renderSourceGallery(rows) {
     previewCards.delete(name);
   }
   for (const name of previewStates.keys()) {
-    if (!detected.has(name) && previewStates.get(name).state !== "pending") previewStates.delete(name);
+    if (!detected.has(name) && !previewStates.get(name).pending) previewStates.delete(name);
   }
   let next = previewGrid.firstElementChild;
   for (const name of [...detected].sort((a, b) => a.localeCompare(b, "fr"))) {
@@ -1503,6 +1567,7 @@ refreshRegieVersion();
 refreshTraffic();
 setInterval(refresh,2000);
 setInterval(refreshTraffic,2000);
+setInterval(refreshVisiblePreviews,2000);
 setInterval(refreshConnections,5000);
 setInterval(refreshRegieVersion,10000);
 </script>

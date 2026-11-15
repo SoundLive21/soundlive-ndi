@@ -3,7 +3,7 @@ SoundLive-NDI
 Auteur : DUVERNOY Matthieu & ChatGPT
 contact@soundlive.fr
 Société SoundLive
-Régie 1.4.9 · Lecteurs 1.4.7
+Régie 1.4.10 · Lecteurs 1.4.7
 
 1. SUR LE PC WINDOWS QUI DIFFUSE AVEC OBS
    Ferme l’ancien tableau et décompresse tout le ZIP dans le dossier de
@@ -376,11 +376,15 @@ ORGANISER LES ÉCRANS
 APERÇU DES SOURCES NDI
 
    Ouvre « Aperçu des sources NDI » dans le tableau pour retrouver les flux
-   détectés par les lecteurs en ligne. « Capturer un aperçu » affiche une
-   image du flux à la demande. Sur chaque fiche en lecture, le même bouton
-   cible le flux signalé en cours de lecture. « Actualiser l’aperçu » demande
-   une nouvelle image. La capture nécessite un lecteur à jour qui détecte
-   le flux. Elle se fait à bande passante réduite et sans lecture audio.
+   détectés par les lecteurs en ligne. Le tableau rafraîchit automatiquement
+   les aperçus visibles de la galerie et des écrans en lecture, avec un
+   intervalle d’au moins 20 secondes par flux. La dernière image reste
+   affichée avec son heure de capture pendant le rafraîchissement.
+   Les captures automatiques se mettent en pause si l’onglet est masqué.
+   L’option de la galerie permet de les désactiver. Les boutons de capture
+   manuelle restent disponibles. La capture nécessite un lecteur 1.4.7
+   ou ultérieur qui détecte le flux. Elle se fait à bande passante réduite
+   et sans lecture audio.
 
 VERSIONS PUBLIÉES
 

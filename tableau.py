@@ -29,12 +29,14 @@ from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.9"
+SOFTWARE_VERSION = "1.4.10"
+PREVIEW_AUTO_INTERVAL = 20
 DATA = ROOT / "ecrans.json"
 REMOTE_ACCESS = ROOT / ".soundlive-acces"
 PAGE = ((ROOT / "tableau.html").read_bytes()
         .replace(b"__SOFTWARE_VERSION__", SOFTWARE_VERSION.encode("ascii"))
-        .replace(b"__CLIENT_VERSION__", CLIENT_VERSION.encode("ascii")))
+        .replace(b"__CLIENT_VERSION__", CLIENT_VERSION.encode("ascii"))
+        .replace(b"__PREVIEW_INTERVAL__", str(PREVIEW_AUTO_INTERVAL).encode("ascii")))
 LOGIN_PAGE = (ROOT / "acces-refuse.html").read_text(encoding="utf-8")
 BLOCKED_MESSAGE = "Cette adresse IP est bloquée sur la régie. Contacte la régie pour demander le déblocage."
 LOGIN_NOTICES = {
@@ -56,7 +58,7 @@ UPDATE_DIGEST = digest(UPDATE_FILES)
 RECEIVER_PATHS = {"/api/enroll", "/api/poll", "/api/client-package", "/api/preview-result"}
 PREVIEWS = {}
 PREVIEW_WAIT = 16
-PREVIEW_FRESH = 20
+PREVIEW_FRESH = 40
 PREVIEW_CLIENT = (1, 4, 7)
 
 
@@ -84,22 +86,30 @@ def request_preview(data, now):
     existing = PREVIEWS.get(source)
     if not online:
         return 409, {"error": "Ce flux n’est plus détecté par les lecteurs."}
-    if existing and (existing["state"] != "ready" or existing["id"] != data.get("previous")):
-        return 200, preview_status(existing)
+    automatic = data.get("automatic") is True
+    if existing:
+        if existing["state"] != "ready":
+            return 200, preview_status(existing)
+        if automatic and now - existing["captured"] < PREVIEW_AUTO_INTERVAL:
+            return 200, preview_status(existing)
+        if not automatic and existing["id"] != data.get("previous"):
+            return 200, preview_status(existing)
     supported = [(key, report) for key, report in online
                  if release_number(report.get("client_release")) >= PREVIEW_CLIENT]
     if not supported:
         return 409, {"error": "Mets à jour un lecteur qui détecte ce flux pour afficher son aperçu."}
     busy = {job["reader"] for job in PREVIEWS.values() if job["state"] == "pending"}
     available = [(key, report) for key, report in supported if key not in busy]
-    if not available or len(busy) >= 4:
+    auto_busy = automatic and any(job["state"] == "pending" and job.get("automatic") for job in PREVIEWS.values())
+    if not available or len(busy) >= 4 or auto_busy:
         return 429, {"error": "Captures en cours. Réessaie dans quelques secondes."}
     device, _ = min(available, key=lambda item: item[1].get("active_source") != source)
-    if len(PREVIEWS) >= 24:
+    if existing is None and len(PREVIEWS) >= 24:
         expired_first = min((name for name in PREVIEWS if PREVIEWS[name]["state"] != "pending"),
                             key=lambda name: PREVIEWS[name]["until"])
         del PREVIEWS[expired_first]
-    job = dict(id=secrets.token_hex(12), reader=device, source=source, state="pending", until=now + PREVIEW_WAIT)
+    job = dict(id=secrets.token_hex(12), reader=device, source=source, state="pending",
+               automatic=automatic, until=now + PREVIEW_WAIT)
     PREVIEWS[source] = job
     return 200, preview_status(job)
 
