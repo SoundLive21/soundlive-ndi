@@ -20,6 +20,19 @@ import webbrowser
 from commun import APP_NAME, COPYRIGHT
 
 
+def relaunch(root):
+    if sys.platform != "win32":
+        subprocess.Popen([sys.executable, "-B", str(root / "regie-windows.py")], cwd=root)
+        return
+
+    for filename in ("SoundLive-NDI.exe", "SoundLive-Regie.exe"):
+        executable = root / filename
+        if executable.is_file():
+            subprocess.Popen([str(executable)], cwd=root)
+            return
+    raise FileNotFoundError("Le lanceur SoundLive-NDI.exe est introuvable dans le dossier de la régie.")
+
+
 def qr_bitmap(modules):
     scale = 4
     width = (len(modules) + 8) * scale
@@ -462,8 +475,11 @@ class Launcher:
                 if not ok:
                     outcome.set(value)
                 elif installing:
-                    messagebox.showinfo("Mise à jour installée",
-                        "Rouvre le lanceur, démarre la régie puis lance le push sur les lecteurs.", parent=form)
+                    try:
+                        relaunch(root)
+                    except OSError as error:
+                        messagebox.showwarning("Mise à jour installée",
+                            f"Le lanceur n’a pas pu redémarrer. Ouvre-le manuellement.\n\n{error}", parent=form)
                     self.window.destroy()
                 elif selected:
                     outcome.set(f"Version {selected[0]} disponible.")
@@ -491,7 +507,7 @@ class Launcher:
             if not selected or self.regie is not None:
                 return
             if not messagebox.askyesno("Installer la mise à jour",
-                    f"Installer la version {selected[0]} et fermer le lanceur ?", parent=form):
+                    f"Installer la version {selected[0]} et relancer le lanceur ?", parent=form):
                 return
             outcome.set("Téléchargement et vérification de la signature…")
             task(lambda: versions.install(root, selected, trusted), installing=True)

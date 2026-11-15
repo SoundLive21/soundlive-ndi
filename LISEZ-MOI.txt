@@ -3,7 +3,7 @@ SoundLive-NDI
 Auteur : DUVERNOY Matthieu & ChatGPT
 contact@soundlive.fr
 Société SoundLive
-Régie 1.4.10 · Lecteurs 1.4.7
+Régie 1.4.11 · Lecteurs 1.4.7
 
 1. SUR LE PC WINDOWS QUI DIFFUSE AVEC OBS
    Ferme l’ancien tableau et décompresse tout le ZIP dans le dossier de
@@ -61,8 +61,8 @@ RÉGIE SOUS UBUNTU DESKTOP
 3. PILOTER LA DIFFUSION
    Choisis dans « Sources NDI détectées » ou saisis le nom complet
    dans « Source NDI ». La liste des sources arrive après quelques
-   secondes. Le menu Qualité affiche High (720p) pour la source réglée
-   en 720p et Low (360p) pour l’aperçu NDI standard en 16:9. « Appliquer » enregistre la source,
+   secondes. Le menu Qualité propose High à la résolution de la source
+   et Low pour l’aperçu NDI. « Appliquer » enregistre la source,
    la qualité, le volume et l'état muet. Le changement relance FFplay, avec une
    courte coupure. Le volume ne change que celui du lecteur.
    « Stop » laisse le Pi en marche et affiche « Diffusion arrêtée ».
@@ -391,5 +391,7 @@ VERSIONS PUBLIÉES
    Consulte README.md pour préparer un dépôt public GitHub et signer ses
    releases. Pour mettre à jour la régie, arrête-la dans le lanceur, ouvre
    « Versions publiées », indique le dépôt et importe la clé publique de
-   l’éditeur. Après installation, relance le lanceur et la régie, puis déploie
-   le nouveau client sur les récepteurs avec le push signé.
+   l’éditeur. Dès la version 1.4.11, le lanceur se rouvre automatiquement
+   après une mise à jour. Si la mise à jour est lancée depuis une version
+   antérieure, rouvre le lanceur une fois. Clique ensuite sur « Démarrer
+   la régie » et déploie le nouveau client s’il est proposé.

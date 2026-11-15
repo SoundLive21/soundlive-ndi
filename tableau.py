@@ -29,7 +29,7 @@ from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.10"
+SOFTWARE_VERSION = "1.4.11"
 PREVIEW_AUTO_INTERVAL = 20
 DATA = ROOT / "ecrans.json"
 REMOTE_ACCESS = ROOT / ".soundlive-acces"

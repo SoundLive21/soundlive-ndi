@@ -2,6 +2,7 @@
 """Publie sur GitHub la version inscrite dans tableau.py."""
 
 import argparse
+from hashlib import sha256
 import io
 import json
 import os
@@ -12,6 +13,7 @@ import subprocess
 import sys
 import tarfile
 from tempfile import TemporaryDirectory
+from urllib.parse import urlencode
 
 
 def run(*args, capture=False, cwd=None):
@@ -37,12 +39,32 @@ def git_paths(*args):
     return set(filter(None, git(*args).split("\0")))
 
 
-def find_release(repo, tag):
-    # La liste authentifiée inclut aussi les brouillons laissés par une publication interrompue.
-    matches = run("gh", "api", "--hostname", "github.com", "--paginate",
-                  f"repos/{repo}/releases?per_page=100",
-                  "--jq", f".[] | select(.tag_name == {json.dumps(tag)})", capture=True)
-    return json.loads(matches) if matches else None
+def github_api(path, *args):
+    return json.loads(run("gh", "api", "--hostname", "github.com", path, *args, capture=True))
+
+
+def find_release(repo, tag, title, draft_id):
+    if draft_id:
+        release = github_api(f"repos/{repo}/releases/{draft_id}")
+        tag_name = release.get("tag_name") or ""
+        if tag_name != tag and not (release["draft"] and release["name"] == title
+                                    and (not tag_name or tag_name.startswith("untagged-"))):
+            raise ValueError(f"La Release {draft_id} ne correspond pas à {tag}.")
+        return release
+    expression = (
+        f".[] | select(.tag_name == {json.dumps(tag)} or "
+        f"(.draft and .name == {json.dumps(title)} and "
+        '((.tag_name // "") | . == "" or startswith("untagged-")))) | @json'
+    )
+    output = run("gh", "api", "--hostname", "github.com", "--paginate",
+                 f"repos/{repo}/releases?per_page=100", "--jq", expression, capture=True)
+    matches = [json.loads(line) for line in output.splitlines()]
+    exact = [release for release in matches if release.get("tag_name") == tag]
+    matches = exact or matches
+    if len(matches) > 1:
+        ids = ", ".join(str(release["id"]) for release in matches)
+        raise ValueError(f"Plusieurs Releases correspondent à {tag} ({ids}). Utilise --brouillon avec l’ID voulu.")
+    return matches[0] if matches else None
 
 
 def generate_assets(commit, key, folder):
@@ -70,31 +92,45 @@ def generate_assets(commit, key, folder):
 
 
 def publish_release(repo, tag, title, notes, release, assets, temporary):
+    endpoint = f"repos/{repo}/releases"
     if release is None:
-        run("gh", "release", "create", tag, "--repo", f"github.com/{repo}",
-            "--verify-tag", "--draft", "--title", title, "--notes", notes)
-        release = find_release(repo, tag)
-    if not release or not release["draft"]:
+        release = github_api(endpoint, "--method", "POST",
+                             "-f", f"tag_name={tag}", "-f", f"name={title}",
+                             "-f", f"body={notes}", "-F", "draft=true")
+    if not release["draft"]:
         raise ValueError(f"Impossible de reprendre le brouillon {tag}.")
-
-    existing = {asset["name"] for asset in release["assets"]}
-    missing = []
+    release_id = int(release["id"])
+    endpoint = f"{endpoint}/{release_id}"
+    upload_url = f"https://uploads.github.com/{endpoint}/assets"
+    existing = {asset["name"]: asset for asset in release["assets"]}
     for asset in assets:
-        if asset.name not in existing:
-            missing.append(str(asset))
+        remote_asset = existing.get(asset.name)
+        if remote_asset is None:
+            github_api(f"{upload_url}?{urlencode({'name': asset.name})}", "--method", "POST",
+                       "-H", "Content-Type: application/octet-stream", "--input", str(asset))
             continue
-        downloaded = temporary / asset.name
-        run("gh", "release", "download", tag, "--repo", f"github.com/{repo}",
-            "--pattern", asset.name, "--output", str(downloaded))
-        if downloaded.read_bytes() != asset.read_bytes():
+        expected = "sha256:" + sha256(asset.read_bytes()).hexdigest()
+        if remote_asset["state"] != "uploaded":
+            raise ValueError(f"{asset.name} est incomplet dans le brouillon {release_id}. Retire le fichier incomplet sur GitHub, puis relance.")
+        if remote_asset.get("digest"):
+            actual = remote_asset["digest"]
+        else:
+            downloaded = temporary / asset.name
+            with downloaded.open("wb") as file:
+                subprocess.run(["gh", "api", "--hostname", "github.com", "-H", "Accept: application/octet-stream",
+                                f"repos/{repo}/releases/assets/{int(remote_asset['id'])}"], stdout=file, check=True)
+            actual = "sha256:" + sha256(downloaded.read_bytes()).hexdigest()
+        if actual != expected:
             raise ValueError(f"{asset.name} diffère dans le brouillon {tag}. Vérifie ce fichier sur GitHub.")
-    if missing:
-        run("gh", "release", "upload", tag, *missing, "--repo", f"github.com/{repo}")
-    release = find_release(repo, tag)
-    if (not release or not release["draft"] or
-            not set(ASSET_NAMES) <= {asset["name"] for asset in release["assets"] if asset["state"] == "uploaded"}):
+    release = github_api(endpoint)
+    if not release["draft"] or not set(ASSET_NAMES) <= {
+            asset["name"] for asset in release["assets"] if asset["state"] == "uploaded"}:
         raise ValueError("Les quatre fichiers doivent être présents avant de publier la Release.")
-    run("gh", "release", "edit", tag, "--repo", f"github.com/{repo}", "--draft=false")
+    release = github_api(endpoint, "--method", "PATCH", "-f", f"tag_name={tag}", "-F", "draft=false",
+                         "-F", "prerelease=false")
+    if release["draft"] or release["tag_name"] != tag:
+        raise ValueError(f"GitHub n’a pas confirmé la publication de {tag}.")
+    print(release["html_url"])
 
 
 def main():
@@ -102,6 +138,7 @@ def main():
     cli.add_argument("--cle", type=Path, default=Path.home() / ".ssh" / "soundlive-publication",
                      help="clé privée de signature déjà utilisée pour les Releases")
     cli.add_argument("--notes", help="texte de la Release et du commit")
+    cli.add_argument("--brouillon", type=int, help="ID GitHub d’un brouillon à reprendre en cas d’ambiguïté")
     args = cli.parse_args()
     key = args.cle.expanduser().resolve()
 
@@ -128,7 +165,7 @@ def main():
     if github_repository(push_url).lower() != repo.lower():
         raise ValueError("Les adresses de lecture et d’envoi de origin visent des dépôts différents.")
     run("gh", "auth", "status", "--hostname", "github.com")
-    release = find_release(repo, tag)
+    release = find_release(repo, tag, title, args.brouillon)
     if release and not release["draft"]:
         print(f"{tag} est déjà publié. {release['html_url']}")
         return
@@ -144,20 +181,24 @@ def main():
     if git("diff", "--name-only", "--diff-filter=U"):
         raise ValueError("Résous les conflits Git avant de publier.")
     tracked = git_paths("ls-files", "-z")
-    eligible = sorted(name for name in SOURCE_FILES if name in tracked or (root / name).is_file())
-    if any((root / name).is_symlink() or (root / name).resolve() == key for name in eligible):
-        raise ValueError("Une clé de publication ou un lien symbolique figure parmi les fichiers à publier.")
-    run("git", "add", "-A", "--", *eligible)
-    changes = git("diff", "--cached", "--name-only")
     local_tag = git("tag", "--list", tag)
     remote_tags = dict(line.split("\t")[::-1] for line in git("ls-remote", "origin", ref, ref + "^{}").splitlines())
     remote_commit = remote_tags.get(ref + "^{}", remote_tags.get(ref))
     head = git("rev-parse", "HEAD")
     if local_tag and git("rev-parse", ref + "^{commit}") != head:
         raise ValueError(f"Le tag local {tag} pointe vers un autre commit.")
-    if (remote_commit and remote_commit != head) or ((local_tag or remote_commit or release) and changes):
+    if remote_commit and remote_commit != head:
+        raise ValueError(f"Le tag distant {tag} pointe vers un autre commit.")
+    resuming = bool(local_tag or remote_commit or release)
+    scope = PUBLICATION_FILES if resuming else SOURCE_FILES
+    eligible = sorted(name for name in scope if name in tracked or (root / name).is_file())
+    if any((root / name).is_symlink() or (root / name).resolve() == key for name in eligible):
+        raise ValueError("Une clé de publication ou un lien symbolique figure parmi les fichiers à publier.")
+    run("git", "add", "-A", "--", *eligible)
+    changes = git_paths("diff", "--cached", "--name-only", "-z")
+    if resuming and changes - {"publier-github.py"}:
         raise ValueError(f"Le tag ou le brouillon {tag} existe déjà pour un autre état des sources.")
-    if changes:
+    if changes and not resuming:
         run("git", "commit", "-m", notes)
         head = git("rev-parse", "HEAD")
 

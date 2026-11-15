@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.10** et le client **1.4.7**.
+Ce kit contient la régie **1.4.11** et le client **1.4.7**.
 
 ## Installer et lancer la régie
 
@@ -172,9 +172,10 @@ dans le tableau SoundLive-NDI. [NDI Screen Capture](https://docs.ndi.video/all/u
   [NDI Studio Monitor](https://docs.ndi.video/all/using-ndi/ndi-tools/ndi-tools-for-windows/studio-monitor)
 - Si l’image saccade, teste avec un seul écran, de préférence en Ethernet.
   Essaie d’abord le réglage 720p à 25 images/s sur l’émetteur puis, si
-  nécessaire, **Low (360p)** sur le lecteur. **High (720p)** correspond à
-  la qualité principale avec une source réglée en 720p. La résolution exacte
-  dépend du flux publié.
+  nécessaire, **Low · Aperçu NDI** sur le lecteur. **High · Résolution de la
+  source** reçoit le flux principal à la résolution émise. Pour proposer
+  plusieurs résolutions précises, publie des sources NDI séparées et
+  sélectionne la source voulue pour chaque écran ou groupe.
 
 ## Utiliser le tableau de régie
 
@@ -289,7 +290,7 @@ privée utilisée par la régie pour signer le push des lecteurs reste distincte
 ```bash
 ssh-keygen -t ed25519 -f /chemin/prive/soundlive-publication
 python3 publier-version.py --cle /chemin/prive/soundlive-publication
-gh release create v1.4.10 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.10' --generate-notes
+gh release create v1.4.11 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.11' --generate-notes
 ```
 
 Adapte le tag au numéro de `SOFTWARE_VERSION` dans `tableau.py`. La version
@@ -312,5 +313,8 @@ Arrête la régie dans le lanceur. Dans **Versions publiées**, saisis le dépô
 sous la forme `propriétaire/dépôt` et importe la clé publique de publication
 obtenue auprès de l’éditeur. Le lanceur vérifie aussi le dépôt mémorisé lors
 de son ouverture. Clique sur **Vérifier**, puis **Installer** si
-une version est proposée. Rouvre le lanceur et redémarre la régie. Le tableau
-permet ensuite d’envoyer le paquet client signé aux récepteurs.
+une version est proposée. Dès la version 1.4.11, le lanceur se rouvre
+automatiquement après l’installation d’une mise à jour. Si tu as lancé
+la mise à jour depuis une version antérieure, rouvre le lanceur une fois.
+Clique ensuite sur **Démarrer la régie**. Le tableau permet d’envoyer le
+paquet client signé aux récepteurs quand une version client est proposée.

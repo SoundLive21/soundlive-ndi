@@ -25,6 +25,7 @@ main{width:min(1120px,90vw);margin:55px auto 80px}h1{margin:0;font-size:clamp(2.
 article{border:1px solid var(--edge);border-radius:16px;background:var(--panel);padding:22px;min-width:0}
 .card-heading,.row{display:flex;gap:12px;align-items:center;justify-content:space-between}
 h2{margin:0;font-size:1.24rem;overflow-wrap:anywhere}.badge{flex:none;border-radius:20px;background:#382b36;color:#f5d1df;padding:5px 10px;font-size:.82rem}.badge.online{background:#20362a;color:var(--green)}
+.badge.stopped{background:#3d2918;color:#ffc078}
 .address{color:var(--sub);font-family:monospace;margin:8px 0 18px}.small{font-size:.88rem;color:var(--sub)}label[hidden]{display:none}label{display:grid;gap:6px;font-size:.88rem;color:#e1d6e2;margin:12px 0}
 input,select,button{font:inherit;border-radius:8px;border:1px solid var(--edge);color:inherit}input:not([type=checkbox]):not([type=range]),select{padding:10px;background:#100d12;width:100%}input[type=range]{accent-color:var(--red);width:100%}input[type=checkbox]{accent-color:var(--red)}
 button{padding:9px 13px;cursor:pointer;background:#2b222f;font-weight:600;white-space:nowrap}button.primary{background:#df3453;color:#fff;border-color:#df3453}button:disabled{opacity:.44;cursor:default}button:hover:not(:disabled){filter:brightness(1.18)}
@@ -236,7 +237,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       <span>Volume <output id="group-volume-value" for="group-volume-input">50 %</output></span>
       <input id="group-volume-input" name="volume" type="range" min="0" max="100" value="50" disabled>
     </label>
-    <label id="group-bandwidth" hidden>Qualité<select name="bandwidth" disabled><option value="0">High (720p)</option><option value="1">Low (360p)</option></select></label>
+    <label id="group-bandwidth" hidden>Qualité<select name="bandwidth" disabled><option value="0">High · Résolution de la source</option><option value="1">Low · Aperçu NDI</option></select></label>
     <p class="small" id="group-help"></p>
     <div class="actions"><button type="button" id="group-close">Fermer</button><button type="submit" class="primary" id="group-submit">Continuer</button></div>
   </form>
@@ -330,7 +331,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       <form class="config">
       <label>Sources NDI détectées<select class="detected-sources"></select></label>
       <label>Source NDI<input class="source" maxlength="256" required></label>
-      <label>Qualité<select class="bandwidth"><option value="0">High (720p)</option><option value="1">Low (360p)</option></select></label>
+      <label>Qualité<select class="bandwidth"><option value="0">High · Résolution de la source</option><option value="1">Low · Aperçu NDI</option></select></label>
       <label><span>Volume <output></output></span><input class="volume" type="range" min="0" max="100"></label>
       <label class="check"><input type="checkbox" class="muted"> Couper le son</label>
       <div class="actions"><button class="primary" type="submit">Appliquer</button><button class="toggle" type="button"></button><button class="reboot" type="button">Redémarrer</button><button class="poweroff" type="button">Éteindre</button></div>
@@ -1126,6 +1127,7 @@ function render(row) {
   select(el,"h2").textContent = row.name;
   ui.badge.textContent = row.online ? row.report.state : row.paired ? "Hors ligne" : "À associer";
   ui.badge.classList.toggle("online",row.online);
+  ui.badge.classList.toggle("stopped", row.online && row.report.state === "Arrêté");
   select(el, ".device-kind").textContent = deviceLabels[row.kind] || "";
   ui.address.textContent = row.report.ip || "";
   const currentVersion = row.update_availability === "current" && row.report.client_release;
