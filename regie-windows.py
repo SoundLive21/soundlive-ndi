@@ -72,11 +72,11 @@ class Launcher:
         panel.grid(sticky="nsew")
         panel.columnconfigure(0, weight=1)
         panel.rowconfigure(6, weight=1)
-        ttk.Label(panel, text=f"{APP_NAME} · Régie", font=("Segoe UI", 19, "bold")).grid(sticky="w")
-        ttk.Label(panel, textvariable=self.status).grid(sticky="w", pady=(2, 14))
+        ttk.Label(panel, text=f"{APP_NAME} · Régie", font=("Segoe UI", 19, "bold")).grid(row=0, sticky="w")
+        ttk.Label(panel, textvariable=self.status).grid(row=1, sticky="w", pady=(2, 14))
 
         setup = ttk.LabelFrame(panel, text="Accès distant HTTPS", padding=10)
-        setup.grid(sticky="ew")
+        setup.grid(row=2, sticky="ew")
         setup.columnconfigure(1, weight=1)
         self.enabled = ttk.Checkbutton(setup, text="Activer l’accès distant", variable=self.remote, command=self.controls)
         self.enabled.grid(row=0, columnspan=3, sticky="w")
@@ -97,7 +97,7 @@ class Launcher:
         self.generate.grid(row=4, column=1, sticky="w", pady=(8, 0))
 
         actions = ttk.Frame(panel)
-        actions.grid(sticky="ew", pady=12)
+        actions.grid(row=3, sticky="ew", pady=12)
         self.start_button = ttk.Button(actions, text="Démarrer la régie", command=self.start)
         self.stop_button = ttk.Button(actions, text="Arrêter la régie", command=self.stop)
         self.open_button = ttk.Button(actions, text="Ouvrir le tableau", command=self.open_dashboard)
@@ -106,18 +106,22 @@ class Launcher:
             button.pack(side="left", padx=(0, 8))
         self.release_button.pack(side="left")
         address = ttk.Frame(panel)
-        address.grid(sticky="ew", pady=(0, 10))
+        address.grid(row=4, sticky="ew", pady=(0, 10))
         ttk.Label(address, textvariable=self.remote_address).pack(side="left")
         self.copy_button = ttk.Button(address, text="Copier l’adresse", command=self.copy_address)
         self.copy_button.pack(side="right")
         self.certificate_button = ttk.Button(address, text="Dossier du certificat", command=self.open_certificate_folder)
         self.certificate_button.pack(side="right", padx=(0, 8))
-        self.qr = ttk.Label(panel, text="Scanner pour ouvrir le tableau · accès HTTPS", compound="left")
-        self.qr.grid(row=5, column=0, sticky="w", pady=(0, 10))
-        self.qr.grid_remove()
+        self.qr_panel = ttk.LabelFrame(panel, text="QR code · Gestion des écrans", padding=8)
+        self.qr_panel.grid(row=5, column=0, sticky="ew", pady=(0, 10))
+        self.qr_panel.grid_remove()
+        self.qr = ttk.Label(self.qr_panel)
+        self.qr.pack(side="left", padx=(0, 12))
+        ttk.Label(self.qr_panel, text="Scanne ce code depuis un appareil connecté au réseau de la régie.",
+                  wraplength=290).pack(side="left", fill="x", expand=True)
 
         connections = ttk.LabelFrame(panel, text="Connexions à distance", padding=10)
-        connections.grid(sticky="nsew")
+        connections.grid(row=6, sticky="nsew")
         connections.columnconfigure(0, weight=1)
         connections.rowconfigure(1, weight=1)
         ttk.Label(connections, textvariable=self.connection_status).grid(sticky="w", pady=(0, 6))
@@ -137,7 +141,7 @@ class Launcher:
         self.blocked_button = ttk.Button(moderation, text="Adresses bloquées", command=self.show_blocked)
         for button in (self.disconnect_button, self.block_button, self.blocked_button):
             button.pack(side="left", padx=(0, 8))
-        ttk.Label(panel, text=COPYRIGHT).grid(sticky="w", pady=(8, 0))
+        ttk.Label(panel, text=COPYRIGHT).grid(row=7, sticky="w", pady=(8, 0))
         self.list.bind("<<TreeviewSelect>>", lambda _event: self.moderation_controls())
         window.protocol("WM_DELETE_WINDOW", self.close)
         if not tableau.DATA.exists():
@@ -336,7 +340,7 @@ class Launcher:
                 self.regie = None
                 self.status.set("Régie arrêtée")
                 self.remote_address.set("—")
-                self.qr.grid_remove()
+                self.qr_panel.grid_remove()
             else:
                 self.status.set("La régie n’a pas démarré")
                 messagebox.showerror("Démarrage impossible", result[1], parent=self.window)
@@ -546,7 +550,7 @@ class Launcher:
     def show_qr(self, modules):
         self.qr_image = tk.PhotoImage(master=self.window, data=qr_bitmap(modules), format="PPM")
         self.qr.configure(image=self.qr_image)
-        self.qr.grid()
+        self.qr_panel.grid()
 
 
 def main():

@@ -3,7 +3,7 @@ SoundLive-NDI
 Auteur : DUVERNOY Matthieu & ChatGPT
 contact@soundlive.fr
 Société SoundLive
-Régie 1.4.13 · Lecteurs 1.4.7
+Régie 1.4.16 · Lecteurs 1.4.7
 
 1. SUR LE PC WINDOWS QUI DIFFUSE AVEC OBS
    Ferme l’ancien tableau et décompresse tout le ZIP dans le dossier de
@@ -369,13 +369,14 @@ ORGANISER LES ÉCRANS
    Ouvre « Organiser les écrans », sélectionne les fiches et crée un groupe,
    choisis un groupe existant ou « Sans groupe ». Les groupes sont enregistrés
    dans ecrans.json et visibles sur tous les navigateurs de la régie.
+   Chaque groupe s’affiche ouvert. Clique sur son titre pour le replier.
 
    Après le push vers le lecteur 1.3.0 ou plus récent, l’écran d’attente affiche sa version.
    Lorsqu’il joint la régie, il indique si elle propose une mise à jour.
 
 APERÇU DES SOURCES NDI
 
-   Ouvre « Aperçu des sources NDI » dans le tableau pour retrouver les flux
+   Ouvre « Aperçu des sources NDI disponibles » pour retrouver les flux
    détectés par les lecteurs en ligne. Le tableau rafraîchit automatiquement
    les aperçus visibles de la galerie et des écrans en lecture, avec un
    intervalle d’au moins 20 secondes par flux. La dernière image reste
@@ -400,7 +401,7 @@ VERSIONS PUBLIÉES
 
 CHOISIR LA RÉSOLUTION NDI
 
-   Les commandes de résolution sont temporairement masquées dans la
+   Les commandes de résolution sont temporairement masquées depuis la
    régie 1.4.13. La sélection des sources et la qualité High/Low restent
    accessibles. Voir README.md pour réactiver les commandes de résolution.
 

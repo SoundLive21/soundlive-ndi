@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.13** et le client **1.4.7**.
+Ce kit contient la régie **1.4.16** et le client **1.4.7**.
 
 ## Installer et lancer la régie
 
@@ -47,7 +47,8 @@ lanceur génère un mot de passe.
 Sur l’appareil de commande, installe l’autorité
 `.soundlive-acces/autorite-soundlive.cer` fournie par ta régie dans les
 certificats de confiance. Depuis le même réseau, ouvre l’adresse HTTPS
-affichée par le lanceur ou scanne son QR code. Connecte-toi avec le compte
+affichée par le lanceur ou scanne le code dans **QR code · Gestion des écrans**.
+Connecte-toi avec le compte
 `regie` et le mot de passe affiché ou choisi. Le QR contient uniquement
 l’URL du tableau sur le port TCP 8766. Le même QR apparaît sur les écrans
 d’attente après réception de la configuration.
@@ -152,7 +153,7 @@ un nom NDI distinct. [DistroAV](https://github.com/DistroAV/DistroAV)
 
 ### Diffuser le même programme en 360p, 720p, 1080p et 4K
 
-Dans la régie 1.4.13, les commandes de résolution sont temporairement
+Depuis la régie 1.4.13, les commandes de résolution sont temporairement
 masquées. Pour les retrouver après les essais, passe
 `RESOLUTION_CONTROLS_ENABLED` à `True` dans `tableau.py`, puis relance la régie.
 Le menu de source et la qualité High/Low restent disponibles.
@@ -256,8 +257,10 @@ bascule.
   ou arrêté, l’écran affiche son nom, sa version et l’état de mise à jour
   dès que cette information est connue.
 - **Groupes** — **Organiser les écrans** permet de créer des groupes pour
-  ranger les fiches. Le nom du groupe s’affiche sous le nom du lecteur sur
-  son écran d’attente dès que le lecteur reçoit la modification.
+  ranger les fiches. Chaque groupe, y compris **Sans groupe**, s’affiche
+  ouvert et peut être replié en cliquant sur son titre. Le nom du groupe
+  s’affiche sous le nom du lecteur sur son écran d’attente dès qu’il reçoit
+  la modification.
   **Actions de groupe** permet de sélectionner des
   écrans et de leur appliquer une commande, par exemple une source, le
   volume, le mode muet, l’arrêt de la diffusion ou le redémarrage.
@@ -291,7 +294,7 @@ remonter les mesures par écran.
 
 ### Afficher un aperçu NDI
 
-Ouvre **Aperçu des sources NDI** pour retrouver les flux signalés par les
+Ouvre **Aperçu des sources NDI disponibles** pour retrouver les flux signalés par les
 lecteurs en ligne. Le tableau rafraîchit les aperçus visibles de la galerie
 et des écrans en lecture, avec un délai d’au moins **20 secondes par flux**.
 Les captures automatiques se font l’une après l’autre. Elles se mettent en
@@ -356,7 +359,7 @@ privée utilisée par la régie pour signer le push des lecteurs reste distincte
 ```bash
 ssh-keygen -t ed25519 -f /chemin/prive/soundlive-publication
 python3 publier-version.py --cle /chemin/prive/soundlive-publication
-gh release create v1.4.13 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.13' --generate-notes
+gh release create v1.4.16 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.16' --generate-notes
 ```
 
 Adapte le tag au numéro de `SOFTWARE_VERSION` dans `tableau.py`. La version
