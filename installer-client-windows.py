@@ -4,6 +4,8 @@
 # Société SoundLive
 """Installation du récepteur Windows dans le profil de la session d’affichage."""
 import argparse
+from base64 import b64encode
+import ctypes
 import os
 from pathlib import Path
 import platform
@@ -14,6 +16,69 @@ import sys
 from mise_a_jour import FILES, PUBLIC_KEY
 
 ROOT = Path(__file__).resolve().parent
+
+
+def install_network_priority():
+    if not ctypes.windll.shell32.IsUserAnAdmin():
+        raise OSError("Ouvre un terminal en tant qu’administrateur pour activer la bascule Ethernet/Wi-Fi.")
+    monitor = r"""
+$ErrorActionPreference = 'Stop'
+while ($true) {
+    try {
+        $physical = Get-CimInstance -Namespace 'root/StandardCimv2' -ClassName 'MSFT_NetAdapter' |
+            Where-Object HardwareInterface
+        $wifi = @($physical | Where-Object InterfaceType -eq 71)
+        if ($wifi.Count) {
+            $wired = $false
+            foreach ($adapter in ($physical | Where-Object {
+                $_.InterfaceType -eq 6 -and $_.MediaConnectState -eq 1
+            })) {
+                $addresses = Get-NetIPAddress -InterfaceIndex $adapter.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                    Where-Object AddressState -eq 'Preferred'
+                if ($addresses | Where-Object { $_.IPAddress -notlike '169.254.*' }) {
+                    $wired = $true
+                    break
+                }
+            }
+            $changed = if ($wired) {
+                $wifi | Where-Object InterfaceAdminStatus -eq 1
+            } else {
+                $wifi | Where-Object InterfaceAdminStatus -eq 2
+            }
+            if ($changed) {
+                $indices = @($changed | ForEach-Object InterfaceIndex)
+                $targets = Get-NetAdapter -IncludeHidden | Where-Object { $_.ifIndex -in $indices }
+                if ($targets -and $wired) {
+                    $targets | Disable-NetAdapter -Confirm:$false
+                } elseif ($targets) {
+                    $targets | Enable-NetAdapter -Confirm:$false
+                }
+            }
+        }
+    } catch {
+        Write-Warning $_.Exception.Message
+    }
+    Start-Sleep -Seconds 3
+}
+"""
+    encoded = b64encode(monitor.encode("utf-16le")).decode("ascii")
+    register = rf"""
+$ErrorActionPreference = 'Stop'
+$name = 'SoundLive-NDI Network'
+$existing = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+if ($existing -and $existing.State -eq 'Running') {{ Stop-ScheduledTask -TaskName $name }}
+$action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument '-NoProfile -NonInteractive -EncodedCommand {encoded}'
+$trigger = New-ScheduledTaskTrigger -AtStartup
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew
+Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Settings $settings -User 'SYSTEM' -RunLevel Highest -Force | Out-Null
+Start-ScheduledTask -TaskName $name
+"""
+    command = b64encode(register.encode("utf-16le")).decode("ascii")
+    # Read the registration script from standard input to stay below command-line limits.
+    runner = "& ([ScriptBlock]::Create([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd()))))"
+    subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", runner],
+                   input=command, text=True, check=True, timeout=30)
+    print("Bascule Ethernet/Wi-Fi active.")
 
 
 def locate_dll(name, runtime=None):
@@ -31,10 +96,16 @@ def main():
     cli.add_argument("serveur", nargs="?")
     cli.add_argument("code", nargs="?")
     cli.add_argument("--mettre-a-jour", action="store_true")
+    cli.add_argument("--reseau-auto", action="store_true")
     cli.add_argument("--lecteur", type=Path, default=ROOT / "lecteur-ndi-windows.exe")
     args = cli.parse_args()
     if sys.platform != "win32" or platform.machine().lower() not in ("amd64", "x86_64"):
         cli.error("L’installateur nécessite Windows x64.")
+    if args.reseau_auto:
+        if args.serveur or args.code or args.mettre_a_jour:
+            cli.error("Utilise --reseau-auto seul.")
+        install_network_priority()
+        return
     if not args.mettre_a_jour and not (args.serveur and args.code):
         cli.error("Indique l’adresse et le code affichés par le tableau.")
     if args.mettre_a_jour and args.code:

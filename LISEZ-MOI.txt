@@ -3,7 +3,7 @@ SoundLive-NDI
 Auteur : DUVERNOY Matthieu & ChatGPT
 contact@soundlive.fr
 Société SoundLive
-Régie 1.4.11 · Lecteurs 1.4.7
+Régie 1.4.12 · Lecteurs 1.4.7
 
 1. SUR LE PC WINDOWS QUI DIFFUSE AVEC OBS
    Ferme l’ancien tableau et décompresse tout le ZIP dans le dossier de
@@ -389,9 +389,31 @@ APERÇU DES SOURCES NDI
 VERSIONS PUBLIÉES
 
    Consulte README.md pour préparer un dépôt public GitHub et signer ses
-   releases. Pour mettre à jour la régie, arrête-la dans le lanceur, ouvre
+   releases. Le lanceur vérifie le dépôt mémorisé à l’ouverture puis
+   toutes les cinq minutes, même pendant une diffusion. Pour mettre à
+   jour la régie, arrête-la dans le lanceur, ouvre
    « Versions publiées », indique le dépôt et importe la clé publique de
    l’éditeur. Dès la version 1.4.11, le lanceur se rouvre automatiquement
    après une mise à jour. Si la mise à jour est lancée depuis une version
    antérieure, rouvre le lanceur une fois. Clique ensuite sur « Démarrer
    la régie » et déploie le nouveau client s’il est proposé.
+
+CHOISIR LA RÉSOLUTION NDI
+
+   Consulte README.md pour préparer les quatre sorties Dedicated Output
+   OBS avec les suffixes [360p], [720p], [1080p] et [4K].
+   Dans les commandes de chaque écran, enregistre la résolution maximale
+   tenue pendant un essai. Le tableau active les résolutions détectées
+   et validées pour cet écran. Pour une action de groupe, la même source
+   doit être détectée et autorisée pour tous les lecteurs sélectionnés.
+
+PRIORITÉ ETHERNET
+
+   Enregistre le Wi-Fi en connexion automatique avant la configuration.
+   Sur Pi et Ubuntu avec NetworkManager, lance depuis le kit :
+     bash installer-client.sh --reseau-auto
+   Sous Windows, ouvre une invite de commandes en administrateur :
+     installer-client.cmd --reseau-auto
+   Le lecteur coupe le Wi-Fi quand l’Ethernet dispose d’un lien et d’une
+   IPv4 utilisable. Dès que l’Ethernet est débranché, le Wi-Fi redevient
+   disponible pour rejoindre le réseau enregistré.

@@ -5,6 +5,72 @@
 # Société SoundLive
 set -euo pipefail
 base=$(cd -- "$(dirname -- "$0")" && pwd)
+if [[ ${1:-} == --reseau-auto && $# -eq 1 ]]; then
+    if [[ ! -x /usr/bin/nmcli ]] || ! systemctl is-active --quiet NetworkManager.service; then
+        echo "La bascule Wi-Fi nécessite NetworkManager actif sur ce lecteur."
+        exit 1
+    fi
+    temporary=$(mktemp -d)
+    trap 'rm -rf -- "$temporary"' EXIT
+    cat > "$temporary/soundlive-ndi-network" <<'NETWORK'
+#!/bin/bash
+set -eu
+ethernet_ready() {
+    local device name kind
+    while IFS=: read -r name kind; do
+        [[ $kind == ethernet ]] || continue
+        device="/sys/class/net/$name"
+        [[ -e "$device/device" && $(cat "$device/carrier" 2>/dev/null) == 1 ]] || continue
+        if ip -4 -o address show dev "$name" scope global | grep -q .; then
+            return 0
+        fi
+    done <<< "$devices"
+    return 1
+}
+devices=$(LC_ALL=C /usr/bin/nmcli -t -e no -f DEVICE,TYPE device status)
+if ! grep -q ':wifi$' <<< "$devices"; then
+    exit 0
+fi
+radio=$(LC_ALL=C /usr/bin/nmcli radio wifi)
+if ethernet_ready; then
+    if [[ $radio == enabled ]]; then
+        /usr/bin/nmcli radio wifi off
+    fi
+elif [[ $radio == disabled ]]; then
+    /usr/bin/nmcli radio wifi on
+fi
+NETWORK
+    cat > "$temporary/soundlive-ndi-network.service" <<'SERVICE'
+[Unit]
+Description=Priorité au réseau Ethernet du lecteur SoundLive-NDI
+After=NetworkManager.service
+Requisite=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/soundlive-ndi-network
+TimeoutStartSec=6
+SERVICE
+    cat > "$temporary/soundlive-ndi-network.timer" <<'TIMER'
+[Unit]
+Description=Vérification de la connexion Ethernet du lecteur SoundLive-NDI
+
+[Timer]
+OnBootSec=2s
+OnUnitInactiveSec=3s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
+TIMER
+    sudo install -o root -g root -m 0755 "$temporary/soundlive-ndi-network" /usr/local/sbin/
+    sudo install -o root -g root -m 0644 "$temporary/"*.service "$temporary/"*.timer /etc/systemd/system/
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now soundlive-ndi-network.timer
+    sudo systemctl start soundlive-ndi-network.service
+    echo "Bascule Ethernet/Wi-Fi active."
+    exit 0
+fi
 kind=
 if [[ ${1:-} == --plateforme ]]; then
     if [[ $# -lt 2 ]]; then

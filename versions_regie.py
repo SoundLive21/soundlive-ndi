@@ -92,6 +92,7 @@ class PublicationStatus:
         self.repo = None
         self.result = {"state": "unconfigured"}
         self.next_check = 0
+        self.generation = 0
 
     def read(self):
         try:
@@ -110,20 +111,36 @@ class PublicationStatus:
                 self.result = {"state": "checking"}
                 self.next_check = 0
             if monotonic() >= self.next_check:
-                self.next_check = monotonic() + 300
-                Thread(target=self.check, args=(repo,), daemon=True).start()
+                generation = self.begin_check(repo)
+                Thread(target=self.check, args=(repo, generation), daemon=True).start()
             return self.result
 
-    def check(self, repo):
+    def begin_check(self, repo):
+        self.repo = repo
+        self.generation += 1
+        self.next_check = monotonic() + 300
+        return self.generation
+
+    def check(self, repo, generation, *, manual=False):
         try:
             release = latest(repo, self.installed)
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
-            result = {"state": "unavailable"}
-        else:
-            result = {"state": "available", "version": release[0]} if release else {"state": "current"}
+            with self.lock:
+                if self.repo == repo and self.generation == generation:
+                    self.result = {"state": "unavailable"}
+            if manual:
+                raise
+            return None
         with self.lock:
-            if self.repo == repo:
-                self.result = result
+            if self.repo == repo and self.generation == generation:
+                self.result = {"state": "available", "version": release[0]} if release else {"state": "current"}
+        return release
+
+    def verify(self, repo):
+        with self.lock:
+            generation = self.begin_check(repo)
+            self.result = {"state": "checking"}
+        return self.check(repo, generation, manual=True)
 
 
 def verify_release(public, archive, signature, archive_name=ARCHIVE):

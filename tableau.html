@@ -218,6 +218,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
     </fieldset>
     <label>Action<select name="operation">
       <option value="source">Changer la source NDI</option>
+      <option value="resolution">Choisir une résolution NDI</option>
       <option value="mute">Couper le son</option>
       <option value="unmute">Rétablir le son</option>
       <option value="stop">Arrêter la diffusion</option>
@@ -232,6 +233,10 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
     <div id="group-source">
       <label>Sources NDI détectées<select id="group-sources"></select></label>
       <label>Nom complet de la source NDI<input name="source" maxlength="256"></label>
+    </div>
+    <div id="group-resolution" hidden>
+      <label>Résolution du flux<select class="resolution"></select></label>
+      <label>Source commune<select class="resolution-source"></select></label>
     </div>
     <label id="group-volume" hidden>
       <span>Volume <output id="group-volume-value" for="group-volume-input">50 %</output></span>
@@ -329,6 +334,9 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       <summary>Commandes et réglages</summary>
       <section class="pending"></section>
       <form class="config">
+      <label>Résolution maximale validée<select class="resolution-limit"></select></label>
+      <p class="small resolution-help">Choisis la résolution la plus élevée testée sur ce lecteur.</p>
+      <label>Résolution du flux<select class="resolution"></select></label>
       <label>Sources NDI détectées<select class="detected-sources"></select></label>
       <label>Source NDI<input class="source" maxlength="256" required></label>
       <label>Qualité<select class="bandwidth"><option value="0">High · Résolution de la source</option><option value="1">Low · Aperçu NDI</option></select></label>
@@ -1016,6 +1024,26 @@ testButton.onclick = action(() => {
   });
 });
 
+const resolutions = ["360p", "720p", "1080p", "4K"];
+function resolutionOptions(element, available, selected) {
+  const values = resolutions.map(value => {
+    const option = new Option(value + (available[value]?.length ? "" : " · Indisponible"), value);
+    option.disabled = !available[value]?.length;
+    return option;
+  });
+  const signature = JSON.stringify(values.map(option => option.disabled));
+  if (element.dataset.choices !== signature) {
+    element.replaceChildren(new Option("Choisir une résolution", ""), ...values);
+    element.dataset.choices = signature;
+  }
+  element.value = available[selected]?.length ? selected : "";
+}
+function commonResolutions(rows) {
+  return Object.fromEntries(resolutions.map(value => {
+    const first = rows[0]?.resolution_sources?.[value] || [];
+    return [value, first.filter(source => rows.every(row => row?.resolution_sources?.[value]?.includes(source)))];
+  }));
+}
 function cardFor(id) {
   if (cards.has(id)) return cards.get(id);
   const el = document.querySelector("#card").content.firstElementChild.cloneNode(true);
@@ -1025,7 +1053,10 @@ function cardFor(id) {
                   "screen-traffic","rate-rx","rate-tx","traffic-interface-label"];
   const ui = Object.fromEntries(fields.map(key => [key, select(el, "."+key)]));
   const list = select(el, ".detected-sources");
-  const card = {el, ui, form, list, dirty:false};
+  const resolution = select(el, ".resolution");
+  const limit = select(el, ".resolution-limit");
+  limit.replaceChildren(new Option("À valider après essai", ""), ...resolutions.map(value => new Option(value, value)));
+  const card = {el, ui, form, list, resolution, limit, dirty:false};
   card.preview = createPreview(select(el, ".screen-preview"), "Aperçu du flux en cours");
   const controls = select(el, "details");
   try { controls.open = localStorage.getItem("soundlive-controls-" + id) === "open"; }
@@ -1039,7 +1070,39 @@ function cardFor(id) {
     ui.source.value = list.value;
     card.dirty = true;
   });
+  resolution.addEventListener("change", () => {
+    card.resolutionChoice = resolution.value;
+    const candidates = card.data.resolution_sources[resolution.value] || [];
+    if (candidates.length === 1) {
+      ui.source.value = candidates[0];
+    } else if (candidates.length && !candidates.includes(ui.source.value)) {
+      ui.source.value = "";
+    }
+    if (candidates.length) ui.bandwidth.value = "0";
+    card.dirty = true;
+    syncSourceChoice(card);
+  });
+  limit.addEventListener("input", event => event.stopPropagation());
+  limit.onchange = action(() => {
+    const value = limit.value || null;
+    limit.value = card.data.resolution_limit || "";
+    showAction({
+      title:"Modifier la résolution maximale de " + card.data.name,
+      detail:value ? "Confirme " + value + " si le lecteur l’a tenue en lecture sur ce réseau." :
+        "Désactiver les choix de résolution jusqu’à la prochaine validation.",
+      label:"Enregistrer", successTitle:"Résolution maximale enregistrée",
+      async perform() {
+        await call("/api/resolution-limit", {id, limit:value});
+        await refresh(true);
+        return card.data.name;
+      }
+    });
+  });
   ui.source.addEventListener("input", () => syncSourceChoice(card));
+  ui.bandwidth.addEventListener("change", () => {
+    if (ui.bandwidth.value === "1") card.resolutionChoice = "";
+    syncSourceChoice(card);
+  });
   form.addEventListener("input", () => {
     card.dirty = true;
     select(el,"output").value = ui.volume.value + " %";
@@ -1049,6 +1112,7 @@ function cardFor(id) {
                       muted:ui.muted.checked, enabled:card.data.options.enabled};
     const version = card.editVersion;
     const quality = ui.bandwidth.selectedOptions[0].textContent;
+    const requested = card.resolutionChoice || undefined;
     const volume = settings.muted ? "Son coupé" : "Volume " + settings.volume + " %";
     showAction({
       title:"Appliquer les réglages à " + card.data.name,
@@ -1056,8 +1120,9 @@ function cardFor(id) {
       label:"Appliquer",
       successTitle:"Réglages enregistrés",
       async perform() {
-        await call("/api/update", {id, version, options:settings});
+        await call("/api/update", {id, version, options:settings, resolution:requested});
         card.dirty = false;
+        card.resolutionChoice = "";
         card.editVersion = version + 1;
         await refresh(true);
         return "Le récepteur « " + card.data.name + " » appliquera les réglages au prochain échange avec la régie.";
@@ -1116,13 +1181,40 @@ function cardFor(id) {
   cards.set(id,card);
   return card;
 }
-function syncSourceChoice({ui, list}) {
+function syncSourceChoice(card) {
+  const {data:row, ui, list, resolution} = card;
+  const available = row.resolution_sources || {};
+  const tagged = row.source_resolutions || {};
+  const activeResolution = Object.hasOwn(tagged, ui.source.value) ? tagged[ui.source.value] : "";
+  if (ui.source.value && activeResolution !== card.resolutionChoice) card.resolutionChoice = "";
+  const filter = card.resolutionChoice;
+  resolutionOptions(resolution, available, filter || (ui.bandwidth.value === "0" ? activeResolution : ""));
+  const sources = row.online ? [...new Set(row.report.sources || [])] : [];
+  const items = sources.filter(source => !filter || tagged[source] === filter).map(source =>
+    [source, Object.hasOwn(tagged, source) && !available[tagged[source]]?.includes(source)]);
+  const signature = JSON.stringify([row.online, items]);
+  if (signature !== card.sources) {
+    const hint = new Option(items.length ? "Choisir une source" :
+      row.online ? "Aucune source détectée" : "Récepteur hors ligne", "");
+    hint.disabled = true;
+    list.replaceChildren(hint, ...items.map(([source, disabled]) => {
+      const option = new Option(source + (disabled ? " · Non validée pour cet écran" : ""), source);
+      option.disabled = disabled;
+      return option;
+    }));
+    list.disabled = !items.length;
+    card.sources = signature;
+  }
   list.value = Array.from(list.options).some(option => option.value === ui.source.value) ?
     ui.source.value : "";
+  const changed = ui.source.value !== row.options.source || ui.bandwidth.value !== row.options.bandwidth;
+  ui.source.setCustomValidity(activeResolution && (changed || filter)
+    && !available[activeResolution]?.includes(ui.source.value)
+    ? "Cette source n’est pas détectée ou sa résolution n’est pas validée sur cet écran." : "");
 }
 function render(row) {
   const card = cardFor(row.id);
-  const {el, ui, form, list} = card;
+  const {el, ui, form} = card;
   card.data = row;
   select(el,"h2").textContent = row.name;
   ui.badge.textContent = row.online ? row.report.state : row.paired ? "Hors ligne" : "À associer";
@@ -1168,23 +1260,7 @@ function render(row) {
     renderPairing(card);
     return;
   }
-  const sources = row.report.sources || [];
-  const signature = JSON.stringify([row.online, sources]);
-  if (signature !== card.sources) {
-    const hint = document.createElement("option");
-    hint.value = "";
-    hint.disabled = true;
-    hint.textContent = sources.length ? "Choisir une source" :
-      row.online ? "Aucune source détectée" : "Récepteur hors ligne";
-    list.replaceChildren(hint, ...sources.map(source => {
-      const option = document.createElement("option");
-      option.value = source;
-      option.textContent = source;
-      return option;
-    }));
-    list.disabled = !sources.length;
-    card.sources = signature;
-  }
+  card.limit.value = row.resolution_limit || "";
   if (!card.dirty && !form.contains(document.activeElement)) {
     for (const field of ["source","bandwidth","volume"]) ui[field].value = row.options[field];
     ui.muted.checked = row.options.muted;
@@ -1255,7 +1331,7 @@ async function refreshScreens() {
     renderSourceGallery(rows);
     organizerButton.disabled = !rows.length;
     groupOpen.disabled = !rows.some(row => row.paired);
-    if (group.open) renderGroupSources();
+    if (group.open) groupFields();
     if (diagnostics.open) {
       const inspected = cards.get(inspectedId);
       if (inspected) renderDiagnostics(inspected);
@@ -1353,6 +1429,7 @@ const groupOperation = select(group, 'select[name="operation"]');
 const groupOpen = document.querySelector("#open-group");
 const groupActions = {
   source:["Changer la source", "source"], mute:["Couper le son", "muted", true],
+  resolution:["Changer la résolution NDI"],
   unmute:["Rétablir le son", "muted", false], stop:["Arrêter la diffusion", "enabled", false],
   play:["Reprendre la diffusion", "enabled", true], volume:["Régler le volume", "volume"],
   bandwidth:["Régler la qualité NDI", "bandwidth"], update:["Pousser la mise à jour"],
@@ -1367,6 +1444,8 @@ const groupDeviceActions = {
 };
 const groupSources = select(group, "#group-sources");
 const groupSourceInput = groupForm.elements.namedItem("source");
+const groupResolution = select(group, "#group-resolution .resolution");
+const groupResolutionSource = select(group, "#group-resolution .resolution-source");
 let groupSourcesSignature;
 function renderGroupSources() {
   const counts = new Map();
@@ -1379,25 +1458,33 @@ function renderGroupSources() {
       counts.set(source, count + Number(selected.has(row.id)));
     }
   }
-  const items = Array.from(counts).sort(([a], [b]) => a.localeCompare(b, "fr"));
+  const selectedRows = groupSelection().map(id => cards.get(id)?.data);
+  const common = Object.values(commonResolutions(selectedRows)).flat();
+  const tagged = new Set(online.flatMap(row => Object.keys(row.source_resolutions || {})));
+  const items = Array.from(counts, ([source, count]) => [source, count, tagged.has(source) && !common.includes(source)])
+    .sort(([a], [b]) => a.localeCompare(b, "fr"));
   const signature = JSON.stringify([selectedOnline, items]);
   if (signature !== groupSourcesSignature) {
     groupSourcesSignature = signature;
     const hint = document.createElement("option");
     hint.value = "";
     hint.textContent = items.length ? "Choisir une source détectée" : "Aucune source NDI détectée";
-    groupSources.replaceChildren(hint, ...items.map(([source, count]) => {
+    groupSources.replaceChildren(hint, ...items.map(([source, count, disabled]) => {
       const option = document.createElement("option");
       option.value = source;
       option.textContent = selectedOnline ? source + " · " + count + "/" + selectedOnline + " sélectionné(s) en ligne" : source;
+      option.disabled = disabled;
       return option;
     }));
   }
   groupSources.value = counts.has(groupSourceInput.value) ? groupSourceInput.value : "";
   groupSources.disabled = groupOperation.value !== "source" || !items.length;
+  groupSourceInput.setCustomValidity(tagged.has(groupSourceInput.value) && !common.includes(groupSourceInput.value)
+    ? "La source doit être détectée et sa résolution validée sur tous les lecteurs sélectionnés." : "");
 }
 groupSources.onchange = () => {
   if (groupSources.value) groupSourceInput.value = groupSources.value;
+  renderGroupSources();
 };
 groupSourceInput.oninput = renderGroupSources;
 const updateStates = {
@@ -1430,15 +1517,32 @@ function groupFields() {
     field.required = operation === name;
   }
   const count = groupSelection().length;
+  const byResolution = operation === "resolution";
+  select(group, "#group-resolution").hidden = !byResolution;
+  const common = byResolution ? commonResolutions(groupSelection().map(id => cards.get(id)?.data)) : {};
+  resolutionOptions(groupResolution, common, groupResolution.value);
+  const candidates = common[groupResolution.value] || [];
+  const signature = JSON.stringify(candidates);
+  if (signature !== groupResolutionSource.dataset.choices) {
+    const previous = groupResolutionSource.value;
+    groupResolutionSource.replaceChildren(new Option("Choisir une source commune", ""),
+      ...candidates.map(source => new Option(source, source)));
+    groupResolutionSource.value = candidates.length === 1 ? candidates[0] :
+      candidates.includes(previous) ? previous : "";
+    groupResolutionSource.dataset.choices = signature;
+  }
+  groupResolutionSource.disabled = !byResolution || !candidates.length;
   const help = groupDeviceActions[operation]?.detail || (operation === "update" ?
     "Sélectionne des récepteurs en ligne équipés de la clé de régie. Le client se relancera après vérification du paquet." :
+    byResolution ? "La source doit être détectée et la résolution validée sur tous les écrans sélectionnés." :
     "Les écrans hors ligne recevront ce réglage à leur prochaine connexion.");
   select(group, "#group-help").textContent = count + " sélectionné(s) · " + help;
-  groupSubmit.disabled = count === 0;
+  groupSubmit.disabled = count === 0 || (byResolution && !groupResolutionSource.value);
   renderGroupSources();
 }
 groupOpen.onclick = () => {
   groupForm.reset();
+  groupResolutionSource.dataset.choices = "";
   renderGroupVolume();
   const rows = Array.from(cards.values(), card => card.data).filter(row => row.paired);
   groupScreens.replaceChildren(...rows.map(row => {
@@ -1469,6 +1573,10 @@ groupForm.onsubmit = action(() => {
   const form = new FormData(groupForm);
   const operation = form.get("operation");
   const deviceAction = groupDeviceActions[operation];
+  const byResolution = operation === "resolution";
+  const resolution = byResolution ? groupResolution.value : undefined;
+  const resolutionSource = byResolution ? groupResolutionSource.value : undefined;
+  if (byResolution && (!resolution || !resolutionSource)) return;
   const summary = ids.length + " écran(s) · " + ids.map(id => cards.get(id)?.data.name || id).join(", ");
   if (deviceAction) {
     showAction({
@@ -1491,6 +1599,7 @@ groupForm.onsubmit = action(() => {
   const raw = field && preset === undefined ? form.get(field) : null;
   const value = preset ?? (field === "volume" ? Number(raw) : raw);
   let detail = summary;
+  if (byResolution) detail += "\n" + resolutionSource;
   if (raw !== null) detail += "\n" + (field === "bandwidth" ? groupForm.elements.namedItem(field).selectedOptions[0].textContent :
     field === "volume" ? value + " %" : value);
   showAction({
@@ -1499,7 +1608,8 @@ groupForm.onsubmit = action(() => {
     async perform() {
       const result = operation === "update" ?
         await call("/api/client-updates", {ids}) :
-        await call("/api/group", {ids, changes:{[field]:value}});
+        await call("/api/group", {ids, resolution, changes:byResolution ?
+          {source:resolutionSource, bandwidth:"0"} : {[field]:value}});
       group.close();
       await refresh(true);
       if (operation === "update") {

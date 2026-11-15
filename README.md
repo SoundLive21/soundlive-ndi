@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.11** et le client **1.4.7**.
+Ce kit contient la régie **1.4.12** et le client **1.4.7**.
 
 ## Installer et lancer la régie
 
@@ -150,6 +150,45 @@ propre nom de source. Pour publier une scène en parallèle depuis un seul OBS,
 ajoute le filtre **Dedicated Output** de DistroAV à cette scène et attribue-lui
 un nom NDI distinct. [DistroAV](https://github.com/DistroAV/DistroAV)
 
+### Diffuser le même programme en 360p, 720p, 1080p et 4K
+
+1. Crée une scène **Programme** qui contient ton contenu. Pour obtenir un
+   rendu 4K avec les détails d’origine, règle le canevas de base OBS à
+   **3840 × 2160** et utilise du contenu 4K.
+2. Crée quatre scènes de sortie. Dans chacune, ajoute **Programme** en tant
+   que source de type **Scène**. Ajoute à chaque scène de sortie le filtre
+   **Mise à l’échelle / rapport hauteur-largeur**, puis **NDI Dedicated
+   Output** en dessous dans la liste des filtres d’effet. Renseigne la
+   résolution dans le premier filtre et le nom NDI dans le second.
+
+   | Résolution | Dimensions | Nom NDI |
+   | --- | --- | --- |
+   | 360p | 640 × 360 | `Programme [360p]` |
+   | 720p | 1280 × 720 | `Programme [720p]` |
+   | 1080p | 1920 × 1080 | `Programme [1080p]` |
+   | 4K | 3840 × 2160 | `Programme [4K]` |
+
+3. Avec DistroAV 6.2, garde les quatre scènes rendues simultanément. Par
+   exemple, ajoute-les comme sources visibles dans une scène **Contrôle NDI**
+   en mosaïque, puis ouvre un projecteur OBS de cette scène ou garde-la en
+   aperçu en mode Studio. La scène **Programme** reste le contenu commun.
+4. Vérifie sur le réseau de diffusion que chaque nom fournit une image et que
+   les dimensions reçues correspondent au nom. Dans **Commandes et réglages**
+   du tableau, renseigne **Résolution maximale validée** pour chaque lecteur
+   après un essai sur son matériel et son réseau. Tant que cette limite est
+   inconnue, les quatre choix restent grisés. Le suffixe du nom indique la
+   résolution attendue. Vérifie les dimensions côté réception avant de valider
+   la limite. Un changement de programme ou de fréquence d’image peut justifier
+   un nouvel essai.
+5. Choisis **Résolution du flux**, puis **Appliquer**. La sélection passe le
+   lecteur en **High**. Si plusieurs sources compatibles annoncent la même
+   résolution, choisis laquelle dans **Sources NDI détectées**. Pour une
+   action de groupe, **Choisir une résolution NDI** propose les sources
+   communes détectées et autorisées pour tous les écrans sélectionnés.
+
+[Filtre de mise à l’échelle OBS](https://obsproject.com/kb/scaling-aspect-ratio-filter) ·
+[Rendu des sorties dédiées avec DistroAV 6.2](https://github.com/DistroAV/DistroAV/discussions/1437)
+
 ### Partager directement un bureau Windows
 
 Depuis le PC Windows à partager, ouvre **NDI Screen Capture** dans NDI Tools.
@@ -174,8 +213,30 @@ dans le tableau SoundLive-NDI. [NDI Screen Capture](https://docs.ndi.video/all/u
   Essaie d’abord le réglage 720p à 25 images/s sur l’émetteur puis, si
   nécessaire, **Low · Aperçu NDI** sur le lecteur. **High · Résolution de la
   source** reçoit le flux principal à la résolution émise. Pour proposer
-  plusieurs résolutions précises, publie des sources NDI séparées et
-  sélectionne la source voulue pour chaque écran ou groupe.
+  plusieurs résolutions précises, configure les sorties dédiées ci-dessus.
+
+### Priorité Ethernet sur un lecteur
+
+Configure d’abord un réseau Wi-Fi enregistré avec connexion automatique.
+Installe ensuite la bascule depuis le lecteur. La fonction s’exécute au
+démarrage et vérifie le lien Ethernet toutes les quelques secondes, même en
+l’absence de la régie. Elle coupe le Wi-Fi quand une interface Ethernet
+physique a un lien et une IPv4 utilisable. Elle réactive le Wi-Fi quand
+l’Ethernet perd sa connexion. L’adresse de la régie enregistrée sur le lecteur
+doit être joignable depuis les deux réseaux.
+
+- **Raspberry Pi OS ou Ubuntu avec NetworkManager actif**. Depuis le dossier
+  décompressé, lance `bash installer-client.sh --reseau-auto`. Pour retirer
+  la bascule, lance `sudo systemctl disable --now soundlive-ndi-network.timer`
+  puis `sudo nmcli radio wifi on`.
+- **Windows x64**. Dans une invite de commandes ouverte en administrateur,
+  lance `installer-client.cmd --reseau-auto`. Pour retirer la bascule, arrête
+  puis supprime la tâche **SoundLive-NDI Network** dans le Planificateur de
+  tâches et réactive l’adaptateur Wi-Fi.
+
+La mise à jour envoyée depuis le tableau conserve les réglages du système.
+Exécute cette commande une fois sur chaque lecteur où tu veux activer la
+bascule.
 
 ## Utiliser le tableau de régie
 
@@ -290,7 +351,7 @@ privée utilisée par la régie pour signer le push des lecteurs reste distincte
 ```bash
 ssh-keygen -t ed25519 -f /chemin/prive/soundlive-publication
 python3 publier-version.py --cle /chemin/prive/soundlive-publication
-gh release create v1.4.11 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.11' --generate-notes
+gh release create v1.4.12 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.12' --generate-notes
 ```
 
 Adapte le tag au numéro de `SOFTWARE_VERSION` dans `tableau.py`. La version
@@ -311,8 +372,8 @@ manuellement en conservant le dossier de régie existant.
 
 Arrête la régie dans le lanceur. Dans **Versions publiées**, saisis le dépôt
 sous la forme `propriétaire/dépôt` et importe la clé publique de publication
-obtenue auprès de l’éditeur. Le lanceur vérifie aussi le dépôt mémorisé lors
-de son ouverture. Clique sur **Vérifier**, puis **Installer** si
+obtenue auprès de l’éditeur. Le lanceur vérifie le dépôt mémorisé à l’ouverture,
+puis toutes les cinq minutes, même pendant la diffusion. Clique sur **Vérifier**, puis **Installer** si
 une version est proposée. Dès la version 1.4.11, le lanceur se rouvre
 automatiquement après l’installation d’une mise à jour. Si tu as lancé
 la mise à jour depuis une version antérieure, rouvre le lanceur une fois.

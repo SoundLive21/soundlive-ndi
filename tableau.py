@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import CookieError, SimpleCookie
 import json
 from pathlib import Path
+import re
 import secrets
 import socket
 import subprocess
@@ -29,7 +30,7 @@ from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.11"
+SOFTWARE_VERSION = "1.4.12"
 PREVIEW_AUTO_INTERVAL = 20
 DATA = ROOT / "ecrans.json"
 REMOTE_ACCESS = ROOT / ".soundlive-acces"
@@ -46,6 +47,9 @@ LOGIN_NOTICES = {
 LOCK = threading.Lock()
 POWER_REQUEST_AGE = 25
 ONLINE_AGE = 12
+RESOLUTIONS = ("360p", "720p", "1080p", "4K")
+RESOLUTION_SUFFIX = re.compile(
+    r"(?:^|\s)(?:\[(360p|720p|1080p|4K)\]|(360p|720p|1080p|4K))$", re.IGNORECASE)
 LATENCY_TEST_AGE = 15
 DEVICE_KINDS = ("pi", "ubuntu", "windows")
 SCREENS = {}
@@ -60,6 +64,42 @@ PREVIEWS = {}
 PREVIEW_WAIT = 16
 PREVIEW_FRESH = 40
 PREVIEW_CLIENT = (1, 4, 7)
+
+
+def source_resolution(source):
+    host, opening, name = source.partition(" (")
+    if host and opening and name.endswith(")"):
+        source = name[:-1]
+    match = RESOLUTION_SUFFIX.search(source.rstrip())
+    if not match:
+        return None
+    return (match[1] or match[2]).lower().replace("4k", "4K")
+
+
+def resolution_sources(row, now):
+    limit = row.get("resolution_limit")
+    report = row.get("report", {})
+    available = {resolution: [] for resolution in RESOLUTIONS}
+    if limit in RESOLUTIONS and now - report.get("seen", 0) < ONLINE_AGE:
+        for source in dict.fromkeys(report.get("sources", [])):
+            resolution = source_resolution(source)
+            if resolution and RESOLUTIONS.index(resolution) <= RESOLUTIONS.index(limit):
+                available[resolution].append(source)
+    return available
+
+
+def resolution_rejection(row, settings, now, requested):
+    resolution = source_resolution(settings["source"])
+    if requested is not None and (requested not in RESOLUTIONS or requested != resolution):
+        raise ValueError("La source ne correspond pas à la résolution choisie.")
+    if requested is not None and settings["bandwidth"] != "0":
+        raise ValueError("Choisis High pour recevoir la résolution annoncée par la source.")
+    changed = (settings["source"] != row["options"]["source"]
+               or settings["bandwidth"] != row["options"]["bandwidth"])
+    if resolution and (changed or requested is not None):
+        if settings["source"] not in resolution_sources(row, now)[resolution]:
+            return f"« {row['name']} » ne détecte plus cette source ou sa limite validée est insuffisante."
+    return None
 
 
 def preview_prune(now):
@@ -270,6 +310,10 @@ def batch(path, data, now):
         if not isinstance(patch, dict) or not patch or not set(patch) <= fields:
             raise ValueError("Aucun réglage de groupe valide.")
         changes = {key: options({**row["options"], **patch}) for key, row in targets.items()}
+        for key, row in targets.items():
+            error = resolution_rejection(row, changes[key], now, data.get("resolution"))
+            if error:
+                return 409, {"error": error}
         previous = {}
         for key, row in targets.items():
             if changes[key] != row["options"]:
@@ -607,7 +651,10 @@ class Request(BaseHTTPRequestHandler):
                         report=report, online=now - report.get("seen", 0) < ONLINE_AGE,
                         pairing=row.get("pairing") if now < row.get("pairing_until", 0) else None,
                         paired="token" in row, version=row.get("version", 0), kind=row.get("kind"),
-                        group=row.get("group"),
+                        group=row.get("group"), resolution_limit=row.get("resolution_limit"),
+                        resolution_sources=resolution_sources(row, now),
+                        source_resolutions={source: resolution for source in report.get("sources", [])
+                                            if (resolution := source_resolution(source))},
                         client_update=update_view(key, report, now),
                         update_availability=update_availability(report, now, key_exists),
                     ))
@@ -803,10 +850,26 @@ class Request(BaseHTTPRequestHandler):
                 test = dict(id=secrets.token_hex(8), until=now + LATENCY_TEST_AGE)
                 LATENCY_TESTS[key] = test
             return 200, {"id": test["id"]}
+        elif path == "/api/resolution-limit" and "options" in row:
+            limit = data["limit"]
+            if limit is not None and limit not in RESOLUTIONS:
+                raise ValueError("Résolution maximale invalide.")
+            previous = row.get("resolution_limit")
+            row["resolution_limit"] = limit
+            try:
+                save()
+            except OSError:
+                row["resolution_limit"] = previous
+                raise
+            return 200, {"ok": True}
         elif path == "/api/update" and "options" in row:
             if data.get("version") != row["version"]:
                 return 409, {"error": "Réglages modifiés entre-temps. Recharge la page."}
-            row["options"] = options(data["options"])
+            settings = options(data["options"])
+            error = resolution_rejection(row, settings, now, data.get("resolution"))
+            if error:
+                return 409, {"error": error}
+            row["options"] = settings
             row["version"] += 1
         elif path in ("/api/reboot", "/api/poweroff"):
             operation = "poweroff" if path == "/api/poweroff" else "reboot"
@@ -821,12 +884,13 @@ class Request(BaseHTTPRequestHandler):
         return 200, {"ok": True}
 
 class Regie:
-    def __init__(self, port=8765):
+    def __init__(self, port=8765, publication_status=None):
         self.remote_url = None
         self.connections = None
         self.server = ThreadingHTTPServer(("0.0.0.0", port), Request)
         self.server.interface_traffic = InterfaceTraffic()
-        self.server.publication_status = PublicationStatus(ROOT / "source-publications.json", SOFTWARE_VERSION)
+        self.server.publication_status = publication_status or PublicationStatus(
+            ROOT / "source-publications.json", SOFTWARE_VERSION)
         self.local_url = f"http://127.0.0.1:{self.server.server_port}"
         self.remote = None
 

@@ -49,6 +49,8 @@ class Launcher:
         self.window = window
         self.tableau = tableau
         self.access = access
+        self.publication_status = tableau.PublicationStatus(
+            tableau.ROOT / "source-publications.json", tableau.SOFTWARE_VERSION)
         self.regie = None
         self.busy = False
         self.closing = False
@@ -142,7 +144,6 @@ class Launcher:
             self.status.set("Aucun écran associé dans ce dossier de régie")
         self.load_interfaces()
         self.tick()
-        self.check_saved_repository()
 
     def load_interfaces(self):
         current = self.interface.get()
@@ -180,7 +181,7 @@ class Launcher:
         remote = self.regie and self.regie.remote_url and not self.busy
         self.copy_button.configure(state="normal" if remote else "disabled")
         self.certificate_button.configure(state="normal" if remote else "disabled")
-        self.release_button.configure(state="normal" if stopped else "disabled")
+        self.release_button.configure(state="normal" if not self.busy else "disabled")
         self.moderation_controls()
 
     def remote_connections(self):
@@ -274,7 +275,7 @@ class Launcher:
 
         def launch():
             try:
-                regie = self.tableau.Regie()
+                regie = self.tableau.Regie(publication_status=self.publication_status)
                 try:
                     generated, certificate = (
                         self.access.prepare_access(self.tableau.REMOTE_ACCESS, address, password)
@@ -344,6 +345,7 @@ class Launcher:
             self.window.destroy()
             return
         self.refresh_remote_list()
+        self.show_publication(self.publication_status.read())
         self.window.after(1500, self.tick)
 
     def refresh_remote_list(self):
@@ -377,31 +379,13 @@ class Launcher:
     def open_dashboard(self):
         webbrowser.open(self.regie.local_url)
 
-    def check_saved_repository(self):
-        config = self.tableau.ROOT / "source-publications.json"
-        if not config.is_file():
-            return
-        result = Queue()
-
-        def lookup():
-            from versions_regie import latest
-            try:
-                name = json.loads(config.read_text(encoding="utf-8"))["repository"]
-                result.put(latest(name, self.tableau.SOFTWARE_VERSION))
-            except Exception:
-                result.put(None)
-
-        def receive():
-            try:
-                available = result.get_nowait()
-            except Empty:
-                self.window.after(250, receive)
-                return
-            if available:
-                self.release_button.configure(text=f"Version {available[0]} disponible")
-
-        threading.Thread(target=lookup, daemon=True).start()
-        self.window.after(250, receive)
+    def show_publication(self, status):
+        state = status["state"]
+        label = {"checking": "Vérification des versions…",
+                 "current": "Versions publiées · À jour",
+                 "unavailable": "Versions publiées · Vérification indisponible"}
+        self.release_button.configure(text=f"Version {status['version']} disponible" if state == "available"
+                                      else label.get(state, "Versions publiées"))
 
     def publications(self):
         import versions_regie as versions
@@ -421,7 +405,10 @@ class Launcher:
         pane = ttk.Frame(form, padding=18)
         pane.pack(fill="both", expand=True)
         repo = tk.StringVar(form, value=current.get("repository", ""))
-        outcome = tk.StringVar(form, value=f"Version installée · {self.tableau.SOFTWARE_VERSION}")
+        available = self.publication_status.read().get("version")
+        outcome = tk.StringVar(form, value=f"Version installée · {self.tableau.SOFTWARE_VERSION}"
+                               + (f"\nVersion {available} disponible." if available else "")
+                               + ("\nArrête la régie avant d’installer une mise à jour." if self.regie else ""))
         selected = None
         answers = Queue()
         ttk.Label(pane, text="Dépôt public GitHub · propriétaire/dépôt").pack(anchor="w")
@@ -483,7 +470,9 @@ class Launcher:
                     self.window.destroy()
                 elif selected:
                     outcome.set(f"Version {selected[0]} disponible.")
-                    if trusted.is_file():
+                    if self.regie is not None:
+                        outcome.set(f"Version {selected[0]} disponible. Ferme cette fenêtre et arrête la régie pour l’installer.")
+                    elif trusted.is_file():
                         apply.configure(state="normal")
                     else:
                         outcome.set(f"Version {selected[0]} disponible. Importe la clé de l’éditeur puis vérifie de nouveau.")
@@ -501,7 +490,7 @@ class Launcher:
                 outcome.set(str(error))
                 return
             outcome.set("Vérification de la dernière version…")
-            task(lambda: versions.latest(name, self.tableau.SOFTWARE_VERSION))
+            task(lambda: self.publication_status.verify(name))
 
         def apply_release():
             if not selected or self.regie is not None:
