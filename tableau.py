@@ -30,13 +30,15 @@ from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.12"
+SOFTWARE_VERSION = "1.4.13"
+RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 20
 DATA = ROOT / "ecrans.json"
 REMOTE_ACCESS = ROOT / ".soundlive-acces"
 PAGE = ((ROOT / "tableau.html").read_bytes()
         .replace(b"__SOFTWARE_VERSION__", SOFTWARE_VERSION.encode("ascii"))
         .replace(b"__CLIENT_VERSION__", CLIENT_VERSION.encode("ascii"))
+        .replace(b"__RESOLUTION_CONTROLS_ENABLED__", str(RESOLUTION_CONTROLS_ENABLED).lower().encode("ascii"))
         .replace(b"__PREVIEW_INTERVAL__", str(PREVIEW_AUTO_INTERVAL).encode("ascii")))
 LOGIN_PAGE = (ROOT / "acces-refuse.html").read_text(encoding="utf-8")
 BLOCKED_MESSAGE = "Cette adresse IP est bloquée sur la régie. Contacte la régie pour demander le déblocage."
@@ -89,6 +91,8 @@ def resolution_sources(row, now):
 
 
 def resolution_rejection(row, settings, now, requested):
+    if not RESOLUTION_CONTROLS_ENABLED:
+        return "Les réglages de résolution sont temporairement désactivés." if requested is not None else None
     resolution = source_resolution(settings["source"])
     if requested is not None and (requested not in RESOLUTIONS or requested != resolution):
         raise ValueError("La source ne correspond pas à la résolution choisie.")
@@ -851,6 +855,8 @@ class Request(BaseHTTPRequestHandler):
                 LATENCY_TESTS[key] = test
             return 200, {"id": test["id"]}
         elif path == "/api/resolution-limit" and "options" in row:
+            if not RESOLUTION_CONTROLS_ENABLED:
+                return 409, {"error": "Les réglages de résolution sont temporairement désactivés."}
             limit = data["limit"]
             if limit is not None and limit not in RESOLUTIONS:
                 raise ValueError("Résolution maximale invalide.")

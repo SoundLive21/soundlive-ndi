@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.12** et le client **1.4.7**.
+Ce kit contient la régie **1.4.13** et le client **1.4.7**.
 
 ## Installer et lancer la régie
 
@@ -151,6 +151,11 @@ ajoute le filtre **Dedicated Output** de DistroAV à cette scène et attribue-lu
 un nom NDI distinct. [DistroAV](https://github.com/DistroAV/DistroAV)
 
 ### Diffuser le même programme en 360p, 720p, 1080p et 4K
+
+Dans la régie 1.4.13, les commandes de résolution sont temporairement
+masquées. Pour les retrouver après les essais, passe
+`RESOLUTION_CONTROLS_ENABLED` à `True` dans `tableau.py`, puis relance la régie.
+Le menu de source et la qualité High/Low restent disponibles.
 
 1. Crée une scène **Programme** qui contient ton contenu. Pour obtenir un
    rendu 4K avec les détails d’origine, règle le canevas de base OBS à
@@ -351,7 +356,7 @@ privée utilisée par la régie pour signer le push des lecteurs reste distincte
 ```bash
 ssh-keygen -t ed25519 -f /chemin/prive/soundlive-publication
 python3 publier-version.py --cle /chemin/prive/soundlive-publication
-gh release create v1.4.12 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.12' --generate-notes
+gh release create v1.4.13 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.13' --generate-notes
 ```
 
 Adapte le tag au numéro de `SOFTWARE_VERSION` dans `tableau.py`. La version

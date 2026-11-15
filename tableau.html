@@ -7,7 +7,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SoundLive-NDI · Régie</title>
+<title>SoundLive-NDI · Gestion</title>
 <style>
 :root{color-scheme:dark;--bg:#100e12;--panel:#1b171e;--edge:#39303e;--text:#fff5f7;--sub:#c0b3c3;--red:#ee4560;--green:#8de0ad;font-family:"Segoe UI",system-ui,sans-serif}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 92% 0%,#30151f 0%,var(--bg) 44%);color:var(--text);min-height:100vh}
@@ -36,6 +36,9 @@ code{display:block;padding:11px;background:#100d12;border-radius:7px;overflow-wr
 @media(max-width:460px){main{margin-top:35px}header #count{display:none}article{padding:16px}.heading{align-items:flex-start}}
 .device-meta{display:flex;align-items:center;gap:8px;min-height:20px;margin:8px 0 15px;color:var(--sub);font-size:.82rem;flex-wrap:wrap}
 .address{margin:0}.device-kind:empty{display:none}
+.network-link{display:inline-flex;align-items:center;gap:5px;padding:3px 7px;border:1px solid var(--edge);border-radius:20px;color:#c1e6f6}
+.network-link[hidden],.network-link svg{display:none}
+.network-link[data-kind="wifi"] .wifi-icon,.network-link[data-kind="ethernet"] .ethernet-icon{display:block;width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 18px}
 .metrics[hidden]{display:none}
 .metric{--tone:#c6b7c8;display:grid;grid-template-columns:16px minmax(0,1fr);align-items:center;text-align:left;gap:5px 6px;padding:9px 8px;min-width:0;background:#17131a;border:1px solid var(--edge);border-radius:9px}
@@ -128,7 +131,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 <body>
 <header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release" id="regie-version" aria-live="polite">v<span id="regie-release">__SOFTWARE_VERSION__</span><span id="regie-version-status"></span></span><span id="count">Écrans connectés</span><button id="logout" type="button" __REMOTE_ONLY__>Me déconnecter</button></header>
 <main>
-  <div class="heading"><h1>Écrans NDI</h1><div class="heading-actions"><button id="open-connections" hidden>Accès distant</button><button id="manage-screens" disabled>Organiser les écrans</button><button id="open-group" disabled>Actions de groupe</button><button id="add" class="primary">Ajouter un écran</button></div></div>
+  <div class="heading"><h1>Gestion des écrans NDI</h1><div class="heading-actions"><button id="open-connections" hidden>Accès distant</button><button id="manage-screens" disabled>Organiser les écrans</button><button id="open-group" disabled>Actions de groupe</button><button id="add" class="primary">Ajouter un écran</button></div></div>
   <section class="traffic-panel" aria-labelledby="traffic-title">
     <h2 id="traffic-title">Débit réseau de la régie</h2>
     <label>Interface à mesurer
@@ -218,7 +221,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
     </fieldset>
     <label>Action<select name="operation">
       <option value="source">Changer la source NDI</option>
-      <option value="resolution">Choisir une résolution NDI</option>
+      <option value="resolution" hidden disabled>Choisir une résolution NDI</option>
       <option value="mute">Couper le son</option>
       <option value="unmute">Rétablir le son</option>
       <option value="stop">Arrêter la diffusion</option>
@@ -228,7 +231,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       <option value="update">Pousser la mise à jour client</option>
       <option value="reboot">Redémarrer les récepteurs</option>
       <option value="poweroff">Éteindre les récepteurs</option>
-      <option value="remove">Retirer les écrans du tableau</option>
+      <option value="remove">Retirer les écrans de la gestion</option>
     </select></label>
     <div id="group-source">
       <label>Sources NDI détectées<select id="group-sources"></select></label>
@@ -299,7 +302,14 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 <template id="card">
   <article>
     <div class="card-heading"><h2></h2><span class="badge"></span></div>
-    <div class="device-meta"><span class="device-kind"></span><span class="address"></span><span class="client-release"></span></div>
+    <div class="device-meta">
+      <span class="device-kind"></span><span class="address"></span><span class="client-release"></span>
+      <span class="network-link" hidden>
+        <svg class="wifi-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9a15 15 0 0 1 18 0M6 13a10 10 0 0 1 12 0m-9 4a5 5 0 0 1 6 0m-3 3h.01"/></svg>
+        <svg class="ethernet-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11h-4v3H8v-3H4zM9 5v4m3-4v4m3-4v4"/></svg>
+        <span></span>
+      </span>
+    </div>
     <div class="metrics" hidden>
       <button type="button" class="metric connection" aria-label="Informations réseau et test de latence">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9a15 15 0 0 1 18 0M6 13a10 10 0 0 1 12 0m-9 4a5 5 0 0 1 6 0m-3 3h.01"/></svg>
@@ -334,9 +344,11 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       <summary>Commandes et réglages</summary>
       <section class="pending"></section>
       <form class="config">
-      <label>Résolution maximale validée<select class="resolution-limit"></select></label>
-      <p class="small resolution-help">Choisis la résolution la plus élevée testée sur ce lecteur.</p>
-      <label>Résolution du flux<select class="resolution"></select></label>
+      <div class="resolution-controls" hidden>
+        <label>Résolution maximale validée<select class="resolution-limit"></select></label>
+        <p class="small resolution-help">Choisis la résolution la plus élevée testée sur ce lecteur.</p>
+        <label>Résolution du flux<select class="resolution"></select></label>
+      </div>
       <label>Sources NDI détectées<select class="detected-sources"></select></label>
       <label>Source NDI<input class="source" maxlength="256" required></label>
       <label>Qualité<select class="bandwidth"><option value="0">High · Résolution de la source</option><option value="1">Low · Aperçu NDI</option></select></label>
@@ -351,6 +363,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 </template>
 <script>
 const select = (root, query) => root.querySelector(query);
+const resolutionControlsEnabled = "__RESOLUTION_CONTROLS_ENABLED__" === "true";
 const holder = document.querySelector("#screens");
 const screenSections = new Map();
 const organizerButton = document.querySelector("#manage-screens");
@@ -522,7 +535,7 @@ async function call(path, data) {
     }
     return result;
   } catch (error) {
-    if (error.name === "AbortError") throw Error("Le tableau de régie ne répond pas.");
+    if (error.name === "AbortError") throw Error("La gestion des écrans ne répond pas.");
     throw error;
   } finally {
     clearTimeout(timer);
@@ -883,6 +896,18 @@ function renderMetrics({data, ui}) {
 function receiverChoices(row) {
   return (row.report.diagnostic?.interfaces || []).filter(item => item.connected);
 }
+function renderNetworkLink({data:row, ui}) {
+  const badge = ui["network-link"];
+  const interfaces = row.online ? receiverChoices(row) : [];
+  const active = interfaces.find(item => row.report.ip && item.addresses?.includes(row.report.ip)) ||
+    interfaces.find(item => item.to_regie);
+  const kind = active?.kind;
+  const label = kind === "wifi" ? "Wi-Fi" : kind === "ethernet" ? "Ethernet" : "";
+  badge.hidden = !label;
+  badge.dataset.kind = label ? kind : "";
+  badge.title = label ? "Liaison vers la régie · " + (active.name || label) : "";
+  select(badge, "span").textContent = label;
+}
 function renderReceiverTraffic({data:row, ui}) {
   ui["screen-traffic"].hidden = !row.paired;
   if (!row.paired) return;
@@ -1050,11 +1075,12 @@ function cardFor(id) {
   const form = select(el, ".config");
   const fields = ["source","bandwidth","volume","muted","toggle","reboot","poweroff",
                   "pending","badge","address","error","remove","info","metrics","connection","cpu","ram",
-                  "screen-traffic","rate-rx","rate-tx","traffic-interface-label"];
+                  "screen-traffic","rate-rx","rate-tx","traffic-interface-label","network-link"];
   const ui = Object.fromEntries(fields.map(key => [key, select(el, "."+key)]));
   const list = select(el, ".detected-sources");
   const resolution = select(el, ".resolution");
   const limit = select(el, ".resolution-limit");
+  select(el, ".resolution-controls").hidden = !resolutionControlsEnabled;
   limit.replaceChildren(new Option("À valider après essai", ""), ...resolutions.map(value => new Option(value, value)));
   const card = {el, ui, form, list, resolution, limit, dirty:false};
   card.preview = createPreview(select(el, ".screen-preview"), "Aperçu du flux en cours");
@@ -1184,7 +1210,7 @@ function cardFor(id) {
 function syncSourceChoice(card) {
   const {data:row, ui, list, resolution} = card;
   const available = row.resolution_sources || {};
-  const tagged = row.source_resolutions || {};
+  const tagged = resolutionControlsEnabled ? row.source_resolutions || {} : {};
   const activeResolution = Object.hasOwn(tagged, ui.source.value) ? tagged[ui.source.value] : "";
   if (ui.source.value && activeResolution !== card.resolutionChoice) card.resolutionChoice = "";
   const filter = card.resolutionChoice;
@@ -1227,6 +1253,7 @@ function render(row) {
     row.report.client_release ? "Lecteur v" + row.report.client_release :
       row.online ? "Version du lecteur non communiquée" : "" : "";
   renderMetrics(card);
+  renderNetworkLink(card);
   renderReceiverTraffic(card);
   const stream = select(el, ".current-stream");
   stream.hidden = !row.options;
@@ -1342,7 +1369,7 @@ async function refreshScreens() {
     if (!rows.length && !empty) {
       const box = document.createElement("div");
       box.className = "empty";
-      box.textContent = "Aucun écran associé. Après une mise à jour, vérifie que ecrans.json est à côté de tableau.py.";
+      box.textContent = "Aucun écran associé. Après une mise à jour, vérifie que ecrans.json est dans le dossier de la régie.";
       holder.append(box);
     }
   } catch (error) { notice(error.message,true); }
@@ -1426,6 +1453,8 @@ const groupForm = select(group, "form");
 const groupScreens = select(group, "#group-screens");
 const groupSubmit = select(group, "#group-submit");
 const groupOperation = select(group, 'select[name="operation"]');
+const groupResolutionOption = select(groupOperation, '[value="resolution"]');
+groupResolutionOption.hidden = groupResolutionOption.disabled = !resolutionControlsEnabled;
 const groupOpen = document.querySelector("#open-group");
 const groupActions = {
   source:["Changer la source", "source"], mute:["Couper le son", "muted", true],
@@ -1439,7 +1468,7 @@ const groupDeviceActions = {
            detail:"La diffusion sera interrompue pendant le redémarrage. Les récepteurs hors ligne seront ignorés."},
   poweroff: {title:"Éteindre les récepteurs", label:"Éteindre", result:"Extinction demandée",
              detail:"Les récepteurs éteints devront être rallumés sur place. Les récepteurs hors ligne seront ignorés."},
-  remove: {title:"Retirer les écrans du tableau", label:"Retirer", result:"Écran retiré",
+  remove: {title:"Retirer les écrans de la gestion", label:"Retirer", result:"Écran retiré",
            detail:"Les écrans seront désassociés, même hors ligne. Il faudra un nouveau code pour les ajouter à nouveau."},
 };
 const groupSources = select(group, "#group-sources");
@@ -1460,7 +1489,7 @@ function renderGroupSources() {
   }
   const selectedRows = groupSelection().map(id => cards.get(id)?.data);
   const common = Object.values(commonResolutions(selectedRows)).flat();
-  const tagged = new Set(online.flatMap(row => Object.keys(row.source_resolutions || {})));
+  const tagged = new Set(resolutionControlsEnabled ? online.flatMap(row => Object.keys(row.source_resolutions || {})) : []);
   const items = Array.from(counts, ([source, count]) => [source, count, tagged.has(source) && !common.includes(source)])
     .sort(([a], [b]) => a.localeCompare(b, "fr"));
   const signature = JSON.stringify([selectedOnline, items]);

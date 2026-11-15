@@ -3,7 +3,7 @@ SoundLive-NDI
 Auteur : DUVERNOY Matthieu & ChatGPT
 contact@soundlive.fr
 Société SoundLive
-Régie 1.4.12 · Lecteurs 1.4.7
+Régie 1.4.13 · Lecteurs 1.4.7
 
 1. SUR LE PC WINDOWS QUI DIFFUSE AVEC OBS
    Ferme l’ancien tableau et décompresse tout le ZIP dans le dossier de
@@ -399,6 +399,10 @@ VERSIONS PUBLIÉES
    la régie » et déploie le nouveau client s’il est proposé.
 
 CHOISIR LA RÉSOLUTION NDI
+
+   Les commandes de résolution sont temporairement masquées dans la
+   régie 1.4.13. La sélection des sources et la qualité High/Low restent
+   accessibles. Voir README.md pour réactiver les commandes de résolution.
 
    Consulte README.md pour préparer les quatre sorties Dedicated Output
    OBS avec les suffixes [360p], [720p], [1080p] et [4K].
