@@ -9,6 +9,7 @@ from base64 import b64encode
 import json
 import os
 import secrets
+import shutil
 from pathlib import Path
 import signal
 import socket
@@ -198,6 +199,238 @@ def capture_ndi_preview(source_name):
         ndi.NDIlib_destroy()
 
 
+def display_snapshot_linux(player_pid, capture):
+    import gi
+    gi.require_version("Gdk", "3.0")
+    from gi.repository import Gdk, GdkPixbuf, Gio, GLib
+
+    Gdk.init_check([])
+    display = Gdk.Display.get_default()
+    if display is None:
+        raise RuntimeError("Session graphique indisponible.")
+    x11 = display.__gtype__.name == "GdkX11Display"
+    monitor = display.get_primary_monitor() or display.get_monitor(0)
+    screen = display.get_default_screen()
+    if player_pid < 0:
+        monitor = display.get_monitor(-player_pid - 1)
+    elif player_pid and display.get_n_monitors() > 1:
+        if not x11:
+            raise RuntimeError("Sortie du lecteur indéterminée en Wayland avec plusieurs moniteurs.")
+        for window in reversed(screen.get_window_stack() or []):
+            try:
+                found, _, _, value = Gdk.property_get(window, Gdk.Atom.intern("_NET_WM_PID", False),
+                                                      Gdk.Atom.intern("CARDINAL", False), 0, 4, False)
+                if found and value and (list(value) == [player_pid] or
+                                        int.from_bytes(bytes(value)[:4], sys.byteorder) == player_pid):
+                    monitor = display.get_monitor_at_window(window)
+                    break
+            except (TypeError, ValueError, OverflowError):
+                continue
+        else:
+            raise RuntimeError("Sortie du lecteur indéterminée.")
+    if monitor is None:
+        raise RuntimeError("Aucun moniteur détecté.")
+    rect = monitor.get_geometry()
+    scale = monitor.get_scale_factor()
+    index = next((i for i in range(display.get_n_monitors()) if display.get_monitor(i) == monitor), -1)
+    connector = screen.get_monitor_plug_name(index) if index >= 0 else None
+    grim = shutil.which("grim") if not x11 else None
+    info = dict(width=rect.width * scale, height=rect.height * scale,
+                model=" ".join(dict.fromkeys(filter(None, (monitor.get_manufacturer(), monitor.get_model())))),
+                connector=connector or "", estimated=not x11, capture=bool(x11 or grim))
+    if not capture and not x11 and "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper():
+        info["capture"] = False
+        try:
+            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            state = bus.call_sync("org.gnome.Mutter.DisplayConfig", "/org/gnome/Mutter/DisplayConfig",
+                                  "org.gnome.Mutter.DisplayConfig", "GetCurrentState", None, None,
+                                  Gio.DBusCallFlags.NO_AUTO_START, 800, None).unpack()
+            for spec, modes, properties in state[1]:
+                logical = next((item for item in state[2] if spec in item[5]), None)
+                if logical is None or logical[:2] != (rect.x, rect.y):
+                    continue
+                for _, width, height, _, _, _, flags in modes:
+                    if flags.get("is-current"):
+                        if logical[3] in (1, 3, 5, 7):
+                            width, height = height, width
+                        info.update(width=width, height=height, connector=spec[0],
+                                    model=properties.get("display-name") or info["model"], estimated=False)
+                        break
+                break
+        except (GLib.Error, IndexError, TypeError, ValueError):
+            pass
+    if not capture:
+        connector = info["connector"]
+        outputs = list(Path("/sys/class/drm").glob("card*-*/edid"))
+        exact = [item for item in outputs if item.parent.name.partition("-")[2] == connector]
+        if not exact and display.get_n_monitors() == 1:
+            for item in outputs:
+                try:
+                    if (item.parent / "status").read_text().strip() == "connected":
+                        exact.append(item)
+                except OSError:
+                    continue
+        if len(exact) == 1:
+            try:
+                edid = exact[0].read_bytes()
+            except OSError:
+                edid = b""
+            if len(edid) >= 128 and edid[:8] == bytes.fromhex("00ffffffffffff00"):
+                info["connector"] = exact[0].parent.name.partition("-")[2]
+                for start in (54, 72, 90, 108):
+                    descriptor = edid[start:start + 18]
+                    if descriptor[:5] == b"\x00\x00\x00\xfc\x00":
+                        model = descriptor[5:].decode("ascii", "replace").strip(" \r\n\x00")
+                        if model:
+                            info["model"] = model
+                            break
+        return info
+    if x11:
+        image = Gdk.pixbuf_get_from_window(screen.get_root_window(), rect.x, rect.y, rect.width, rect.height)
+    else:
+        if not grim:
+            raise RuntimeError("Capture Wayland indisponible. Une session compatible avec grim est nécessaire.")
+        region = f"{rect.x},{rect.y} {rect.width}x{rect.height}"
+        raw = subprocess.run([grim, "-g", region, "-t", "png", "-"], capture_output=True, timeout=4)
+        if raw.returncode != 0:
+            raise RuntimeError("Capture indisponible sur ce bureau Wayland.")
+        loader = GdkPixbuf.PixbufLoader.new_with_type("png")
+        loader.write(raw.stdout)
+        loader.close()
+        image = loader.get_pixbuf()
+    if image is None:
+        raise RuntimeError("Lecture du moniteur indisponible.")
+    width, height = preview_size(image.get_width(), image.get_height())
+    image = image.scale_simple(width, height, GdkPixbuf.InterpType.BILINEAR)
+    if image.get_has_alpha():
+        output = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, width, height)
+        output.fill(0)
+        image.composite(output, 0, 0, width, height, 0, 0, 1, 1, GdkPixbuf.InterpType.NEAREST, 255)
+        image = output
+    ok, png = image.save_to_bufferv("png", [], [])
+    if not ok:
+        raise RuntimeError("Impossible d’encoder la capture.")
+    return bytes(png)
+
+
+def preview_size(width, height):
+    scale = min(240 / width, 135 / height, 1)
+    return max(1, round(width * scale)), max(1, round(height * scale))
+
+
+def display_snapshot_windows(player_pid, capture):
+    import ctypes as c
+    from ctypes import wintypes as w
+    import struct
+    import zlib
+
+    user, gdi = c.windll.user32, c.windll.gdi32
+    if not hasattr(user, "SetProcessDpiAwarenessContext") or not user.SetProcessDpiAwarenessContext(c.c_void_p(-4)):
+        user.SetProcessDPIAware()
+    callback_type = c.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
+
+    class Monitor(c.Structure):
+        _fields_ = [("size", w.DWORD), ("area", w.RECT), ("work", w.RECT),
+                    ("flags", w.DWORD), ("name", w.WCHAR * 32)]
+
+    class Device(c.Structure):
+        _fields_ = [("size", w.DWORD), ("name", w.WCHAR * 32), ("description", w.WCHAR * 128),
+                    ("flags", w.DWORD), ("id", w.WCHAR * 128), ("key", w.WCHAR * 128)]
+
+    for library, name, result, args in (
+        (user, "EnumWindows", w.BOOL, (callback_type, w.LPARAM)),
+        (user, "GetWindowThreadProcessId", w.DWORD, (w.HWND, c.POINTER(w.DWORD))),
+        (user, "IsWindowVisible", w.BOOL, (w.HWND,)),
+        (user, "IsIconic", w.BOOL, (w.HWND,)),
+        (user, "MonitorFromWindow", w.HANDLE, (w.HWND, w.DWORD)),
+        (user, "GetMonitorInfoW", w.BOOL, (w.HANDLE, c.POINTER(Monitor))),
+        (user, "EnumDisplayDevicesW", w.BOOL, (w.LPCWSTR, w.DWORD, c.POINTER(Device), w.DWORD)),
+        (user, "GetDC", w.HDC, (w.HWND,)),
+        (user, "ReleaseDC", c.c_int, (w.HWND, w.HDC)),
+        (gdi, "CreateCompatibleDC", w.HDC, (w.HDC,)),
+        (gdi, "CreateDIBSection", w.HBITMAP, (w.HDC, c.c_void_p, w.UINT, c.POINTER(c.c_void_p), w.HANDLE, w.DWORD)),
+        (gdi, "SelectObject", w.HANDLE, (w.HDC, w.HANDLE)),
+        (gdi, "SetStretchBltMode", c.c_int, (w.HDC, c.c_int)),
+        (gdi, "StretchBlt", w.BOOL, (w.HDC, c.c_int, c.c_int, c.c_int, c.c_int,
+                                    w.HDC, c.c_int, c.c_int, c.c_int, c.c_int, w.DWORD)),
+        (gdi, "GdiFlush", w.BOOL, ()),
+        (gdi, "DeleteObject", w.BOOL, (w.HANDLE,)),
+        (gdi, "DeleteDC", w.BOOL, (w.HDC,)),
+    ):
+        function = getattr(library, name)
+        function.restype, function.argtypes = result, args
+    window = None
+
+    @callback_type
+    def find_window(handle, _):
+        nonlocal window
+        owner = w.DWORD()
+        user.GetWindowThreadProcessId(handle, c.byref(owner))
+        if owner.value == player_pid and user.IsWindowVisible(handle) and not user.IsIconic(handle):
+            window = handle
+            return False
+        return True
+
+    if player_pid:
+        user.EnumWindows(find_window, 0)
+        if not window:
+            raise RuntimeError("Fenêtre du lecteur introuvable.")
+    monitor = Monitor(size=c.sizeof(Monitor))
+    if not user.GetMonitorInfoW(user.MonitorFromWindow(window, 1), c.byref(monitor)):
+        raise RuntimeError("Aucun moniteur détecté.")
+    rect = monitor.area
+    width, height = rect.right - rect.left, rect.bottom - rect.top
+    if not capture:
+        device = Device(size=c.sizeof(Device))
+        model = ""
+        if user.EnumDisplayDevicesW(monitor.name, 0, c.byref(device), 0):
+            model = device.description
+            identifier = device.id.split("\\")
+            if len(identifier) > 1 and identifier[0] == "MONITOR" and identifier[1] != "Default_Monitor":
+                model = f"{model} · {identifier[1]}" if model else identifier[1]
+        return dict(width=width, height=height, model=model, connector=monitor.name, capture=True)
+    w_out, h_out = preview_size(width, height)
+    header = c.create_string_buffer(struct.pack("<IiiHHIIiiII", 40, w_out, -h_out, 1, 32, 0, 0, 0, 0, 0, 0))
+    dc = user.GetDC(None)
+    if not dc:
+        raise RuntimeError("Session graphique Windows indisponible.")
+    memory = bitmap = previous = None
+    try:
+        memory = gdi.CreateCompatibleDC(dc)
+        pixels = c.c_void_p()
+        bitmap = gdi.CreateDIBSection(dc, header, 0, c.byref(pixels), None, 0)
+        if not memory or not bitmap or not pixels:
+            raise RuntimeError("Impossible d’allouer la capture Windows.")
+        previous = gdi.SelectObject(memory, bitmap)
+        if not previous or previous == c.c_void_p(-1).value:
+            previous = None
+            raise RuntimeError("Impossible de sélectionner le bitmap Windows.")
+        gdi.SetStretchBltMode(memory, 4)
+        if not gdi.StretchBlt(memory, 0, 0, w_out, h_out, dc, rect.left, rect.top, width, height, 0x40CC0020):
+            raise RuntimeError("Impossible de capturer l’affichage Windows.")
+        gdi.GdiFlush()
+        pixels = c.string_at(pixels, w_out * h_out * 4)
+    finally:
+        if previous:
+            gdi.SelectObject(memory, previous)
+        if bitmap:
+            gdi.DeleteObject(bitmap)
+        if memory:
+            gdi.DeleteDC(memory)
+        user.ReleaseDC(None, dc)
+    scanlines = bytearray()
+    for start in range(0, len(pixels), w_out * 4):
+        scanlines.append(0)
+        for offset in range(start, start + w_out * 4, 4):
+            scanlines.extend((pixels[offset + 2], pixels[offset + 1], pixels[offset]))
+
+    def chunk(kind, payload):
+        return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload))
+
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w_out, h_out, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(scanlines, 1)) + chunk(b"IEND", b""))
+
+
 def waiting_update_message(recommendation):
     if not isinstance(recommendation, dict):
         return ""
@@ -338,13 +571,24 @@ class DashboardClient:
         self.can_update = "SOUNDLIVE_APP" in os.environ and self.updater.public.is_file()
         self.version = digest(contents(CLIENT_DIR))
         self.preview_job = None
+        self.display_key = None
+        self.display_info = {}
+        self.display_check_at = 0
 
-    def poll(self, report):
+    def poll(self, report, display_pid=0):
         server = self.identity["server"]
         token = self.identity["token"]
+        if display_pid != self.display_key or time.monotonic() >= self.display_check_at:
+            self.display_key = display_pid
+            self.display_check_at = time.monotonic() + 15
+            try:
+                self.display_info = json.loads(self.preview_command("--info-ecran", str(display_pid), 3))
+            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+                self.display_info = {}
         report.update(kind=DEVICE_KIND, latency_ms=self.latency_ms, latency_test=self.latency_test,
                       diagnostic=self.diagnostic.sample(server), can_update=self.can_update,
-                      client_version=self.version, client_release=SOFTWARE_VERSION)
+                      client_version=self.version, client_release=SOFTWARE_VERSION,
+                      display=self.display_info, display_capture=self.display_info.get("capture") is True)
         if self.can_update:
             report["update_result"] = self.updater.report()
         started = time.monotonic()
@@ -358,9 +602,12 @@ class DashboardClient:
         preview = reply.get("preview_request")
         if isinstance(preview, dict) and not (reply.get("reboot") or reply.get("poweroff")):
             job, source = preview.get("id"), preview.get("source")
-            if isinstance(job, str) and isinstance(source, str) and job != self.preview_job:
+            screen = preview.get("screen") is True
+            if isinstance(job, str) and (screen or isinstance(source, str)) and job != self.preview_job:
                 self.preview_job = job
-                threading.Thread(target=self.send_preview, args=(job, source), daemon=True).start()
+                mode = "--capture-ecran" if screen else "--apercu-ndi"
+                argument = str(display_pid) if screen else source
+                threading.Thread(target=self.send_preview, args=(job, mode, argument, screen), daemon=True).start()
         reply.pop("restart_client", None)
         if self.can_update and not (reply.get("reboot") or reply.get("poweroff")):
             job = reply.get("client_update")
@@ -377,19 +624,28 @@ class DashboardClient:
                 self.latency_test = dict(id=test, ms=None)
         return reply
 
-    def send_preview(self, job, source):
-        result = {"id": self.identity["id"], "job": job}
+    def preview_command(self, mode, argument, timeout):
         python = Path(sys.executable)
         if WINDOWS and python.name.lower() == "pythonw.exe" and python.with_name("python.exe").is_file():
             python = python.with_name("python.exe")
+        probe = subprocess.run(
+            [str(python), "-B", str(Path(__file__).resolve()), mode, argument],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
+            creationflags=subprocess.CREATE_NO_WINDOW if WINDOWS else 0,
+        )
+        if probe.returncode:
+            raise RuntimeError(probe.stderr.decode("utf-8", "replace").strip()[-240:])
+        return probe.stdout
+
+    def send_preview(self, job, mode, argument, screen):
+        result = {"id": self.identity["id"], "job": job}
         try:
-            probe = subprocess.run(
-                [str(python), "-B", str(Path(__file__).resolve()), "--apercu-ndi", source],
-                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=9,
-                creationflags=subprocess.CREATE_NO_WINDOW if WINDOWS else 0,
-            )
-            if probe.returncode == 0 and 0 < len(probe.stdout) <= PREVIEW_LIMIT:
-                result["image"] = b64encode(probe.stdout).decode("ascii")
+            png = self.preview_command(mode, argument, 9)
+            if 0 < len(png) <= PREVIEW_LIMIT:
+                result["image"] = b64encode(png).decode("ascii")
+        except RuntimeError as error:
+            if screen and str(error):
+                result["error"] = str(error)
         except (OSError, subprocess.SubprocessError):
             pass
         try:
@@ -690,7 +946,13 @@ def desktop():
             data = dict(id=self.identity["id"], boot=BOOT, state=state, sources=self.sources,
                         active_source=self.active_source if state == "Lecture" else None,
                         error=self.error, can_poweroff=True)
-            self.request = self.work.submit(self.dashboard.poll, data)
+            display_pid = self.player.pid if state == "Lecture" and self.player else 0
+            if not display_pid and self.window.get_window():
+                display = self.window.get_display()
+                monitor = display.get_monitor_at_window(self.window.get_window())
+                display_pid = next((-index - 1 for index in range(display.get_n_monitors())
+                                    if display.get_monitor(index) == monitor), 0)
+            self.request = self.work.submit(self.dashboard.poll, data, display_pid)
             return GLib.SOURCE_CONTINUE
 
         def apply(self, result):
@@ -923,7 +1185,8 @@ def run_windows_screen(tk, log):
                 state = "Arrêté" if not settings["enabled"] else "Lecture" if ready else "En attente"
                 request = work.submit(client.poll, dict(id=identity["id"], boot=BOOT, state=state,
                     sources=sources, active_source=settings["source"] if ready else None,
-                    error=failure, can_poweroff=True, can_reboot=True))
+                    error=failure, can_poweroff=True, can_reboot=True),
+                    player.pid if state == "Lecture" and player else os.getpid())
                 next_poll = now + 2
         except (OSError, ValueError, subprocess.SubprocessError) as error:
             failure = str(error)[:240]
@@ -951,6 +1214,11 @@ if __name__ == "__main__":
     try:
         if len(sys.argv) == 3 and sys.argv[1] == "--apercu-ndi":
             sys.stdout.buffer.write(capture_ndi_preview(sys.argv[2]))
+        elif len(sys.argv) == 3 and sys.argv[1] in ("--info-ecran", "--capture-ecran"):
+            capture = sys.argv[1] == "--capture-ecran"
+            backend = display_snapshot_windows if WINDOWS else display_snapshot_linux
+            value = backend(int(sys.argv[2]), capture)
+            sys.stdout.buffer.write(value if capture else json.dumps(value).encode("utf-8"))
         elif len(sys.argv) == 4 and sys.argv[1] == "associer":
             pair(sys.argv[2], sys.argv[3])
         elif len(sys.argv) in (2, 3) and sys.argv[1] == "verifier":
@@ -960,5 +1228,5 @@ if __name__ == "__main__":
         else:
             raise ValueError("Usage : ecran.py associer http://ADRESSE_DU_PC:8765 CODE"
                              " ou ecran.py verifier [http://ADRESSE_DU_PC:8765]")
-    except (OSError, RuntimeError, ValueError, AttributeError) as error:
+    except (OSError, RuntimeError, ValueError, AttributeError, subprocess.SubprocessError) as error:
         sys.exit(str(error))

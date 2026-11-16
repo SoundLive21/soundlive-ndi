@@ -378,7 +378,6 @@ const dialog = document.querySelector("#pair");
 const cards = new Map();
 const previewGrid = document.querySelector("#preview-grid");
 const previewCards = new Map();
-const previewStates = new Map();
 const previewAuto = document.querySelector("#preview-auto");
 const previewSection = document.querySelector("#source-previews");
 const previewInterval = Number("__PREVIEW_INTERVAL__") * 1000;
@@ -539,76 +538,68 @@ async function call(path, data) {
   }
 }
 
-function createPreview(parent, title) {
+function createPreview(parent, title, target, screen = false) {
   const element = document.querySelector("#preview-template").content.firstElementChild.cloneNode(true);
   const button = select(element, "button");
   const image = select(element, "img");
   const status = select(element, "p");
-  const view = {element, button, image, status, source:""};
+  const view = {element, button, image, status, title, target, screen, available:!screen};
   select(element, "strong").textContent = title;
-  button.onclick = () => requestSourcePreview(view.source);
+  button.onclick = () => requestPreview(view);
   parent.append(element);
   return view;
 }
 
 function renderPreview(view) {
-  const state = previewStates.get(view.source);
-  const snapshot = state?.snapshot;
+  const snapshot = view.available ? view.snapshot : null;
   const image = snapshot?.image;
   if (image) {
     const url = "data:image/png;base64," + image;
     if (view.image.getAttribute("src") !== url) view.image.src = url;
-    view.image.alt = "Aperçu du flux " + view.source;
+    view.image.alt = view.screen ? "Capture de l’écran " + view.title : "Aperçu du flux " + view.target;
   } else {
     view.image.removeAttribute("src");
   }
   view.image.hidden = !image;
-  view.button.disabled = !view.source || Boolean(state?.pending);
+  view.button.disabled = !view.available || Boolean(view.pending);
   view.button.textContent = image ? "Actualiser l’aperçu" : "Capturer un aperçu";
   const timestamp = image ? "Image capturée à " + new Date(snapshot.captured * 1000).toLocaleTimeString("fr-FR") : "";
-  const progress = state?.pending ? (image ? "Actualisation…" : "Capture en cours…") : state?.error;
-  const message = [timestamp, progress].filter(Boolean).join(" · ") ||
-    (previewAuto.checked ? "En attente d’un aperçu…" : "Image à la demande");
+  const progress = view.pending ? (image ? "Actualisation…" : "Capture en cours…") : view.error;
+  const message = view.available ? ([timestamp, progress].filter(Boolean).join(" · ") ||
+    (previewAuto.checked ? "En attente d’un aperçu…" : "Image à la demande")) : view.unavailable;
   if (view.status.textContent !== message) view.status.textContent = message;
 }
 
-function redrawSource(source) {
-  const gallery = previewCards.get(source);
-  if (gallery) renderPreview(gallery);
-  for (const card of cards.values()) if (card.preview.source === source) renderPreview(card.preview);
-}
-
-async function requestSourcePreview(source, automatic = false) {
-  if (!source || remoteSessionEnded || previewStates.get(source)?.pending) return;
-  const state = previewStates.get(source) || {};
-  state.pending = true;
-  state.error = "";
-  previewStates.set(source, state);
-  redrawSource(source);
+async function requestPreview(view, automatic = false) {
+  if (!view.available || remoteSessionEnded || view.pending) return;
+  const target = {[view.screen ? "screen" : "source"]:view.target};
+  view.pending = true;
+  view.error = "";
+  renderPreview(view);
   try {
-    let result = await call("/api/preview", {source, previous:state.snapshot?.id, automatic});
+    let result = await call("/api/preview", {...target, previous:view.snapshot?.id, automatic});
     const end = Date.now() + 18000;
     while (result.state === "pending" && Date.now() < end) {
       await new Promise(resolve => setTimeout(resolve, 950));
-      result = await call("/api/preview?source=" + encodeURIComponent(source));
+      result = await call("/api/preview?" + new URLSearchParams(target));
     }
     if (result.state === "ready") {
-      state.snapshot = result;
+      if (view.available) view.snapshot = result;
     } else {
-      throw Error(result.error || "La capture a expiré. Réessaie si le flux est toujours détecté.");
+      throw Error(result.error || "La capture a expiré. Réessaie dans quelques secondes.");
     }
-    state.nextAuto = Date.now() + previewInterval;
+    view.nextAuto = Date.now() + previewInterval;
   } catch (error) {
-    state.error = error.message;
-    state.nextAuto = Date.now() + (error.status === 429 ? 4000 : 30000);
+    view.error = error.message;
+    view.nextAuto = Date.now() + (error.status === 429 ? 4000 : 30000);
   } finally {
-    state.pending = false;
-    redrawSource(source);
+    view.pending = false;
+    renderPreview(view);
   }
 }
 
 function previewVisible(view) {
-  if (!view.source) return false;
+  if (!view.available) return false;
   const rect = view.element.getBoundingClientRect();
   return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 &&
     rect.top < window.innerHeight && rect.left < window.innerWidth;
@@ -618,28 +609,27 @@ async function refreshVisiblePreviews() {
   if (!previewAuto.checked || document.hidden || automaticCapture || remoteSessionEnded) return;
   const visible = new Set();
   if (previewSection.open) {
-    for (const view of previewCards.values()) if (previewVisible(view)) visible.add(view.source);
+    for (const view of previewCards.values()) if (previewVisible(view)) visible.add(view);
   }
   for (const card of cards.values()) {
     if (card.el.closest(".screen-group")?.open && previewVisible(card.preview)) {
-      visible.add(card.preview.source);
+      visible.add(card.preview);
     }
   }
   const now = Date.now();
-  let nextSource = "";
+  let nextPreview;
   let oldest = now;
-  for (const source of visible) {
-    const state = previewStates.get(source);
-    const due = state?.nextAuto || 0;
-    if (!state?.pending && due <= oldest) {
-      nextSource = source;
+  for (const view of visible) {
+    const due = view.nextAuto || 0;
+    if (!view.pending && due <= oldest) {
+      nextPreview = view;
       oldest = due;
     }
   }
-  if (!nextSource) return;
+  if (!nextPreview) return;
   automaticCapture = true;
   try {
-    await requestSourcePreview(nextSource, true);
+    await requestPreview(nextPreview, true);
   } finally {
     automaticCapture = false;
   }
@@ -665,14 +655,10 @@ function renderSourceGallery(rows) {
     view.element.remove();
     previewCards.delete(name);
   }
-  for (const name of previewStates.keys()) {
-    if (!detected.has(name) && !previewStates.get(name).pending) previewStates.delete(name);
-  }
   let next = previewGrid.firstElementChild;
   for (const name of [...detected].sort((a, b) => a.localeCompare(b, "fr"))) {
     if (!previewCards.has(name)) {
-      const view = createPreview(previewGrid, name);
-      view.source = name;
+      const view = createPreview(previewGrid, name, name);
       previewCards.set(name, view);
       renderPreview(view);
     }
@@ -911,6 +897,7 @@ function renderReceiverTraffic({data:row, ui}) {
   const context = !row.online ? "Hors ligne" :
     (current?.name ? current.name + " · " : "") +
     (link ? link + " · " : "") +
+    (current?.kind === "wifi" && current.ssid ? current.ssid + " · " : "") +
     (Number.isFinite(rx) || Number.isFinite(tx) ? "Trafic total" : "Mesure indisponible");
   const caption = ui["traffic-interface-label"];
   caption.dataset.kind = current?.kind || "";
@@ -923,6 +910,9 @@ function renderReceiverTraffic({data:row, ui}) {
 function gib(bytes) {
   return Number.isFinite(bytes) ? (bytes / 2**30).toLocaleString("fr-FR", {maximumFractionDigits:2}) + " Gio" : "—";
 }
+function displayResolution(display) {
+  return display ? (display.estimated ? "≈ " : "") + display.width + " × " + display.height + " px" : "—";
+}
 function renderDiagnostics(card) {
   const row = card.data;
   const report = row.report;
@@ -933,6 +923,9 @@ function renderDiagnostics(card) {
     (report.diagnostic ? "Hors ligne · dernières informations reçues" : "Hors ligne");
   const facts = [
     ["Récepteur", deviceLabels[row.kind] || "—"],
+    ["Résolution de l’écran", displayResolution(report.display)],
+    ["Type / modèle de l’écran", report.display?.model || "—"],
+    ["Sortie d’affichage", report.display?.connector || "—"],
     ["Système", data.os || "—"],
     ["Architecture", data.architecture || "—"],
     ["Modèle", data.model || "—"],
@@ -962,6 +955,7 @@ function renderDiagnostics(card) {
     const rate = row.online && (item.rx_mbps != null || item.tx_mbps != null) ?
       "Réception " + rateText(item.rx_mbps) + " · Émission " + rateText(item.tx_mbps) : "";
     return [kind, item.name, item.connected ? "Connectée" : "Déconnectée",
+            item.kind === "wifi" && item.connected && item.ssid ? "SSID " + item.ssid : "",
             item.to_regie ? "Vers la régie" : "", ...item.addresses, rate].filter(Boolean).join(" · ");
   });
   if (!lines.length) lines.push(data.interfaces ? "Aucune interface détectée." : "Informations réseau indisponibles.");
@@ -1077,7 +1071,7 @@ function cardFor(id) {
   select(el, ".resolution-controls").hidden = !resolutionControlsEnabled;
   limit.replaceChildren(new Option("À valider après essai", ""), ...resolutions.map(value => new Option(value, value)));
   const card = {el, ui, form, list, resolution, limit, dirty:false};
-  card.preview = createPreview(select(el, ".screen-preview"), "Aperçu du flux en cours");
+  card.preview = createPreview(select(el, ".screen-preview"), "Capture de l’écran", id, true);
   const controls = select(el, "details");
   try { controls.open = localStorage.getItem("soundlive-controls-" + id) === "open"; }
   catch { /* Storage can be unavailable in private mode. */ }
@@ -1253,11 +1247,20 @@ function render(row) {
   stream.hidden = !row.options;
   const playing = row.online && row.report.state === "Lecture";
   const activeSource = playing ? row.report.active_source || "" : "";
-  card.preview.element.parentElement.hidden = !activeSource;
-  if (card.preview.source !== activeSource) {
-    card.preview.source = activeSource;
-    renderPreview(card.preview);
+  const overview = card.preview;
+  overview.title = row.name;
+  overview.element.parentElement.hidden = !row.paired;
+  const hasNewClient = row.report.display_capture !== null && Object.hasOwn(row.report, "display_capture");
+  const supported = row.report.display_capture === true;
+  overview.available = row.online && supported;
+  overview.unavailable = !row.online ? "Lecteur hors ligne." : hasNewClient ?
+    "Capture indisponible dans cette session graphique." : "Mets à jour le lecteur pour activer la capture.";
+  if (!overview.available) {
+    overview.snapshot = null;
+    overview.error = "";
+    overview.nextAuto = 0;
   }
+  renderPreview(overview);
   select(stream, "span").textContent = playing && row.report.active_source ? "Flux en cours" :
     playing ? "Source configurée · lecture signalée" : "Source configurée";
   select(stream, "strong").textContent = (playing && row.report.active_source) || row.options?.source || "";

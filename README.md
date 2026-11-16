@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.17** et le client **1.4.7**.
+Ce kit contient la régie **1.4.19** et le client **1.4.9**.
 
 ## Installer et lancer la régie
 
@@ -267,6 +267,9 @@ bascule.
   Les actions d’alimentation ciblent les récepteurs en ligne.
 - **Diagnostic** — Clique sur **Réseau** ou **Informations** pour voir l’OS,
   le processeur, la RAM, le disque et les interfaces réseau du récepteur.
+  Depuis le client **1.4.9**, le nom du Wi-Fi connecté (SSID) figure dans
+  les interfaces réseau et sous les débits du lecteur si cette interface
+  est sélectionnée. Le système doit rendre le SSID accessible au lecteur.
   **Tester la latence** mesure l’aller-retour entre ce lecteur et la régie.
 
 L’écran d’attente indique aussi l’état du rattachement. **Lecteur rattaché
@@ -295,18 +298,28 @@ remonter les mesures par écran.
 ### Afficher un aperçu NDI
 
 Ouvre **Aperçu des sources NDI disponibles** pour retrouver les flux signalés par les
-lecteurs en ligne. Le tableau rafraîchit les aperçus visibles de la galerie
-et des écrans en lecture, avec un délai d’au moins **20 secondes par flux**.
+lecteurs en ligne. La galerie capture la source NDI à bande passante réduite.
+Chaque fiche propose sa propre **Capture de l’écran**, prise sur le moniteur
+du lecteur, en lecture, en attente ou à l’arrêt. Ouvre **Informations**
+pour voir la résolution du moniteur, son modèle et sa sortie d’affichage
+lorsqu’ils sont signalés par le système.
+
+Le tableau rafraîchit les aperçus visibles avec un délai d’au moins
+**20 secondes par source ou par écran**.
 Les captures automatiques se font l’une après l’autre. Elles se mettent en
 pause quand l’onglet passe en arrière-plan. L’option **Actualiser
 automatiquement les aperçus visibles** permet de désactiver ce mode.
 **Capturer un aperçu** et **Actualiser l’aperçu** restent disponibles.
 
-La régie demande une seule image à un lecteur à la fois pour un même flux et
-partage cette image entre les fiches concernées. Pendant l’actualisation, la
-dernière image reste affichée avec son heure de capture. La capture se fait
-à bande passante réduite, sans lecture audio ni capture du bureau.
-Il faut au moins un lecteur **1.4.7** ou ultérieur en ligne qui détecte le flux.
+La galerie nécessite un lecteur **1.4.7** ou ultérieur qui détecte le flux.
+La capture de l’écran et ses informations nécessitent le client **1.4.8**.
+La capture reflète ce qui est visible sur la sortie, y compris les fenêtres
+qui recouvrent le lecteur. Elle est disponible sous Windows et sous Linux
+en session X11. Sous Wayland, elle nécessite un seul moniteur en lecture
+et un compositeur compatible avec `grim`, installé avec
+`sudo apt install grim`. Avec GNOME Wayland, les informations du moniteur
+restent disponibles quand le système les fournit et la capture apparaît
+indisponible. Une résolution précédée de **≈** est une estimation.
 
 ## Mettre à jour les lecteurs depuis la régie
 
@@ -359,7 +372,7 @@ privée utilisée par la régie pour signer le push des lecteurs reste distincte
 ```bash
 ssh-keygen -t ed25519 -f /chemin/prive/soundlive-publication
 python3 publier-version.py --cle /chemin/prive/soundlive-publication
-gh release create v1.4.17 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.17' --generate-notes
+gh release create v1.4.19 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.19' --generate-notes
 ```
 
 Adapte le tag au numéro de `SOFTWARE_VERSION` dans `tableau.py`. La version

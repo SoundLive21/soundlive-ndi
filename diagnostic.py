@@ -85,6 +85,14 @@ def ip_json(*args):
 def network_info(server=None):
     if sys.platform == "win32":
         script = ("[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); "
+                  "$ssids = @{}; "
+                  "if ($env:SOUNDLIVE_WIFI_SSID -eq '1') { try { "
+                  "$network = [Windows.Networking.Connectivity.NetworkInformation,Windows,ContentType=WindowsRuntime]; "
+                  "foreach ($p in $network::GetConnectionProfiles()) { try { "
+                  "if ($p.IsWlanConnectionProfile -and $p.NetworkAdapter) { "
+                  "$ssid = $p.WlanConnectionProfileDetails.GetConnectedSsid(); "
+                  "if ($ssid) { $ssids[$p.NetworkAdapter.NetworkAdapterId.ToString('D')] = $ssid } } "
+                  "} catch {} } } catch {} }; "
                   "$rows = foreach ($a in [Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()) { "
                   "if ($a.NetworkInterfaceType -eq 'Loopback') { continue }; "
                   "$kind = switch ($a.NetworkInterfaceType) { 'Wireless80211' {'wifi'} "
@@ -92,13 +100,15 @@ def network_info(server=None):
                   "$stats = $null; "
                   "if ($a.OperationalStatus -eq 'Up') { try { $stats = $a.GetIPStatistics() } catch {} }; "
                   "[pscustomobject]@{id=$a.Id; name=$a.Name; kind=$kind; connected=$a.OperationalStatus -eq 'Up'; "
+                  "ssid=$(if ($kind -eq 'wifi' -and $a.OperationalStatus -eq 'Up') { $ssids[$a.Id.Trim('{}')] }); "
                   "tx_bytes=$stats.BytesSent; rx_bytes=$stats.BytesReceived; "
                   "addresses=@($a.GetIPProperties().UnicastAddresses | "
                   "Where-Object {$_.Address.AddressFamily -eq 'InterNetwork'} | "
                   "ForEach-Object {$_.Address.ToString()})} }; ConvertTo-Json -Compress -InputObject @($rows)")
         run = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
                              capture_output=True, encoding="utf-8-sig", check=True, timeout=3,
-                             creationflags=subprocess.CREATE_NO_WINDOW)
+                             creationflags=subprocess.CREATE_NO_WINDOW,
+                             env={**os.environ, "SOUNDLIVE_WIFI_SSID":"1" if server else "0"})
         rows = json.loads(run.stdout or "[]")
         local_ip = None
         if server:
@@ -144,13 +154,43 @@ def network_info(server=None):
             kind = "ethernet"
         else:
             kind = "other"
-        interfaces.append(dict(
+        row = dict(
             id=name, name=name, kind=kind, connected="LOWER_UP" in item.get("flags", []),
             to_regie=name == route_device,
             addresses=[addr["local"] for addr in item.get("addr_info", [])
                        if addr.get("family") == "inet"][:4],
-        ))
+        )
+        if server and kind == "wifi" and row["connected"]:
+            row["ssid"] = connected_ssid(name)
+        interfaces.append(row)
     return sorted(interfaces, key=lambda item: (not item["to_regie"], not item["connected"], item["name"]))[:12]
+
+
+def connected_ssid(interface):
+    nmcli = shutil.which("nmcli")
+    if nmcli:
+        try:
+            result = subprocess.run([nmcli, "-t", "-e", "no", "-f", "IN-USE,SSID",
+                                     "device", "wifi", "list", "ifname", interface, "--rescan", "no"],
+                                    capture_output=True, encoding="utf-8", errors="replace", check=True,
+                                    timeout=1, env={**os.environ, "LC_ALL": "C"})
+            for line in result.stdout.split("\n"):
+                if line.startswith("*:") and line[2:]:
+                    return line[2:]
+        except (OSError, subprocess.SubprocessError):
+            pass
+    iw = shutil.which("iw") or next((path for path in ("/usr/sbin/iw", "/sbin/iw") if Path(path).is_file()), None)
+    if iw:
+        try:
+            result = subprocess.run([iw, "dev", interface, "link"], capture_output=True, encoding="utf-8",
+                                    errors="replace", check=True, timeout=1)
+            for line in result.stdout.split("\n"):
+                line = line.lstrip()
+                if line.startswith("SSID: ") and line[6:]:
+                    return line[6:]
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return None
 
 
 class NetworkRates:

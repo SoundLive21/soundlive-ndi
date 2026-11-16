@@ -30,7 +30,7 @@ from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.17"
+SOFTWARE_VERSION = "1.4.19"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 20
 DATA = ROOT / "ecrans.json"
@@ -66,6 +66,7 @@ PREVIEWS = {}
 PREVIEW_WAIT = 16
 PREVIEW_FRESH = 40
 PREVIEW_CLIENT = (1, 4, 7)
+DISPLAY_PREVIEW_CLIENT = (1, 4, 8)
 
 
 def source_resolution(source):
@@ -119,17 +120,28 @@ def preview_status(job):
     return public
 
 
+def preview_target(data):
+    if "screen" in data:
+        return ("screen", safe_text(data["screen"])), None
+    source = safe_text(data["source"], 256)
+    return ("source", source), source
+
+
 def request_preview(data, now):
     preview_prune(now)
-    source = safe_text(data["source"], 256)
+    target, source = preview_target(data)
+    screen = target[0] == "screen"
     online = [
         (key, row["report"]) for key, row in SCREENS.items()
         if row.get("token") and now - row.get("report", {}).get("seen", 0) < ONLINE_AGE
-        and (source in row["report"].get("sources", []) or source == row["report"].get("active_source"))
+        and (key == target[1] if screen else
+             source in row["report"].get("sources", []) or source == row["report"].get("active_source"))
     ]
-    existing = PREVIEWS.get(source)
+    existing = PREVIEWS.get(target)
     if not online:
-        return 409, {"error": "Ce flux n’est plus détecté par les lecteurs."}
+        return 409, {"error": "Ce lecteur est hors ligne." if screen else "Ce flux n’est plus détecté par les lecteurs."}
+    if screen and online[0][1].get("display_capture") is not True:
+        return 409, {"error": "La capture de l’affichage est indisponible sur ce lecteur."}
     automatic = data.get("automatic") is True
     if existing:
         if existing["state"] != "ready":
@@ -138,8 +150,9 @@ def request_preview(data, now):
             return 200, preview_status(existing)
         if not automatic and existing["id"] != data.get("previous"):
             return 200, preview_status(existing)
+    minimum = DISPLAY_PREVIEW_CLIENT if screen else PREVIEW_CLIENT
     supported = [(key, report) for key, report in online
-                 if release_number(report.get("client_release")) >= PREVIEW_CLIENT]
+                 if release_number(report.get("client_release")) >= minimum]
     if not supported:
         return 409, {"error": "Mets à jour un lecteur qui détecte ce flux pour afficher son aperçu."}
     busy = {job["reader"] for job in PREVIEWS.values() if job["state"] == "pending"}
@@ -152,9 +165,9 @@ def request_preview(data, now):
         expired_first = min((name for name in PREVIEWS if PREVIEWS[name]["state"] != "pending"),
                             key=lambda name: PREVIEWS[name]["until"])
         del PREVIEWS[expired_first]
-    job = dict(id=secrets.token_hex(12), reader=device, source=source, state="pending",
+    job = dict(id=secrets.token_hex(12), reader=device, source=source, screen=screen, state="pending",
                automatic=automatic, until=now + PREVIEW_WAIT)
-    PREVIEWS[source] = job
+    PREVIEWS[target] = job
     return 200, preview_status(job)
 
 
@@ -176,7 +189,11 @@ def finish_preview(reader, data, now):
                 and raw[24:29] == b"\x08\x02\x00\x00\x00"):
             job.update(state="ready", image=image, captured=now, until=now + PREVIEW_FRESH)
             return 200, {"ok": True}
-    job.update(state="error", error="Ce lecteur n’a pas pu capturer une image NDI.", until=now + 4)
+    error = data.get("error")
+    if not isinstance(error, str) or not error or not job["screen"]:
+        error = ("Ce lecteur n’a pas pu capturer son affichage." if job["screen"] else
+                 "Ce lecteur n’a pas pu capturer une image NDI.")
+    job.update(state="error", error=error[:240], until=now + 4)
     return 200, {"ok": True}
 
 
@@ -386,12 +403,29 @@ def diagnostic_report(payload):
                  name=str(item.get("name", ""))[:64],
                  kind=item.get("kind") if item.get("kind") in ("wifi", "ethernet") else "other",
                  connected=item.get("connected") is True, to_regie=item.get("to_regie") is True,
+                 ssid="".join(char if char.isprintable() else "�" for char in item["ssid"][:64])
+                 if item.get("kind") == "wifi" and item.get("connected") is True
+                 and isinstance(item.get("ssid"), str) and item["ssid"] else None,
                  addresses=[ip[:45] for ip in item["addresses"][:4] if isinstance(ip, str)]
                  if isinstance(item.get("addresses"), list) else [],
                  rx_mbps=bounded_number(item.get("rx_mbps"), 1_000_000),
                  tx_mbps=bounded_number(item.get("tx_mbps"), 1_000_000))
             for item in interfaces[:12] if isinstance(item, dict)
         ]
+    return report
+
+
+def display_report(payload):
+    if not isinstance(payload, dict):
+        return None
+    width, height = payload.get("width"), payload.get("height")
+    if not all(type(value) is int and 1 <= value <= 32768 for value in (width, height)):
+        return None
+    report = dict(width=width, height=height, estimated=payload.get("estimated") is True)
+    for field in ("model", "connector"):
+        value = payload.get(field)
+        if isinstance(value, str):
+            report[field] = value.strip()[:160]
     return report
 
 
@@ -629,13 +663,17 @@ class Request(BaseHTTPRequestHandler):
             self.reply(200, self.server.publication_status.read())
         elif path == "/api/preview":
             try:
-                source = parse_qs(url.query, max_num_fields=4).get("source", [""])[0]
-            except ValueError:
-                self.reply(400, {"error": "Source NDI invalide."})
+                query = {name: values[0] for name, values in parse_qs(url.query, max_num_fields=4).items()}
+                target, _ = preview_target(query)
+            except (KeyError, ValueError):
+                self.reply(400, {"error": "Aperçu demandé invalide."})
                 return
             with LOCK:
-                preview_prune(time.time())
-                job = PREVIEWS.get(source)
+                now = time.time()
+                preview_prune(now)
+                job = PREVIEWS.get(target)
+                if target[0] == "screen" and now - SCREENS.get(target[1], {}).get("report", {}).get("seen", 0) >= ONLINE_AGE:
+                    job = None
                 value = preview_status(job) if job else {"state": "empty"}
             self.reply(200, value)
         elif path == "/api/remote-connections":
@@ -819,6 +857,9 @@ class Request(BaseHTTPRequestHandler):
                                  can_poweroff=data.get("can_poweroff") is True,
                                  can_reboot=data.get("can_reboot") is not False,
                                  diagnostic=diagnostics, latency_test=test_result,
+                                 display=display_report(data.get("display")),
+                                 display_capture=data.get("display_capture") is True
+                                 if "display_capture" in data else None,
                                  can_update=can_update, client_version=version, client_release=release,
                                  update_result=result,
                                  latency_ms=bounded_number(data.get("latency_ms"), 10000))
@@ -828,7 +869,7 @@ class Request(BaseHTTPRequestHandler):
             availability = update_availability(row["report"], now, UPDATE_KEY.is_file())
             recommendation = dict(version=CLIENT_VERSION, state=availability)
             preview_prune(now)
-            preview = next((dict(id=item["id"], source=item["source"]) for item in PREVIEWS.values()
+            preview = next((dict(id=item["id"], source=item["source"], screen=item["screen"]) for item in PREVIEWS.values()
                             if item["reader"] == key and item["state"] == "pending"), None)
             return 200, dict(options=row["options"],
                              preview_request=preview,
