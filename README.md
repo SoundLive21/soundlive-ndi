@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.16** et le client **1.4.7**.
+Ce kit contient la régie **1.4.17** et le client **1.4.7**.
 
 ## Installer et lancer la régie
 
@@ -359,7 +359,7 @@ privée utilisée par la régie pour signer le push des lecteurs reste distincte
 ```bash
 ssh-keygen -t ed25519 -f /chemin/prive/soundlive-publication
 python3 publier-version.py --cle /chemin/prive/soundlive-publication
-gh release create v1.4.16 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.16' --generate-notes
+gh release create v1.4.17 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.17' --generate-notes
 ```
 
 Adapte le tag au numéro de `SOFTWARE_VERSION` dans `tableau.py`. La version

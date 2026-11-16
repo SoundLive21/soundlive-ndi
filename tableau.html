@@ -26,6 +26,7 @@ article{border:1px solid var(--edge);border-radius:16px;background:var(--panel);
 .card-heading,.row{display:flex;gap:12px;align-items:center;justify-content:space-between}
 h2{margin:0;font-size:1.24rem;overflow-wrap:anywhere}.badge{flex:none;border-radius:20px;background:#382b36;color:#f5d1df;padding:5px 10px;font-size:.82rem}.badge.online{background:#20362a;color:var(--green)}
 .badge.stopped{background:#3d2918;color:#ffc078}
+.badge.waiting{background:#172f49;color:#a9d6ff}
 .address{color:var(--sub);font-family:monospace;margin:8px 0 18px}.small{font-size:.88rem;color:var(--sub)}label[hidden]{display:none}label{display:grid;gap:6px;font-size:.88rem;color:#e1d6e2;margin:12px 0}
 input,select,button{font:inherit;border-radius:8px;border:1px solid var(--edge);color:inherit}input:not([type=checkbox]):not([type=range]),select{padding:10px;background:#100d12;width:100%}input[type=range]{accent-color:var(--red);width:100%}input[type=checkbox]{accent-color:var(--red)}
 button{padding:9px 13px;cursor:pointer;background:#2b222f;font-weight:600;white-space:nowrap}button.primary{background:#df3453;color:#fff;border-color:#df3453}button:disabled{opacity:.44;cursor:default}button:hover:not(:disabled){filter:brightness(1.18)}
@@ -1239,6 +1240,7 @@ function render(row) {
   ui.badge.textContent = row.online ? row.report.state : row.paired ? "Hors ligne" : "À associer";
   ui.badge.classList.toggle("online",row.online);
   ui.badge.classList.toggle("stopped", row.online && row.report.state === "Arrêté");
+  ui.badge.classList.toggle("waiting", row.online && row.report.state === "En attente");
   select(el, ".device-kind").textContent = deviceLabels[row.kind] || "";
   ui.address.textContent = row.report.ip || "";
   const currentVersion = row.update_availability === "current" && row.report.client_release;
