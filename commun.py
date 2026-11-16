@@ -8,7 +8,7 @@ import sys
 DEFAULT_SOURCE = "OBS (Programme)"
 APP_NAME = "SoundLive-NDI"
 COPYRIGHT = "© 2026 Société SoundLive"
-SOFTWARE_VERSION = "1.4.9"
+SOFTWARE_VERSION = "1.4.10"
 PREVIEW_LIMIT = 160 * 1024
 
 

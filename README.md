@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.19** et le client **1.4.9**.
+Ce kit contient la régie **1.4.20** et le client **1.4.10**.
 
 ## Installer et lancer la régie
 
@@ -315,11 +315,24 @@ La galerie nécessite un lecteur **1.4.7** ou ultérieur qui détecte le flux.
 La capture de l’écran et ses informations nécessitent le client **1.4.8**.
 La capture reflète ce qui est visible sur la sortie, y compris les fenêtres
 qui recouvrent le lecteur. Elle est disponible sous Windows et sous Linux
-en session X11. Sous Wayland, elle nécessite un seul moniteur en lecture
-et un compositeur compatible avec `grim`, installé avec
-`sudo apt install grim`. Avec GNOME Wayland, les informations du moniteur
-restent disponibles quand le système les fournit et la capture apparaît
-indisponible. Une résolution précédée de **≈** est une estimation.
+en session X11. Pour les bureaux Wayland compatibles avec `grim`, installe
+`sudo apt install grim` et utilise un seul moniteur en lecture. GNOME
+Wayland utilise le portail décrit ci-dessous.
+Une résolution précédée de **≈** est une estimation.
+
+#### Capturer sur Ubuntu GNOME sous Wayland
+
+Installe les composants nécessaires une fois sur le lecteur Ubuntu.
+
+```bash
+sudo apt install xdg-desktop-portal-gnome gstreamer1.0-tools gstreamer1.0-pipewire gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+```
+
+Après la mise à jour du client en **1.4.10**, clique sur **Autoriser la
+capture** dans la fiche du lecteur. Sélectionne le moniteur, puis valide
+**Partager** sur le PC Ubuntu. Le partage dure jusqu’à l’arrêt du lecteur,
+la fermeture de session ou l’arrêt du partage depuis GNOME. Tu peux ensuite
+utiliser le rafraîchissement automatique sans valider chaque capture.
 
 ## Mettre à jour les lecteurs depuis la régie
 
@@ -372,7 +385,7 @@ privée utilisée par la régie pour signer le push des lecteurs reste distincte
 ```bash
 ssh-keygen -t ed25519 -f /chemin/prive/soundlive-publication
 python3 publier-version.py --cle /chemin/prive/soundlive-publication
-gh release create v1.4.19 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.19' --generate-notes
+gh release create v1.4.20 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.20' --generate-notes
 ```
 
 Adapte le tag au numéro de `SOFTWARE_VERSION` dans `tableau.py`. La version

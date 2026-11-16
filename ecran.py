@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import time
+import warnings
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
@@ -209,12 +210,15 @@ def display_snapshot_linux(player_pid, capture):
     if display is None:
         raise RuntimeError("Session graphique indisponible.")
     x11 = display.__gtype__.name == "GdkX11Display"
+    gnome_portal = not x11 and "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper()
     monitor = display.get_primary_monitor() or display.get_monitor(0)
     screen = display.get_default_screen()
     if player_pid < 0:
         monitor = display.get_monitor(-player_pid - 1)
     elif player_pid and display.get_n_monitors() > 1:
         if not x11:
+            if gnome_portal and not capture:
+                return {"portal": True}
             raise RuntimeError("Sortie du lecteur indéterminée en Wayland avec plusieurs moniteurs.")
         for window in reversed(screen.get_window_stack() or []):
             try:
@@ -233,13 +237,16 @@ def display_snapshot_linux(player_pid, capture):
     rect = monitor.get_geometry()
     scale = monitor.get_scale_factor()
     index = next((i for i in range(display.get_n_monitors()) if display.get_monitor(i) == monitor), -1)
-    connector = screen.get_monitor_plug_name(index) if index >= 0 else None
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        connector = screen.get_monitor_plug_name(index) if index >= 0 else None
     grim = shutil.which("grim") if not x11 else None
     info = dict(width=rect.width * scale, height=rect.height * scale,
                 model=" ".join(dict.fromkeys(filter(None, (monitor.get_manufacturer(), monitor.get_model())))),
                 connector=connector or "", estimated=not x11, capture=bool(x11 or grim))
-    if not capture and not x11 and "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper():
+    if not capture and gnome_portal:
         info["capture"] = False
+        info["portal"] = True
         try:
             bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
             state = bus.call_sync("org.gnome.Mutter.DisplayConfig", "/org/gnome/Mutter/DisplayConfig",
@@ -291,7 +298,12 @@ def display_snapshot_linux(player_pid, capture):
         if not grim:
             raise RuntimeError("Capture Wayland indisponible. Une session compatible avec grim est nécessaire.")
         region = f"{rect.x},{rect.y} {rect.width}x{rect.height}"
-        raw = subprocess.run([grim, "-g", region, "-t", "png", "-"], capture_output=True, timeout=4)
+        factor = min(240 / rect.width, 135 / rect.height, 1)
+        try:
+            raw = subprocess.run([grim, "-g", region, "-s", str(factor), "-t", "png", "-"],
+                                 capture_output=True, timeout=8)
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError("Grim n’a pas reçu l’image du moniteur en 8 secondes. Relance la capture.") from error
         if raw.returncode != 0:
             raise RuntimeError("Capture indisponible sur ce bureau Wayland.")
         loader = GdkPixbuf.PixbufLoader.new_with_type("png")
@@ -316,6 +328,120 @@ def display_snapshot_linux(player_pid, capture):
 def preview_size(width, height):
     scale = min(240 / width, 135 / height, 1)
     return max(1, round(width * scale)), max(1, round(height * scale))
+
+
+class PortalCapture:
+    name = "org.freedesktop.portal.Desktop"
+    path = "/org/freedesktop/portal/desktop"
+    interface = "org.freedesktop.portal.ScreenCast"
+
+    def __init__(self):
+        self.session = None
+        self.stream = None
+        self.bus = None
+
+    def request(self, method, signature, arguments, options, timeout):
+        from gi.repository import Gio, GLib
+
+        token = "ndi_" + secrets.token_hex(12)
+        options = {**options, "handle_token": GLib.Variant("s", token)}
+        sender = self.bus.get_unique_name()[1:].replace(".", "_")
+        path = f"{self.path}/request/{sender}/{token}"
+        context = GLib.MainContext.new()
+        loop = GLib.MainLoop.new(context, False)
+        response = None
+
+        def received(_bus, _sender, _path, _interface, _signal, parameters):
+            nonlocal response
+            response = parameters.unpack()
+            loop.quit()
+
+        def expired(*_):
+            loop.quit()
+            return GLib.SOURCE_REMOVE
+
+        timer = GLib.timeout_source_new(timeout * 1000)
+        context.push_thread_default()
+        try:
+            subscription = self.bus.signal_subscribe(self.name, "org.freedesktop.portal.Request",
+                                                     "Response", path, None, Gio.DBusSignalFlags.NONE, received)
+            try:
+                (request_path,) = self.bus.call_sync(
+                    self.name, self.path, self.interface, method, GLib.Variant(signature, (*arguments, options)),
+                    GLib.VariantType.new("(o)"), Gio.DBusCallFlags.NONE, 3000, None).unpack()
+                if request_path != path:
+                    raise RuntimeError("Le portail a renvoyé une requête de partage inattendue.")
+                timer.set_callback(expired)
+                timer.attach(context)
+                loop.run()
+                if response is None:
+                    self.close(path, "Request")
+                    raise RuntimeError("Le délai d’autorisation a expiré. Relance la capture et valide sur Ubuntu.")
+                if response[0] != 0:
+                    raise RuntimeError("Partage d’écran annulé ou refusé sur Ubuntu.")
+                return response[1]
+            finally:
+                self.bus.signal_unsubscribe(subscription)
+        finally:
+            timer.destroy()
+            context.pop_thread_default()
+
+    def close(self, path, interface):
+        from gi.repository import Gio, GLib
+
+        try:
+            self.bus.call_sync(self.name, path, "org.freedesktop.portal." + interface, "Close",
+                               None, None, Gio.DBusCallFlags.NONE, 1000, None)
+        except GLib.Error:
+            pass
+
+    def snapshot(self, allow_prompt):
+        from gi.repository import Gio, GLib
+
+        gst = shutil.which("gst-launch-1.0")
+        if not gst:
+            raise RuntimeError("Installe les dépendances GStreamer sur le lecteur Ubuntu.")
+        try:
+            if self.session is None:
+                if not allow_prompt:
+                    raise RuntimeError("Clique sur Autoriser la capture puis valide le partage sur Ubuntu.")
+                self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+                session = self.request("CreateSession", "(a{sv})", (),
+                                       {"session_handle_token": GLib.Variant("s", "ndi_" + secrets.token_hex(12))}, 4)
+                self.session = session["session_handle"]
+                self.request("SelectSources", "(oa{sv})", (self.session,),
+                             {"types": GLib.Variant("u", 1), "multiple": GLib.Variant("b", False)}, 4)
+                result = self.request("Start", "(osa{sv})", (self.session, ""), {}, 55)
+                [(node, props)] = result["streams"]
+                self.stream = (node, props.get("pipewire-serial"))
+            response, fds = self.bus.call_with_unix_fd_list_sync(
+                self.name, self.path, self.interface, "OpenPipeWireRemote",
+                GLib.Variant("(oa{sv})", (self.session, {})), GLib.VariantType.new("(h)"),
+                Gio.DBusCallFlags.NONE, 3000, None, None)
+            fd = fds.get(response.unpack()[0])
+            try:
+                node, serial = self.stream
+                target = f"target-object={serial}" if serial is not None else f"path={node}"
+                result = subprocess.run(
+                    [gst, "-q", "pipewiresrc", f"fd={fd}", target, "num-buffers=1",
+                     "!", "videoconvert", "!", "videoscale", "add-borders=true",
+                     "!", "video/x-raw,format=RGB,width=240,height=135,pixel-aspect-ratio=1/1",
+                     "!", "pngenc", "!", "fdsink", "fd=1", "sync=false"],
+                    capture_output=True, pass_fds=(fd,), timeout=8)
+            finally:
+                os.close(fd)
+            if result.returncode or not result.stdout.startswith(b"\x89PNG\r\n\x1a\n"):
+                if b"no element" in result.stderr or b"no property" in result.stderr:
+                    raise RuntimeError("Un module GStreamer manque sur Ubuntu. Installe les paquets indiqués dans le README.")
+                raise RuntimeError("PipeWire n’a pas pu lire l’écran partagé. Relance la capture.")
+            return result.stdout
+        except (GLib.Error, KeyError, ValueError, OSError, RuntimeError, subprocess.SubprocessError) as error:
+            if self.session:
+                self.close(self.session, "Session")
+            self.session = self.stream = None
+            if isinstance(error, RuntimeError):
+                raise
+            raise RuntimeError("Partage d’écran indisponible. Relance la capture et valide sur Ubuntu.") from error
 
 
 def display_snapshot_windows(player_pid, capture):
@@ -574,6 +700,7 @@ class DashboardClient:
         self.display_key = None
         self.display_info = {}
         self.display_check_at = 0
+        self.portal = PortalCapture() if not WINDOWS else None
 
     def poll(self, report, display_pid=0):
         server = self.identity["server"]
@@ -585,10 +712,12 @@ class DashboardClient:
                 self.display_info = json.loads(self.preview_command("--info-ecran", str(display_pid), 3))
             except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
                 self.display_info = {}
+        uses_portal = self.portal is not None and self.display_info.get("portal") is True
         report.update(kind=DEVICE_KIND, latency_ms=self.latency_ms, latency_test=self.latency_test,
                       diagnostic=self.diagnostic.sample(server), can_update=self.can_update,
                       client_version=self.version, client_release=SOFTWARE_VERSION,
-                      display=self.display_info, display_capture=self.display_info.get("capture") is True)
+                      display=self.display_info, display_capture=uses_portal or self.display_info.get("capture") is True,
+                      capture_needs_consent=uses_portal and self.portal.stream is None)
         if self.can_update:
             report["update_result"] = self.updater.report()
         started = time.monotonic()
@@ -605,9 +734,11 @@ class DashboardClient:
             screen = preview.get("screen") is True
             if isinstance(job, str) and (screen or isinstance(source, str)) and job != self.preview_job:
                 self.preview_job = job
-                mode = "--capture-ecran" if screen else "--apercu-ndi"
+                mode = "portal" if screen and uses_portal else "--capture-ecran" if screen else "--apercu-ndi"
                 argument = str(display_pid) if screen else source
-                threading.Thread(target=self.send_preview, args=(job, mode, argument, screen), daemon=True).start()
+                threading.Thread(target=self.send_preview,
+                                 args=(job, mode, argument, screen, preview.get("automatic") is not True),
+                                 daemon=True).start()
         reply.pop("restart_client", None)
         if self.can_update and not (reply.get("reboot") or reply.get("poweroff")):
             job = reply.get("client_update")
@@ -637,17 +768,19 @@ class DashboardClient:
             raise RuntimeError(probe.stderr.decode("utf-8", "replace").strip()[-240:])
         return probe.stdout
 
-    def send_preview(self, job, mode, argument, screen):
+    def send_preview(self, job, mode, argument, screen, allow_prompt):
         result = {"id": self.identity["id"], "job": job}
         try:
-            png = self.preview_command(mode, argument, 9)
+            png = (self.portal.snapshot(allow_prompt) if mode == "portal" else
+                   self.preview_command(mode, argument, 11 if screen else 9))
             if 0 < len(png) <= PREVIEW_LIMIT:
                 result["image"] = b64encode(png).decode("ascii")
         except RuntimeError as error:
             if screen and str(error):
                 result["error"] = str(error)
         except (OSError, subprocess.SubprocessError):
-            pass
+            if screen:
+                result["error"] = "La capture locale n’a pas abouti. Relance la capture."
         try:
             post(self.identity["server"], "/api/preview-result", result, self.identity["token"])
         except (OSError, RuntimeError, ValueError):

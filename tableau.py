@@ -30,7 +30,7 @@ from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.19"
+SOFTWARE_VERSION = "1.4.20"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 20
 DATA = ROOT / "ecrans.json"
@@ -64,6 +64,7 @@ UPDATE_DIGEST = digest(UPDATE_FILES)
 RECEIVER_PATHS = {"/api/enroll", "/api/poll", "/api/client-package", "/api/preview-result"}
 PREVIEWS = {}
 PREVIEW_WAIT = 16
+PREVIEW_CONSENT_WAIT = 90
 PREVIEW_FRESH = 40
 PREVIEW_CLIENT = (1, 4, 7)
 DISPLAY_PREVIEW_CLIENT = (1, 4, 8)
@@ -114,7 +115,7 @@ def preview_prune(now):
 
 def preview_status(job):
     public = {"id": job["id"], "state": job["state"]}
-    for field in ("image", "error", "captured"):
+    for field in ("image", "error", "captured", "consent"):
         if field in job:
             public[field] = job[field]
     return public
@@ -143,12 +144,15 @@ def request_preview(data, now):
     if screen and online[0][1].get("display_capture") is not True:
         return 409, {"error": "La capture de l’affichage est indisponible sur ce lecteur."}
     automatic = data.get("automatic") is True
+    consent = screen and online[0][1].get("capture_needs_consent") is True
+    if automatic and consent:
+        return 409, {"error": "Autorise le partage sur le lecteur Ubuntu avant de lancer la capture automatique."}
     if existing:
         if existing["state"] != "ready":
             return 200, preview_status(existing)
         if automatic and now - existing["captured"] < PREVIEW_AUTO_INTERVAL:
             return 200, preview_status(existing)
-        if not automatic and existing["id"] != data.get("previous"):
+        if not automatic and not consent and existing["id"] != data.get("previous"):
             return 200, preview_status(existing)
     minimum = DISPLAY_PREVIEW_CLIENT if screen else PREVIEW_CLIENT
     supported = [(key, report) for key, report in online
@@ -166,7 +170,7 @@ def request_preview(data, now):
                             key=lambda name: PREVIEWS[name]["until"])
         del PREVIEWS[expired_first]
     job = dict(id=secrets.token_hex(12), reader=device, source=source, screen=screen, state="pending",
-               automatic=automatic, until=now + PREVIEW_WAIT)
+               automatic=automatic, consent=consent, until=now + (PREVIEW_CONSENT_WAIT if consent else PREVIEW_WAIT))
     PREVIEWS[target] = job
     return 200, preview_status(job)
 
@@ -860,6 +864,7 @@ class Request(BaseHTTPRequestHandler):
                                  display=display_report(data.get("display")),
                                  display_capture=data.get("display_capture") is True
                                  if "display_capture" in data else None,
+                                 capture_needs_consent=data.get("capture_needs_consent") is True,
                                  can_update=can_update, client_version=version, client_release=release,
                                  update_result=result,
                                  latency_ms=bounded_number(data.get("latency_ms"), 10000))
@@ -869,7 +874,8 @@ class Request(BaseHTTPRequestHandler):
             availability = update_availability(row["report"], now, UPDATE_KEY.is_file())
             recommendation = dict(version=CLIENT_VERSION, state=availability)
             preview_prune(now)
-            preview = next((dict(id=item["id"], source=item["source"], screen=item["screen"]) for item in PREVIEWS.values()
+            preview = next((dict(id=item["id"], source=item["source"], screen=item["screen"],
+                                 automatic=item["automatic"]) for item in PREVIEWS.values()
                             if item["reader"] == key and item["state"] == "pending"), None)
             return 200, dict(options=row["options"],
                              preview_request=preview,

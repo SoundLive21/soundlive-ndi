@@ -562,23 +562,26 @@ function renderPreview(view) {
   }
   view.image.hidden = !image;
   view.button.disabled = !view.available || Boolean(view.pending);
-  view.button.textContent = image ? "Actualiser l’aperçu" : "Capturer un aperçu";
+  view.button.textContent = view.needsConsent ? "Autoriser la capture" :
+    image ? "Actualiser l’aperçu" : "Capturer un aperçu";
   const timestamp = image ? "Image capturée à " + new Date(snapshot.captured * 1000).toLocaleTimeString("fr-FR") : "";
-  const progress = view.pending ? (image ? "Actualisation…" : "Capture en cours…") : view.error;
+  const progress = view.pending ? (view.needsConsent ? "Sélectionne l’écran et valide le partage sur Ubuntu." :
+    image ? "Actualisation…" : "Capture en cours…") : view.error;
   const message = view.available ? ([timestamp, progress].filter(Boolean).join(" · ") ||
-    (previewAuto.checked ? "En attente d’un aperçu…" : "Image à la demande")) : view.unavailable;
+    (view.needsConsent ? "Le partage de l’écran doit être autorisé sur le lecteur." :
+      previewAuto.checked ? "En attente d’un aperçu…" : "Image à la demande")) : view.unavailable;
   if (view.status.textContent !== message) view.status.textContent = message;
 }
 
 async function requestPreview(view, automatic = false) {
-  if (!view.available || remoteSessionEnded || view.pending) return;
+  if (!view.available || remoteSessionEnded || view.pending || (automatic && view.needsConsent)) return;
   const target = {[view.screen ? "screen" : "source"]:view.target};
   view.pending = true;
   view.error = "";
   renderPreview(view);
   try {
     let result = await call("/api/preview", {...target, previous:view.snapshot?.id, automatic});
-    const end = Date.now() + 18000;
+    const end = Date.now() + (result.consent ? 92000 : 18000);
     while (result.state === "pending" && Date.now() < end) {
       await new Promise(resolve => setTimeout(resolve, 950));
       result = await call("/api/preview?" + new URLSearchParams(target));
@@ -599,7 +602,7 @@ async function requestPreview(view, automatic = false) {
 }
 
 function previewVisible(view) {
-  if (!view.available) return false;
+  if (!view.available || view.needsConsent) return false;
   const rect = view.element.getBoundingClientRect();
   return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 &&
     rect.top < window.innerHeight && rect.left < window.innerWidth;
@@ -1253,6 +1256,7 @@ function render(row) {
   const hasNewClient = row.report.display_capture !== null && Object.hasOwn(row.report, "display_capture");
   const supported = row.report.display_capture === true;
   overview.available = row.online && supported;
+  overview.needsConsent = row.report.capture_needs_consent === true;
   overview.unavailable = !row.online ? "Lecteur hors ligne." : hasNewClient ?
     "Capture indisponible dans cette session graphique." : "Mets à jour le lecteur pour activer la capture.";
   if (!overview.available) {
