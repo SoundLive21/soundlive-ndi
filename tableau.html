@@ -116,9 +116,13 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .preview-box{margin:0 0 14px;min-width:0;border:1px solid var(--edge);border-radius:12px;overflow:hidden;background:#100d12}
 .preview-box[hidden],.preview-box img[hidden]{display:none}
 .preview-box img{width:100%;aspect-ratio:16/9;display:block;object-fit:contain;background:#09070a}
+.preview-placeholder{display:grid;place-content:center;justify-items:center;gap:8px;aspect-ratio:16/9;background:#15111a;color:#c8bcca;font-size:.85rem;text-align:center}
+.preview-placeholder[hidden]{display:none}
+.preview-placeholder svg{width:32px;height:32px;fill:none;stroke:#a9d6ff;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
 .preview-caption{display:grid;gap:8px;padding:11px;overflow-wrap:anywhere}
 .preview-caption strong{font-size:.88rem}
 .preview-caption .small{margin:0;min-height:1.25em}
+.preview-caption [role="status"]{height:2.75em;overflow:auto}
 .preview-caption button{justify-self:start;white-space:normal}
 .traffic-interface-label{display:flex;align-items:center;gap:6px;margin:6px 0 0;overflow-wrap:anywhere;font-size:.8rem}
 .traffic-interface-label svg{display:none;width:16px;height:16px;flex:none;color:#c1e6f6;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
@@ -292,6 +296,10 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 <template id="preview-template">
   <figure class="preview-box">
     <img alt="" hidden>
+    <div class="preview-placeholder" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4m-5-8 3-3 2 2 2-2 3 3"/></svg>
+      <span>Aperçu en attente</span>
+    </div>
     <figcaption class="preview-caption">
       <strong></strong>
       <p class="small" role="status"></p>
@@ -543,7 +551,8 @@ function createPreview(parent, title, target, screen = false) {
   const button = select(element, "button");
   const image = select(element, "img");
   const status = select(element, "p");
-  const view = {element, button, image, status, title, target, screen, available:!screen};
+  const view = {element, button, image, status, title, target, screen, available:!screen,
+    placeholder:select(element, ".preview-placeholder")};
   select(element, "strong").textContent = title;
   button.onclick = () => requestPreview(view);
   parent.append(element);
@@ -556,11 +565,13 @@ function renderPreview(view) {
   if (image) {
     const url = "data:image/png;base64," + image;
     if (view.image.getAttribute("src") !== url) view.image.src = url;
-    view.image.alt = view.screen ? "Capture de l’écran " + view.title : "Aperçu du flux " + view.target;
+    view.image.alt = view.screen ? "Aperçu du lecteur " + view.title : "Aperçu du flux " + view.target;
   } else {
     view.image.removeAttribute("src");
   }
   view.image.hidden = !image;
+  view.placeholder.hidden = Boolean(image);
+  select(view.placeholder, "span").textContent = view.available ? "Aperçu en attente" : "Aperçu indisponible";
   view.button.disabled = !view.available || Boolean(view.pending);
   view.button.textContent = view.needsConsent ? "Autoriser la capture" :
     image ? "Actualiser l’aperçu" : "Capturer un aperçu";
@@ -1252,6 +1263,8 @@ function render(row) {
   const activeSource = playing ? row.report.active_source || "" : "";
   const overview = card.preview;
   overview.title = row.name;
+  select(overview.element, "strong").textContent = row.report.display_preview_kind === "player" ?
+    "Aperçu du rendu SoundLive‑NDI" : "Capture de l’écran";
   overview.element.parentElement.hidden = !row.paired;
   const hasNewClient = row.report.display_capture !== null && Object.hasOwn(row.report, "display_capture");
   const supported = row.report.display_capture === true;

@@ -69,6 +69,20 @@ static void fill_audio(SDL_AudioDeviceID device, NDIlib_framesync_instance_t syn
     }
 }
 
+static SDL_Rect fitted_frame(int width, int height, const NDIlib_video_frame_v2_t *frame)
+{
+    const double aspect = frame->picture_aspect_ratio > 0 ?
+                          frame->picture_aspect_ratio : (double)frame->xres / frame->yres;
+    SDL_Rect rect = {0, 0, width, height};
+    if (width > height * aspect)
+        rect.w = SDL_max(1, (int)(height * aspect));
+    else
+        rect.h = SDL_max(1, (int)(width / aspect));
+    rect.x = (width - rect.w) / 2;
+    rect.y = (height - rect.h) / 2;
+    return rect;
+}
+
 static int display_frame(SDL_Renderer *renderer, SDL_Texture **texture,
                          const NDIlib_video_frame_v2_t *frame)
 {
@@ -94,15 +108,7 @@ static int display_frame(SDL_Renderer *renderer, SDL_Texture **texture,
     int output_width, output_height;
     if (SDL_GetRendererOutputSize(renderer, &output_width, &output_height) < 0)
         return -1;
-    const double aspect = frame->picture_aspect_ratio > 0 ?
-                          frame->picture_aspect_ratio : (double)frame->xres / frame->yres;
-    SDL_Rect dst = {0, 0, output_width, output_height};
-    if (output_width > output_height * aspect)
-        dst.w = (int)(output_height * aspect);
-    else
-        dst.h = (int)(output_width / aspect);
-    dst.x = (output_width - dst.w) / 2;
-    dst.y = (output_height - dst.h) / 2;
+    const SDL_Rect dst = fitted_frame(output_width, output_height, frame);
     if (SDL_RenderClear(renderer) < 0 || SDL_RenderCopy(renderer, *texture, NULL, &dst) < 0)
         return -1;
     SDL_RenderPresent(renderer);
@@ -120,6 +126,57 @@ static FILE *open_ready(const char *path)
     return fopen(path, "w");
 #endif
 }
+
+#ifndef _WIN32
+/* On demand only. Use the very same frame and aspect ratio as the SDL player. */
+static void preview_frame(const char *base, const NDIlib_video_frame_v2_t *frame,
+                          int out_width, int out_height)
+{
+    char request[4096], pending[4096], output[4096], token[25];
+    if (snprintf(request, sizeof(request), "%s.request", base) >= (int)sizeof(request) ||
+        snprintf(pending, sizeof(pending), "%s.tmp", base) >= (int)sizeof(pending) ||
+        snprintf(output, sizeof(output), "%s.rgb", base) >= (int)sizeof(output))
+        return;
+    FILE *file = fopen(request, "r");
+    if (!file)
+        return;
+    const int parsed = fscanf(file, "%24[0123456789abcdef]", token);
+    fclose(file);
+    remove(request);
+    if (parsed != 1 || strlen(token) != 24 || out_width <= 0 || out_height <= 0 ||
+        frame->line_stride_in_bytes < 4LL * frame->xres)
+        return;
+    const double scale_x = 240.0 / out_width, scale_y = 135.0 / out_height;
+    const double scale = scale_x < scale_y ? scale_x : scale_y;
+    const int width = SDL_max(1, (int)(out_width * scale + 0.5));
+    const int height = SDL_max(1, (int)(out_height * scale + 0.5));
+    const SDL_Rect rect = fitted_frame(width, height, frame);
+    file = fopen(pending, "wb");
+    if (!file)
+        return;
+    fprintf(file, "%s\n%d %d\n", token, width, height);
+    for (int y = 0; y < height; ++y) {
+        unsigned char line[240 * 3] = {0};
+        if (y >= rect.y && y < rect.y + rect.h) {
+            const unsigned char *row = frame->p_data +
+                (size_t)((int64_t)(y - rect.y) * frame->yres / rect.h) * frame->line_stride_in_bytes;
+            for (int x = 0; x < rect.w; ++x) {
+                const unsigned char *pixel = row + 4 * ((int64_t)x * frame->xres / rect.w);
+                unsigned char *rgb = &line[(rect.x + x) * 3];
+                rgb[0] = pixel[2];
+                rgb[1] = pixel[1];
+                rgb[2] = pixel[0];
+            }
+        }
+        if (fwrite(line, 3, width, file) != (size_t)width)
+            break;
+    }
+    const bool complete = !ferror(file);
+    if (fclose(file) == 0 && complete)
+        rename(pending, output);
+    remove(pending);
+}
+#endif
 
 static int play(const char *source, bool low, float volume, const char *ready_file)
 {
@@ -179,6 +236,10 @@ static int play(const char *source, bool low, float volume, const char *ready_fi
     Uint64 last_frame = SDL_GetTicks64();
     Uint64 next_draw = 0;
     int refresh_rate = 60;
+#ifndef _WIN32
+    const char *preview = getenv("SOUNDLIVE_RENDER_PREVIEW");
+    Uint64 next_preview = 0;
+#endif
 
     if (SDL_InitSubSystem(SDL_INIT_VIDEO) < 0)
         goto sdl_error;
@@ -250,6 +311,14 @@ static int play(const char *source, bool low, float volume, const char *ready_fi
                     SDL_ShowCursor(SDL_DISABLE);
                 }
                 const int displayed = display_frame(renderer, &texture, &frame);
+#ifndef _WIN32
+                if (displayed == 0 && preview && now >= next_preview) {
+                    int width, height;
+                    if (SDL_GetRendererOutputSize(renderer, &width, &height) == 0)
+                        preview_frame(preview, &frame, width, height);
+                    next_preview = now + 250;
+                }
+#endif
                 NDIlib_framesync_free_video(sync, &frame);
                 if (displayed < 0)
                     goto sdl_error;
@@ -289,6 +358,12 @@ cleanup:
 
 static int run(int argc, char **argv)
 {
+#ifndef _WIN32
+    if (argc == 2 && strcmp(argv[1], "--apercu-interne") == 0) {
+        puts("apercu-interne");
+        return 0;
+    }
+#endif
     const bool list = argc == 2 && strcmp(argv[1], "--sources") == 0;
     char *end = NULL;
     const long volume = argc == 5 ? strtol(argv[3], &end, 10) : -1;

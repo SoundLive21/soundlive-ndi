@@ -30,9 +30,9 @@ from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.20"
+SOFTWARE_VERSION = "1.4.21"
 RESOLUTION_CONTROLS_ENABLED = False
-PREVIEW_AUTO_INTERVAL = 20
+PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
 REMOTE_ACCESS = ROOT / ".soundlive-acces"
 PAGE = ((ROOT / "tableau.html").read_bytes()
@@ -865,6 +865,7 @@ class Request(BaseHTTPRequestHandler):
                                  display_capture=data.get("display_capture") is True
                                  if "display_capture" in data else None,
                                  capture_needs_consent=data.get("capture_needs_consent") is True,
+                                 display_preview_kind="player" if data.get("display_preview_kind") == "player" else "monitor",
                                  can_update=can_update, client_version=version, client_release=release,
                                  update_result=result,
                                  latency_ms=bounded_number(data.get("latency_ms"), 10000))

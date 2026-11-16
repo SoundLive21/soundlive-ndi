@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.20** et le client **1.4.10**.
+Ce kit contient la régie **1.4.21** et le client **1.4.11**.
 
 ## Installer et lancer la régie
 
@@ -305,7 +305,8 @@ pour voir la résolution du moniteur, son modèle et sa sortie d’affichage
 lorsqu’ils sont signalés par le système.
 
 Le tableau rafraîchit les aperçus visibles avec un délai d’au moins
-**20 secondes par source ou par écran**.
+**30 secondes par source ou par écran**. Une image d’attente réserve la
+même surface que la capture.
 Les captures automatiques se font l’une après l’autre. Elles se mettent en
 pause quand l’onglet passe en arrière-plan. L’option **Actualiser
 automatiquement les aperçus visibles** permet de désactiver ce mode.
@@ -322,13 +323,30 @@ Une résolution précédée de **≈** est une estimation.
 
 #### Capturer sur Ubuntu GNOME sous Wayland
 
+Sur un lecteur Ubuntu dédié, le client **1.4.11** et son moteur SDL
+mis à jour peuvent afficher dans la régie le **rendu SoundLive‑NDI**.
+L’image vient de la vidéo en cours de lecture ou de l’écran d’attente
+dessiné par le lecteur. Elle n’inclut que le contenu de SoundLive‑NDI.
+Aucune confirmation locale n’est nécessaire, y compris après redémarrage.
+
+Pour un lecteur déjà installé, copie le kit et exécute cette commande
+depuis son compte `soundlive`, par exemple via SSH. Pousse ensuite le
+client 1.4.11 depuis la régie pour charger le moteur mis à jour.
+
+```bash
+bash installer-ubuntu.sh --mettre-a-jour-rendu
+```
+
+Avec le moteur précédent, la capture du moniteur complet reste
+accessible par le portail de GNOME.
+
 Installe les composants nécessaires une fois sur le lecteur Ubuntu.
 
 ```bash
 sudo apt install xdg-desktop-portal-gnome gstreamer1.0-tools gstreamer1.0-pipewire gstreamer1.0-plugins-base gstreamer1.0-plugins-good
 ```
 
-Après la mise à jour du client en **1.4.10**, clique sur **Autoriser la
+Avec un client **1.4.10 ou ultérieur**, clique sur **Autoriser la
 capture** dans la fiche du lecteur. Sélectionne le moniteur, puis valide
 **Partager** sur le PC Ubuntu. Le partage dure jusqu’à l’arrêt du lecteur,
 la fermeture de session ou l’arrêt du partage depuis GNOME. Tu peux ensuite
@@ -385,7 +403,7 @@ privée utilisée par la régie pour signer le push des lecteurs reste distincte
 ```bash
 ssh-keygen -t ed25519 -f /chemin/prive/soundlive-publication
 python3 publier-version.py --cle /chemin/prive/soundlive-publication
-gh release create v1.4.20 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.20' --generate-notes
+gh release create v1.4.21 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.21' --generate-notes
 ```
 
 Adapte le tag au numéro de `SOFTWARE_VERSION` dans `tableau.py`. La version

@@ -4,7 +4,7 @@
 # contact@soundlive.fr
 # Société SoundLive
 import configparser
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from base64 import b64encode
 import json
 import os
@@ -42,6 +42,7 @@ DEVICE_KIND = "windows" if WINDOWS else os.environ.get("SOUNDLIVE_DEVICE_KIND", 
 PLAYER = str(APP / "lecteur-ndi-windows.exe" if WINDOWS else
              APP / "lecteur-ndi-ubuntu" if UBUNTU else NDI / "bin/ffplay")
 READY = STATE / "video.prete"
+RENDER_PREVIEW = STATE / "apercu-interne"
 BOOT = "windows-" + secrets.token_hex(16) if WINDOWS else Path("/proc/sys/kernel/random/boot_id").read_text().strip()
 REGIE_UNPAIRED = ("Lecteur non associé à la régie", "#ffacb8")
 REGIE_CHECKING = ("Vérification du rattachement…", "#dfcbd1")
@@ -328,6 +329,45 @@ def display_snapshot_linux(player_pid, capture):
 def preview_size(width, height):
     scale = min(240 / width, 135 / height, 1)
     return max(1, round(width * scale)), max(1, round(height * scale))
+
+
+def player_render_preview():
+    import struct
+    import zlib
+
+    token = secrets.token_hex(12)
+    request = RENDER_PREVIEW.with_suffix(".request")
+    temporary = RENDER_PREVIEW.with_suffix(".new")
+    output = RENDER_PREVIEW.with_suffix(".rgb")
+    temporary.write_text(token + "\n", encoding="ascii")
+    temporary.replace(request)
+    try:
+        deadline = time.monotonic() + 4
+        while time.monotonic() < deadline:
+            try:
+                with output.open("rb") as stream:
+                    if stream.readline(26) == token.encode() + b"\n":
+                        width, height = map(int, stream.readline(16).split())
+                        if not (1 <= width <= 240 and 1 <= height <= 135):
+                            raise ValueError("Dimensions d’aperçu invalides.")
+                        stride = width * 3
+                        pixels = stream.read(stride * height + 1)
+                        if len(pixels) != stride * height:
+                            raise ValueError("Image du lecteur incomplète.")
+                        raw = b"".join(b"\0" + pixels[row:row + stride] for row in range(0, len(pixels), stride))
+
+                        def chunk(kind, data):
+                            return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+                        return (b"\x89PNG\r\n\x1a\n" +
+                                chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) +
+                                chunk(b"IDAT", zlib.compress(raw, 1)) + chunk(b"IEND", b""))
+            except FileNotFoundError:
+                pass
+            time.sleep(.10)
+        raise RuntimeError("Le lecteur n’a pas produit d’image. Réessaie quand le flux est en lecture.")
+    finally:
+        request.unlink(missing_ok=True)
 
 
 class PortalCapture:
@@ -701,6 +741,7 @@ class DashboardClient:
         self.display_info = {}
         self.display_check_at = 0
         self.portal = PortalCapture() if not WINDOWS else None
+        self.internal_preview = None
 
     def poll(self, report, display_pid=0):
         server = self.identity["server"]
@@ -712,11 +753,14 @@ class DashboardClient:
                 self.display_info = json.loads(self.preview_command("--info-ecran", str(display_pid), 3))
             except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
                 self.display_info = {}
-        uses_portal = self.portal is not None and self.display_info.get("portal") is True
+        uses_internal = self.internal_preview is not None and self.display_info.get("portal") is True
+        uses_portal = not uses_internal and self.portal is not None and self.display_info.get("portal") is True
         report.update(kind=DEVICE_KIND, latency_ms=self.latency_ms, latency_test=self.latency_test,
                       diagnostic=self.diagnostic.sample(server), can_update=self.can_update,
                       client_version=self.version, client_release=SOFTWARE_VERSION,
-                      display=self.display_info, display_capture=uses_portal or self.display_info.get("capture") is True,
+                      display=self.display_info, display_capture=uses_internal or uses_portal
+                      or self.display_info.get("capture") is True,
+                      display_preview_kind="player" if uses_internal else "monitor",
                       capture_needs_consent=uses_portal and self.portal.stream is None)
         if self.can_update:
             report["update_result"] = self.updater.report()
@@ -734,7 +778,10 @@ class DashboardClient:
             screen = preview.get("screen") is True
             if isinstance(job, str) and (screen or isinstance(source, str)) and job != self.preview_job:
                 self.preview_job = job
-                mode = "portal" if screen and uses_portal else "--capture-ecran" if screen else "--apercu-ndi"
+                if screen and uses_internal:
+                    mode = "waiting" if report["state"] != "Lecture" else "player"
+                else:
+                    mode = "portal" if screen and uses_portal else "--capture-ecran" if screen else "--apercu-ndi"
                 argument = str(display_pid) if screen else source
                 threading.Thread(target=self.send_preview,
                                  args=(job, mode, argument, screen, preview.get("automatic") is not True),
@@ -771,14 +818,20 @@ class DashboardClient:
     def send_preview(self, job, mode, argument, screen, allow_prompt):
         result = {"id": self.identity["id"], "job": job}
         try:
-            png = (self.portal.snapshot(allow_prompt) if mode == "portal" else
-                   self.preview_command(mode, argument, 11 if screen else 9))
+            if mode == "player":
+                png = player_render_preview()
+            elif mode == "waiting":
+                png = self.internal_preview()
+            elif mode == "portal":
+                png = self.portal.snapshot(allow_prompt)
+            else:
+                png = self.preview_command(mode, argument, 11 if screen else 9)
             if 0 < len(png) <= PREVIEW_LIMIT:
                 result["image"] = b64encode(png).decode("ascii")
         except RuntimeError as error:
             if screen and str(error):
                 result["error"] = str(error)
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, ValueError, subprocess.SubprocessError):
             if screen:
                 result["error"] = "La capture locale n’a pas abouti. Relance la capture."
         try:
@@ -835,6 +888,16 @@ def desktop():
             self.window = Gtk.Window(title=APP_NAME, decorated=False)
             self.window.connect("destroy", lambda *_: Gtk.main_quit())
             self.window.connect("key-press-event", self.key_press)
+            if self.dashboard and UBUNTU and "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper():
+                try:
+                    gi.require_foreign("cairo")
+                    check = subprocess.run([PLAYER, "--apercu-interne"], capture_output=True, timeout=2)
+                    if check.returncode == 0 and check.stdout.strip() == b"apercu-interne":
+                        RENDER_PREVIEW.with_suffix(".request").unlink(missing_ok=True)
+                        RENDER_PREVIEW.with_suffix(".rgb").unlink(missing_ok=True)
+                        self.dashboard.internal_preview = self.waiting_preview
+                except (ImportError, OSError, subprocess.SubprocessError):
+                    pass
             css = Gtk.CssProvider()
             css.load_from_data(b"""
                 window {background-image:linear-gradient(145deg,#230c11,#100e11 46%,#08080a);}
@@ -924,6 +987,46 @@ def desktop():
             self.title.set_text("En attente du flux vidéo" if self.settings["enabled"] else "Diffusion arrêtée")
             self.window.fullscreen()
             self.window.show_all()
+
+        def waiting_preview(self):
+            import cairo
+
+            result = Future()
+
+            def draw():
+                if not result.set_running_or_notify_cancel():
+                    return GLib.SOURCE_REMOVE
+                try:
+                    allocation = self.window.get_allocation()
+                    if not self.window.get_mapped() or allocation.width < 2 or allocation.height < 2:
+                        raise RuntimeError("L’écran d’attente n’est plus affiché. Relance la capture.")
+                    width, height = preview_size(allocation.width, allocation.height)
+                    surface = cairo.ImageSurface(cairo.FORMAT_RGB24, width, height)
+                    context = cairo.Context(surface)
+                    context.scale(width / allocation.width, height / allocation.height)
+                    self.window.draw(context)
+                    pixbuf = Gdk.pixbuf_get_from_surface(surface, 0, 0, width, height)
+                    ok, png = pixbuf.save_to_bufferv("png", [], [])
+                    if not ok:
+                        raise RuntimeError("Impossible d’encoder l’écran d’attente.")
+                    if png[25] != 2:
+                        rgb = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, width, height)
+                        rgb.fill(0)
+                        pixbuf.composite(rgb, 0, 0, width, height, 0, 0, 1, 1, GdkPixbuf.InterpType.NEAREST, 255)
+                        ok, png = rgb.save_to_bufferv("png", [], [])
+                        if not ok:
+                            raise RuntimeError("Impossible d’encoder l’écran d’attente.")
+                    result.set_result(bytes(png))
+                except (RuntimeError, ValueError, AttributeError, GLib.Error, cairo.Error) as error:
+                    result.set_exception(RuntimeError(str(error)))
+                return GLib.SOURCE_REMOVE
+
+            GLib.idle_add(draw)
+            try:
+                return result.result(timeout=3)
+            except TimeoutError as error:
+                result.cancel()
+                raise RuntimeError("Le rendu de l’écran d’attente n’a pas répondu.") from error
 
         def show_regie_state(self, state):
             if state != self.regie_state:
@@ -1016,7 +1119,10 @@ def desktop():
                     READY.unlink(missing_ok=True)
                     command = [PLAYER, self.settings["source"], self.settings["bandwidth"],
                                str(volume), str(READY)]
-                self.player = subprocess.Popen(command, stdout=self.log, stderr=subprocess.STDOUT)
+                env = None
+                if self.dashboard and self.dashboard.internal_preview is not None:
+                    env = {**os.environ, "SOUNDLIVE_RENDER_PREVIEW": str(RENDER_PREVIEW)}
+                self.player = subprocess.Popen(command, stdout=self.log, stderr=subprocess.STDOUT, env=env)
                 self.active_source = self.settings["source"]
                 self.video_ready = not UBUNTU
             except OSError as error:

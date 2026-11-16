@@ -15,11 +15,16 @@ show_usage() {
     echo "Première installation : bash installer-ubuntu.sh http://IP_DU_PC:8765 CODE"
     echo "Mise à jour complète : bash installer-ubuntu.sh --mettre-a-jour [http://IP_DU_PC:8765]"
     echo "Mise à jour du client et des diagnostics : bash installer-ubuntu.sh --mettre-a-jour-client [http://IP_DU_PC:8765]"
+    echo "Mise à jour du moteur d’affichage uniquement : bash installer-ubuntu.sh --mettre-a-jour-rendu"
 }
 
 update=false
 client_only=false
-if [[ ${1:-} == --mettre-a-jour || ${1:-} == --mettre-a-jour-client ]]; then
+render_only=false
+if [[ ${1:-} == --mettre-a-jour-rendu && $# -eq 1 ]]; then
+    update=true
+    render_only=true
+elif [[ ${1:-} == --mettre-a-jour || ${1:-} == --mettre-a-jour-client ]]; then
     if (( $# > 2 )); then
         show_usage
         exit 1
@@ -46,6 +51,10 @@ autostart="$config_dir/autostart"
 association="$config_dir/soundlive-ndi/association.json"
 if $update && [[ ! -r "$association" ]]; then
     echo "Ce compte n’a pas encore d’association. Utilise le code du tableau SoundLive-NDI."
+    exit 1
+fi
+if $render_only && [[ ! -x "$app/lecteur-ndi-ubuntu" || ! -r "$app/lib/libndi.so.6" ]]; then
+    echo "Installation incomplète. Lance la mise à jour complète avec --mettre-a-jour."
     exit 1
 fi
 
@@ -100,10 +109,17 @@ case "$(dpkg --print-architecture)" in
     *) echo "Architecture non prise en charge. Ubuntu doit être en 64 bits."; exit 1 ;;
 esac
 
-sudo apt update
-sudo apt install -y gcc pkg-config libsdl2-dev python3 python3-gi gir1.2-gtk-3.0 \
-    avahi-daemon libavahi-client3 curl ca-certificates
-sudo systemctl enable --now avahi-daemon
+if $render_only; then
+    if ! command -v gcc >/dev/null || ! command -v pkg-config >/dev/null || ! pkg-config --exists sdl2; then
+        sudo apt update
+        sudo apt install -y gcc pkg-config libsdl2-dev
+    fi
+else
+    sudo apt update
+    sudo apt install -y gcc pkg-config libsdl2-dev python3 python3-gi python3-gi-cairo gir1.2-gtk-3.0 \
+        avahi-daemon libavahi-client3 curl ca-certificates
+    sudo systemctl enable --now avahi-daemon
+fi
 
 temp=$(mktemp -d)
 trap 'rm -rf -- "$temp"' EXIT
@@ -143,6 +159,16 @@ gcc -O2 -std=c11 -Wall -Wextra -I"$sdk/include" "$here/lecteur-ndi-ubuntu.c" \
     "$sdk/lib/$sdk_arch/libndi.so.6" -o "$temp/lecteur-ndi-ubuntu"
 mkdir -p "$temp/lib"
 install -m 644 "$sdk/lib/$sdk_arch/libndi.so.6" "$temp/lib/libndi.so.6"
+if $render_only; then
+    if ! /usr/bin/python3 -c 'import cairo, gi; gi.require_foreign("cairo")' >/dev/null 2>&1; then
+        sudo apt install -y python3-gi-cairo
+    fi
+    "$temp/lecteur-ndi-ubuntu" --apercu-interne >/dev/null
+    install -m 755 "$temp/lecteur-ndi-ubuntu" "$app/.lecteur-ndi-ubuntu.new"
+    mv -fT "$app/.lecteur-ndi-ubuntu.new" "$app/lecteur-ndi-ubuntu"
+    echo "Moteur d’affichage mis à jour. Pousse ensuite le nouveau client depuis la régie."
+    exit 0
+fi
 "$temp/lecteur-ndi-ubuntu" --sources >/dev/null
 
 account=$(id -un)
