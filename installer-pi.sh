@@ -29,6 +29,11 @@ if ! /usr/bin/python3 -c 'import gi; gi.require_version("Gtk", "3.0"); from gi.r
     sudo apt update
     sudo apt install -y python3-gi gir1.2-gtk-3.0
 fi
+if [[ ${XDG_SESSION_TYPE:-} == wayland ]] && ! command -v wlr-randr >/dev/null; then
+    sudo apt install -y wlr-randr
+elif [[ ${XDG_SESSION_TYPE:-} == x11 ]] && ! command -v xrandr >/dev/null; then
+    sudo apt install -y x11-xserver-utils
+fi
 here=$(cd -- "$(dirname -- "$0")" && pwd)
 for file in ecran.py commun.py diagnostic.py mise_a_jour.py lancer-client.py; do
     if [[ ! -r "$here/$file" ]]; then

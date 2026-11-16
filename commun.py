@@ -8,8 +8,9 @@ import sys
 DEFAULT_SOURCE = "OBS (Programme)"
 APP_NAME = "SoundLive-NDI"
 COPYRIGHT = "© 2026 Société SoundLive"
-SOFTWARE_VERSION = "1.4.14"
+SOFTWARE_VERSION = "1.4.15"
 PREVIEW_LIMIT = 160 * 1024
+ORIENTATIONS = ("landscape", "portrait-left", "portrait-right")
 
 
 @contextmanager
@@ -44,14 +45,17 @@ def options(value):
     source = value["source"]
     mode = value["bandwidth"]
     volume = value["volume"]
+    orientation = value.get("orientation", "landscape")
     if not isinstance(source, str) or not 0 < len(source.strip()) <= 256 or any(ord(c) < 32 for c in source):
         raise ValueError("Saisis le nom complet d’une source NDI.")
     if mode not in ("0", "1"):
         raise ValueError("Sélectionne Low ou High.")
     if type(volume) is not int or not 0 <= volume <= 100:
         raise ValueError("Le volume doit être compris entre 0 et 100.")
+    if orientation not in ORIENTATIONS:
+        raise ValueError("Orientation de l’écran invalide.")
     for key in ("enabled", "muted"):
         if type(value[key]) is not bool:
             raise ValueError("État audio ou lecture invalide.")
-    return dict(source=source.strip(), bandwidth=mode, volume=volume,
+    return dict(source=source.strip(), bandwidth=mode, volume=volume, orientation=orientation,
                 enabled=value["enabled"], muted=value["muted"])

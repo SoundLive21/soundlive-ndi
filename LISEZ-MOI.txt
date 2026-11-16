@@ -85,6 +85,14 @@ RÉGIE SOUS UBUNTU DESKTOP
    Si le tableau est fermé, le Pi garde son dernier réglage local. Un Pi
    hors ligne récupère les réglages enregistrés quand il se reconnecte.
 
+   Orientation de l’écran depuis Gestion → Commandes et réglages
+   Le client 1.4.15 applique Paysage, Portrait gauche ou Portrait droite
+   à la sortie graphique du système. Le bureau, l’attente et le flux
+   suivent la rotation. Paysage est la valeur par défaut. Le réglage est
+   réappliqué à l’ouverture de la session et figure dans Actions de groupe.
+   Sur un Pi Wayland compatible, installe wlr-randr si nécessaire.
+   En X11, xrandr est fourni par le paquet x11-xserver-utils.
+
 4. DÉPLOYER UN NOUVEAU PI
    Clone la microSD d'un Pi opérationnel pour récupérer l'OS, FFplay NDI,
    le Wi-Fi et l'ouverture automatique du bureau. Donne au clone un nom

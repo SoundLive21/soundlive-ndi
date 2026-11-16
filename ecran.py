@@ -8,6 +8,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from base64 import b64encode
 import json
 import os
+import re
 import secrets
 import shutil
 from pathlib import Path
@@ -22,7 +23,8 @@ from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
-from commun import APP_NAME, COPYRIGHT, DEFAULT_SOURCE, PREVIEW_LIMIT, SOFTWARE_VERSION, client_lock, options, release_number
+from commun import (APP_NAME, COPYRIGHT, DEFAULT_SOURCE, ORIENTATIONS, PREVIEW_LIMIT,
+                    SOFTWARE_VERSION, client_lock, options, release_number)
 from diagnostic import Diagnostic
 from mise_a_jour import ClientUpdate, FULL_LIMIT, RESTART, digest, engine_name, full_contents, update_target
 
@@ -55,6 +57,8 @@ REGIE_CHECKING = ("Vérification du rattachement…", "#dfcbd1")
 REGIE_CONNECTED = ("Lecteur rattaché à la régie", "#95e6b3")
 REGIE_UNAVAILABLE = ("Régie indisponible · association enregistrée", "#ffc78a")
 REGIE_REPAIR = ("Réassociation à la régie nécessaire", "#ffacb8")
+MUTTER_DISPLAY = "org.gnome.Mutter.DisplayConfig"
+MUTTER_DISPLAY_PATH = "/org/gnome/Mutter/DisplayConfig"
 
 def serial():
     if WINDOWS:
@@ -256,9 +260,8 @@ def display_snapshot_linux(player_pid, capture):
         info["portal"] = True
         try:
             bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-            state = bus.call_sync("org.gnome.Mutter.DisplayConfig", "/org/gnome/Mutter/DisplayConfig",
-                                  "org.gnome.Mutter.DisplayConfig", "GetCurrentState", None, None,
-                                  Gio.DBusCallFlags.NO_AUTO_START, 800, None).unpack()
+            state = bus.call_sync(MUTTER_DISPLAY, MUTTER_DISPLAY_PATH, MUTTER_DISPLAY, "GetCurrentState",
+                                  None, None, Gio.DBusCallFlags.NO_AUTO_START, 800, None).unpack()
             for spec, modes, properties in state[1]:
                 logical = next((item for item in state[2] if spec in item[5]), None)
                 if logical is None or logical[:2] != (rect.x, rect.y):
@@ -330,6 +333,161 @@ def display_snapshot_linux(player_pid, capture):
     if not ok:
         raise RuntimeError("Impossible d’encoder la capture.")
     return bytes(png)
+
+
+def orient_desktop_mutter(connector, transform):
+    from gi.repository import Gio, GLib
+
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        state = bus.call_sync(MUTTER_DISPLAY, MUTTER_DISPLAY_PATH, MUTTER_DISPLAY, "GetCurrentState",
+                              None, None, Gio.DBusCallFlags.NO_AUTO_START, 900, None)
+        serial, monitors, logical, properties = state.unpack()
+        if connector:
+            targets = [item for item in logical if any(spec[0] == connector for spec in item[5])]
+        else:
+            targets = logical
+        if not targets and len(logical) == 1:
+            targets = logical
+        if len(targets) != 1 or len(targets[0][5]) != 1:
+            raise RuntimeError("Sortie GNOME indéterminée. Vérifie la configuration des moniteurs.")
+        target = targets[0]
+        if target[3] == transform:
+            return False
+        active_modes = {}
+        for spec, modes, monitor_properties in monitors:
+            for mode in modes:
+                if mode[-1].get("is-current"):
+                    flags = {}
+                    if "is-underscanning" in monitor_properties:
+                        flags["underscanning"] = GLib.Variant("b", monitor_properties["is-underscanning"])
+                    if "color-mode" in monitor_properties:
+                        flags["color-mode"] = GLib.Variant("u", monitor_properties["color-mode"])
+                    active_modes[tuple(spec)] = (spec[0], mode[0], flags)
+                    break
+        layout = []
+        for item in logical:
+            x, y, scale, rotation, primary, outputs, _ = item
+            layout.append((x, y, scale, transform if item == target else rotation, primary,
+                           [active_modes[tuple(spec)] for spec in outputs]))
+        global_options = {}
+        if properties.get("supports-changing-layout-mode") and "layout-mode" in properties:
+            global_options["layout-mode"] = GLib.Variant("u", properties["layout-mode"])
+        original = state.get_child_value(3)
+        lease = original.lookup_value("monitors-for-lease", None)
+        if lease is not None:
+            global_options["monitors-for-lease"] = lease
+        # La méthode de session applique la rotation sans boîte de confirmation. Le client
+        # réapplique la valeur enregistrée par la régie à la prochaine ouverture de session.
+        arguments = GLib.Variant("(uua(iiduba(ssa{sv}))a{sv})", (serial, 1, layout, global_options))
+        bus.call_sync(MUTTER_DISPLAY, MUTTER_DISPLAY_PATH, MUTTER_DISPLAY, "ApplyMonitorsConfig",
+                      arguments, None, Gio.DBusCallFlags.NO_AUTO_START, 2200, None)
+    except (GLib.Error, KeyError) as error:
+        raise RuntimeError(f"GNOME a refusé l’orientation de l’écran. {error}") from error
+    return True
+
+
+def orient_desktop_linux(player_pid, orientation):
+    import gi
+    gi.require_version("Gdk", "3.0")
+    from gi.repository import Gdk
+
+    Gdk.init_check([])
+    display = Gdk.Display.get_default()
+    if display is None:
+        raise RuntimeError("Session graphique indisponible.")
+    info = display_snapshot_linux(player_pid, False)
+    connector = info.get("connector")
+    index = ORIENTATIONS.index(orientation)
+    wayland = (display.__gtype__.name == "GdkWaylandDisplay"
+               or os.environ.get("XDG_SESSION_TYPE") == "wayland")
+    if wayland and "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper():
+        return orient_desktop_mutter(connector, (0, 1, 3)[index])
+
+    utility = "wlr-randr" if wayland else "xrandr"
+    executable = shutil.which(utility)
+    if not executable:
+        raise RuntimeError(f"Installe {utility if wayland else 'x11-xserver-utils'} sur ce lecteur.")
+
+    def command(*args):
+        result = subprocess.run([executable, *args], capture_output=True, text=True, timeout=2)
+        if result.returncode:
+            message = result.stderr.strip() or "Le bureau a refusé l’orientation."
+            raise RuntimeError(f"{utility} · {message}")
+        return result.stdout
+
+    outputs = {}
+    if wayland:
+        # La sortie texte existe aussi dans les anciennes versions de wlr-randr.
+        output = None
+        enabled = False
+        for line in command().splitlines():
+            if line and not line[0].isspace():
+                output = line.split()[0]
+                enabled = False
+            elif line.strip() == "Enabled: yes":
+                enabled = True
+            elif output and enabled and line.strip().startswith("Transform:"):
+                outputs[output] = line.partition(":")[2].strip()
+        desired, flag = ("normal", "90", "270")[index], "--transform"
+    else:
+        for line in command("--query").splitlines():
+            match = re.match(r"^(\S+) connected (?:primary )?\d+x\d+[-+]\d+[-+]\d+\s+([^()]*)", line)
+            if match:
+                fields = match[2].split()
+                outputs[match[1]] = fields[0] if fields and fields[0] in ("left", "right", "inverted") else "normal"
+        desired, flag = ("normal", "left", "right")[index], "--rotate"
+    if connector not in outputs:
+        if len(outputs) == 1:
+            connector = next(iter(outputs))
+        else:
+            raise RuntimeError("La sortie à tourner n’a pas pu être identifiée.")
+    if outputs[connector] == desired:
+        return False
+    command("--output", connector, flag, desired)
+    return True
+
+
+def orient_desktop_windows(player_pid, orientation):
+    import ctypes as c
+    from ctypes import wintypes as w
+
+    connector = display_snapshot_windows(player_pid, False)["connector"]
+    user = c.windll.user32
+
+    class DisplayMode(c.Structure):
+        # Branche écran de DEVMODEW (l’union imprimante a la même taille).
+        _fields_ = [
+            ("device", w.WCHAR * 32), ("spec_version", w.WORD), ("driver_version", w.WORD),
+            ("size", w.WORD), ("driver_extra", w.WORD), ("fields", w.DWORD),
+            ("position", w.POINT), ("orientation", w.DWORD), ("fixed_output", w.DWORD),
+            ("printer_fields", w.WORD * 5), ("form", w.WCHAR * 32), ("log_pixels", w.WORD),
+            ("bits_per_pixel", w.DWORD), ("width", w.DWORD), ("height", w.DWORD),
+            ("display_fields", w.DWORD * 10),
+        ]
+
+    query = user.EnumDisplaySettingsW
+    query.argtypes = (w.LPCWSTR, w.DWORD, c.POINTER(DisplayMode))
+    query.restype = w.BOOL
+    change = user.ChangeDisplaySettingsExW
+    change.argtypes = (w.LPCWSTR, c.POINTER(DisplayMode), w.HWND, w.DWORD, c.c_void_p)
+    change.restype = w.LONG
+    mode = DisplayMode(size=c.sizeof(DisplayMode))
+    if not query(connector, 0xffffffff, c.byref(mode)):
+        raise RuntimeError("Windows ne peut pas lire le mode de cet écran.")
+    desired = (0, 1, 3)[ORIENTATIONS.index(orientation)]
+    if mode.orientation == desired:
+        return False
+    if (mode.orientation - desired) % 2:
+        mode.width, mode.height = mode.height, mode.width
+    mode.orientation = desired
+    mode.fields |= 0x00000080 | 0x00080000 | 0x00100000  # DM_DISPLAYORIENTATION, DM_PELSWIDTH, DM_PELSHEIGHT
+    result = change(connector, c.byref(mode), None, 2, None)  # CDS_TEST
+    if result == 0:
+        result = change(connector, c.byref(mode), None, 1, None)  # CDS_UPDATEREGISTRY
+    if result != 0:
+        raise RuntimeError(f"Windows a refusé l’orientation de cet écran (code {result}).")
+    return True
 
 
 def preview_size(width, height):
@@ -734,7 +892,7 @@ def pair(server, code):
     print("Écran associé. Ouvre une nouvelle session pour lancer le lecteur.")
 
 class DashboardClient:
-    def __init__(self, identity):
+    def __init__(self, identity, orientation):
         self.identity = identity
         self.diagnostic = Diagnostic()
         self.latency_ms = None
@@ -750,6 +908,10 @@ class DashboardClient:
         self.display_info_pid = None
         self.display_info = {}
         self.display_check_at = 0
+        self.orientation = orientation
+        self.orientation_report = None
+        self.orientation_check_at = 0
+        self.orientation_display_pid = None
         self.portal = PortalCapture() if not WINDOWS else None
         self.internal_preview = None
         self.internal_preview_required = False
@@ -759,11 +921,22 @@ class DashboardClient:
     def poll(self, report, display_pid=0):
         server = self.identity["server"]
         token = self.identity["token"]
+        if self.orientation_display_pid != display_pid or time.monotonic() >= self.orientation_check_at:
+            self.orientation_display_pid = display_pid
+            self.orientation_check_at = time.monotonic() + 15
+            try:
+                changed = self.client_command("--orienter-ecran", f"{display_pid} {self.orientation}", 6)
+            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+                self.orientation_report = dict(value=self.orientation, error=str(error))
+            else:
+                self.orientation_report = dict(value=self.orientation)
+                if changed == b"1":
+                    self.display_check_at = 0
         if display_pid != self.display_key or time.monotonic() >= self.display_check_at:
             self.display_key = display_pid
             self.display_check_at = time.monotonic() + 15
             try:
-                self.display_info = json.loads(self.preview_command("--info-ecran", str(display_pid), 3))
+                self.display_info = json.loads(self.client_command("--info-ecran", str(display_pid), 3))
             except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
                 if display_pid != self.display_info_pid:
                     self.display_info = {}
@@ -778,6 +951,7 @@ class DashboardClient:
                       diagnostic=self.diagnostic.sample(server), can_update=self.can_update,
                       client_version=self.version, client_release=SOFTWARE_VERSION, update_target=self.target,
                       update_has_engine=self.has_versioned_engine,
+                      orientation_status=self.orientation_report,
                       display=self.display_info, display_capture=uses_internal or uses_portal or uses_monitor,
                       display_preview_kind="player" if self.internal_preview_required else "monitor",
                       display_preview_error=self.internal_preview_error if self.internal_preview_required else monitor_error,
@@ -792,6 +966,10 @@ class DashboardClient:
             self.latency_test = None
             raise
         self.latency_ms = round((time.monotonic() - started) * 1000, 1)
+        orientation = options(reply["options"])["orientation"]
+        if self.orientation != orientation:
+            self.orientation = orientation
+            self.orientation_check_at = 0
         preview = reply.get("preview_request")
         if isinstance(preview, dict) and not (reply.get("reboot") or reply.get("poweroff")):
             job, source = preview.get("id"), preview.get("source")
@@ -824,7 +1002,7 @@ class DashboardClient:
                 self.latency_test = dict(id=test, ms=None)
         return reply
 
-    def preview_command(self, mode, argument, timeout):
+    def client_command(self, mode, argument, timeout):
         python = Path(sys.executable)
         if WINDOWS and python.name.lower() == "pythonw.exe" and python.with_name("python.exe").is_file():
             python = python.with_name("python.exe")
@@ -849,7 +1027,7 @@ class DashboardClient:
             elif mode == "portal":
                 png = self.portal.snapshot(allow_prompt)
             else:
-                png = self.preview_command(mode, argument, 11 if screen else 9)
+                png = self.client_command(mode, argument, 11 if screen else 9)
             if 0 < len(png) <= PREVIEW_LIMIT:
                 result["image"] = b64encode(png).decode("ascii")
         except RuntimeError as error:
@@ -891,7 +1069,7 @@ def desktop():
             except (OSError, ValueError) as error:
                 self.identity = None
                 print(error, file=log)
-            self.dashboard = DashboardClient(self.identity) if self.identity else None
+            self.dashboard = DashboardClient(self.identity, self.settings["orientation"]) if self.identity else None
             self.connection_status = None
             self.regie_state = None
             self.sources = []
@@ -1256,9 +1434,11 @@ def desktop():
                 save_waiting_details(self.identity, self.waiting_data, self.log)
             if new != self.settings:
                 write_json(LAST_SETTINGS, new)
+                playback_changed = new != {**self.settings, "orientation": new["orientation"]}
                 self.settings = new
-                self.terminate()
-                self.waiting()
+                if playback_changed:
+                    self.terminate()
+                    self.waiting()
             if result.get("poweroff"):
                 self.power("poweroff", result["poweroff"], "Extinction")
             elif result.get("reboot"):
@@ -1321,8 +1501,8 @@ def run_windows_screen(tk, log):
     except (OSError, ValueError) as error:
         identity = None
         print(error, file=log)
-    client = DashboardClient(identity) if identity else None
     settings = initial_settings()
+    client = DashboardClient(identity, settings["orientation"]) if identity else None
     root = tk.Tk()
     root.title(APP_NAME)
     root.configure(background="#100e11")
@@ -1422,8 +1602,10 @@ def run_windows_screen(tk, log):
                     new = options(answer["options"])
                     if new != settings:
                         write_json(LAST_SETTINGS, new)
+                        playback_changed = new != {**settings, "orientation": new["orientation"]}
                         settings = new
-                        stop_player()
+                        if playback_changed:
+                            stop_player()
                     if show_waiting_details(answer.get("waiting")):
                         save_waiting_details(identity, waiting_data, log)
                     show_regie_state(REGIE_CONNECTED)
@@ -1511,6 +1693,10 @@ if __name__ == "__main__":
             backend = display_snapshot_windows if WINDOWS else display_snapshot_linux
             value = backend(int(sys.argv[2]), capture)
             sys.stdout.buffer.write(value if capture else json.dumps(value).encode("utf-8"))
+        elif len(sys.argv) == 3 and sys.argv[1] == "--orienter-ecran":
+            pid, orientation = sys.argv[2].split()
+            backend = orient_desktop_windows if WINDOWS else orient_desktop_linux
+            sys.stdout.write("1" if backend(int(pid), orientation) else "0")
         elif len(sys.argv) == 4 and sys.argv[1] == "associer":
             pair(sys.argv[2], sys.argv[3])
         elif len(sys.argv) in (2, 3) and sys.argv[1] == "verifier":

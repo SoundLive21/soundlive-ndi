@@ -117,7 +117,7 @@ if $render_only; then
 else
     sudo apt update
     sudo apt install -y gcc pkg-config libsdl2-dev python3 python3-gi python3-gi-cairo gir1.2-gtk-3.0 \
-        avahi-daemon libavahi-client3 curl ca-certificates
+        avahi-daemon libavahi-client3 curl ca-certificates x11-xserver-utils
     sudo systemctl enable --now avahi-daemon
 fi
 

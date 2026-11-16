@@ -232,6 +232,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       <option value="play">Reprendre la diffusion</option>
       <option value="volume">Régler le volume</option>
       <option value="bandwidth">Régler la qualité NDI</option>
+      <option value="orientation">Changer l’orientation des écrans</option>
       <option value="update">Pousser la mise à jour client</option>
       <option value="reboot">Redémarrer les récepteurs</option>
       <option value="poweroff">Éteindre les récepteurs</option>
@@ -250,6 +251,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       <input id="group-volume-input" name="volume" type="range" min="0" max="100" value="50" disabled>
     </label>
     <label id="group-bandwidth" hidden>Qualité<select name="bandwidth" disabled><option value="0">High · Résolution de la source</option><option value="1">Low · Aperçu NDI</option></select></label>
+    <label id="group-orientation" hidden>Orientation de l’écran<select name="orientation" disabled><option value="landscape">Paysage</option><option value="portrait-left">Portrait gauche</option><option value="portrait-right">Portrait droite</option></select></label>
     <p class="small" id="group-help"></p>
     <div class="actions"><button type="button" id="group-close">Fermer</button><button type="submit" class="primary" id="group-submit">Continuer</button></div>
   </form>
@@ -357,6 +359,9 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       <label>Sources NDI détectées<select class="detected-sources"></select></label>
       <label>Source NDI<input class="source" maxlength="256" required></label>
       <label>Qualité<select class="bandwidth"><option value="0">High · Résolution de la source</option><option value="1">Low · Aperçu NDI</option></select></label>
+      <label>Orientation de l’écran<select class="orientation"><option value="landscape">Paysage</option><option value="portrait-left">Portrait gauche</option><option value="portrait-right">Portrait droite</option></select>
+        <span class="small orientation-status"></span>
+      </label>
       <label><span>Volume <output></output></span><input class="volume" type="range" min="0" max="100"></label>
       <label class="check"><input type="checkbox" class="muted"> Couper le son</label>
       <div class="actions"><button class="primary" type="submit">Appliquer</button><button class="toggle" type="button"></button><button class="reboot" type="button">Redémarrer</button><button class="poweroff" type="button">Éteindre</button></div>
@@ -1075,10 +1080,12 @@ function cardFor(id) {
   if (cards.has(id)) return cards.get(id);
   const el = document.querySelector("#card").content.firstElementChild.cloneNode(true);
   const form = select(el, ".config");
-  const fields = ["source","bandwidth","volume","muted","toggle","reboot","poweroff",
+  const fields = ["source","bandwidth","volume","orientation","orientation-status","muted","toggle","reboot","poweroff",
                   "pending","badge","address","error","remove","info","metrics","connection","cpu","ram",
                   "screen-traffic","rate-rx","rate-tx","traffic-interface-label"];
   const ui = Object.fromEntries(fields.map(key => [key, select(el, "."+key)]));
+  ui["orientation-status"].id = "orientation-status-" + id;
+  ui.orientation.setAttribute("aria-describedby", ui["orientation-status"].id);
   const list = select(el, ".detected-sources");
   const resolution = select(el, ".resolution");
   const limit = select(el, ".resolution-limit");
@@ -1137,6 +1144,7 @@ function cardFor(id) {
   });
   form.onsubmit = action(() => {
     const settings = {source:ui.source.value, bandwidth:ui.bandwidth.value, volume:Number(ui.volume.value),
+                      orientation:ui.orientation.value,
                       muted:ui.muted.checked, enabled:card.data.options.enabled};
     const version = card.editVersion;
     const quality = ui.bandwidth.selectedOptions[0].textContent;
@@ -1144,7 +1152,7 @@ function cardFor(id) {
     const volume = settings.muted ? "Son coupé" : "Volume " + settings.volume + " %";
     showAction({
       title:"Appliquer les réglages à " + card.data.name,
-      detail:settings.source + " · " + quality + " · " + volume,
+      detail:settings.source + " · " + quality + " · " + volume + " · " + ui.orientation.selectedOptions[0].textContent,
       label:"Appliquer",
       successTitle:"Réglages enregistrés",
       async perform() {
@@ -1303,8 +1311,15 @@ function render(row) {
     return;
   }
   card.limit.value = row.resolution_limit || "";
+  const orientation = row.options.orientation || "landscape";
+  const orientationStatus = row.report.orientation_status;
+  ui["orientation-status"].textContent = !row.online ? "Application à la reconnexion." :
+    !orientationStatus ? "Disponible à partir du client 1.4.15." :
+    orientationStatus.value !== orientation ? "En attente du lecteur…" :
+    orientationStatus.error || "Appliquée sur le lecteur.";
   if (!card.dirty && !form.contains(document.activeElement)) {
     for (const field of ["source","bandwidth","volume"]) ui[field].value = row.options[field];
+    ui.orientation.value = orientation;
     ui.muted.checked = row.options.muted;
     select(el,"output").value = row.options.volume + " %";
     card.editVersion = row.version;
@@ -1478,6 +1493,7 @@ const groupActions = {
   unmute:["Rétablir le son", "muted", false], stop:["Arrêter la diffusion", "enabled", false],
   play:["Reprendre la diffusion", "enabled", true], volume:["Régler le volume", "volume"],
   bandwidth:["Régler la qualité NDI", "bandwidth"], update:["Pousser la mise à jour"],
+  orientation:["Changer l’orientation des écrans", "orientation"],
 };
 const groupDeviceActions = {
   reboot: {title:"Redémarrer les récepteurs", label:"Redémarrer", result:"Redémarrage demandé",
@@ -1556,7 +1572,7 @@ function renderGroupVolume() {
 groupVolume.addEventListener("input", renderGroupVolume);
 function groupFields() {
   const operation = groupOperation.value;
-  for (const name of ["source", "volume", "bandwidth"]) {
+  for (const name of ["source", "volume", "bandwidth", "orientation"]) {
     const label = select(group, "#group-" + name);
     const field = groupForm.elements.namedItem(name);
     label.hidden = field.disabled = operation !== name;
@@ -1646,7 +1662,7 @@ groupForm.onsubmit = action(() => {
   const value = preset ?? (field === "volume" ? Number(raw) : raw);
   let detail = summary;
   if (byResolution) detail += "\n" + resolutionSource;
-  if (raw !== null) detail += "\n" + (field === "bandwidth" ? groupForm.elements.namedItem(field).selectedOptions[0].textContent :
+  if (raw !== null) detail += "\n" + (["bandwidth", "orientation"].includes(field) ? groupForm.elements.namedItem(field).selectedOptions[0].textContent :
     field === "volume" ? value + " %" : value);
   showAction({
     title:label, detail, label:"Confirmer",

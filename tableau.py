@@ -23,14 +23,14 @@ from urllib.parse import parse_qs, urlsplit
 
 from acces_regie import (PORT as REMOTE_PORT, SESSION_COOKIE, SESSION_WARNING, USERNAME,
                          RemoteConnections, RemoteDashboard, prepare_access)
-from commun import APP_NAME, PREVIEW_LIMIT, SOFTWARE_VERSION as CLIENT_VERSION, options, release_number
+from commun import APP_NAME, ORIENTATIONS, PREVIEW_LIMIT, SOFTWARE_VERSION as CLIENT_VERSION, options, release_number
 from diagnostic import NetworkRates, network_info
 from mise_a_jour import ENGINE_ASSETS, SAFE_ID, contents, digest, engine_name, full_contents, package, prepare_key
 from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.24"
+SOFTWARE_VERSION = "1.4.25"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -348,7 +348,7 @@ def batch(path, data, now):
                 raise ValueError("Action de groupe invalide.")
             return 200, {"results": group_device_action(targets, operation, now)}
         patch = data.get("changes")
-        fields = {"source", "muted", "enabled", "bandwidth", "volume"}
+        fields = {"source", "muted", "enabled", "bandwidth", "volume", "orientation"}
         if not isinstance(patch, dict) or not patch or not set(patch) <= fields:
             raise ValueError("Aucun réglage de groupe valide.")
         changes = {key: options({**row["options"], **patch}) for key, row in targets.items()}
@@ -874,6 +874,12 @@ class Request(BaseHTTPRequestHandler):
             update_target = update_target if isinstance(update_target, str) and update_target in ENGINE_ASSETS else None
             active_source = data.get("active_source")
             active_source = active_source[:256] if state == "Lecture" and isinstance(active_source, str) else None
+            orientation_status = data.get("orientation_status")
+            if isinstance(orientation_status, dict) and orientation_status.get("value") in ORIENTATIONS:
+                orientation_status = dict(value=orientation_status["value"],
+                                          error=str(orientation_status.get("error") or "")[:240])
+            else:
+                orientation_status = None
             row["report"] = dict(seen=now, ip=self.client_address[0], state=state, boot=boot,
                                  active_source=active_source,
                                  sources=[s[:256] for s in sources[:32] if isinstance(s, str)],
@@ -882,6 +888,7 @@ class Request(BaseHTTPRequestHandler):
                                  can_reboot=data.get("can_reboot") is not False,
                                  diagnostic=diagnostics, latency_test=test_result,
                                  display=display_report(data.get("display")),
+                                 orientation_status=orientation_status,
                                  display_capture=data.get("display_capture") is True
                                  if "display_capture" in data else None,
                                  capture_needs_consent=data.get("capture_needs_consent") is True,
@@ -941,12 +948,19 @@ class Request(BaseHTTPRequestHandler):
         elif path == "/api/update" and "options" in row:
             if data.get("version") != row["version"]:
                 return 409, {"error": "Réglages modifiés entre-temps. Recharge la page."}
-            settings = options(data["options"])
+            incoming = data["options"]
+            settings = options({"orientation": row["options"].get("orientation", "landscape"), **incoming})
             error = resolution_rejection(row, settings, now, data.get("resolution"))
             if error:
                 return 409, {"error": error}
-            row["options"] = settings
-            row["version"] += 1
+            previous = row["options"], row["version"]
+            row.update(options=settings, version=row["version"] + 1)
+            try:
+                save()
+            except OSError:
+                row["options"], row["version"] = previous
+                raise
+            return 200, {"ok": True}
         elif path in ("/api/reboot", "/api/poweroff"):
             operation = "poweroff" if path == "/api/poweroff" else "reboot"
             state = queue_power(row, operation, now)
@@ -977,6 +991,8 @@ class Regie:
                 for row in screens.values():
                     for field in ("report", "reboot", "power"):
                         row.pop(field, None)
+                    if "options" in row:
+                        row["options"].setdefault("orientation", "landscape")
                 SCREENS.clear()
                 SCREENS.update(screens)
                 CLIENT_UPDATES.clear()

@@ -323,6 +323,25 @@ des informations du moniteur. Le
 lecteur Ubuntu SDL en session Wayland utilise le rendu décrit ci-dessous.
 Une résolution précédée de **≈** est une estimation.
 
+#### Orientation du bureau du lecteur
+
+Dans **Gestion → Commandes et réglages**, choisis **Paysage**, **Portrait
+gauche** ou **Portrait droite** sous **Orientation de l’écran**, puis clique
+sur **Appliquer**. Le client **1.4.15** modifie la sortie du système
+graphique. Le bureau, l’écran d’attente et le flux suivent la rotation.
+Le paysage est la valeur par défaut. Le client réapplique la valeur
+enregistrée à l’ouverture de sa session et reçoit les changements à la
+reconnexion. **Actions de groupe** permet d’appliquer le même réglage à
+plusieurs lecteurs. La fiche indique si le système a accepté la demande.
+
+Sur Raspberry Pi OS, le bureau Wayland doit prendre en charge
+`wlr-randr` (`sudo apt install wlr-randr` si absent). En X11, utilise
+`xrandr` (`sudo apt install x11-xserver-utils` si absent). Ubuntu GNOME
+sous Wayland utilise le service d’affichage de GNOME. Sous Windows,
+la rotation dépend du pilote graphique. Avec plusieurs moniteurs, le client
+signale une erreur s’il ne peut pas identifier la sortie de lecture ou si
+le système refuse la disposition demandée.
+
 #### Aperçu du lecteur Ubuntu sous Wayland
 
 Sur un lecteur Ubuntu dédié, le client **1.4.14** et son moteur SDL
