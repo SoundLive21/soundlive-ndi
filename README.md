@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.22** et le client **1.4.12**.
+Ce kit contient la régie **1.4.23** et le client **1.4.13**.
 
 ## Installer et lancer la régie
 
@@ -317,21 +317,24 @@ La capture de l’écran et ses informations nécessitent le client **1.4.8**.
 La capture reflète ce qui est visible sur la sortie, y compris les fenêtres
 qui recouvrent le lecteur. Elle est disponible sous Windows et sous Linux
 en session X11. Pour les bureaux Wayland compatibles avec `grim`, installe
-`sudo apt install grim` et utilise un seul moniteur en lecture. Le
+`sudo apt install grim` et utilise un seul moniteur en lecture. Sur
+Raspberry Pi, la disponibilité de la capture est vérifiée indépendamment
+des informations du moniteur. Le
 lecteur Ubuntu SDL en session Wayland utilise le rendu décrit ci-dessous.
 Une résolution précédée de **≈** est une estimation.
 
 #### Aperçu du lecteur Ubuntu sous Wayland
 
-Sur un lecteur Ubuntu dédié, le client **1.4.12** et son moteur SDL
+Sur un lecteur Ubuntu dédié, le client **1.4.13** et son moteur SDL
 mis à jour peuvent afficher dans la régie le **rendu SoundLive‑NDI**.
 L’image vient de la vidéo en cours de lecture ou de l’écran d’attente
 dessiné par le lecteur. Elle n’inclut que le contenu de SoundLive‑NDI.
 Aucune confirmation locale n’est nécessaire, y compris après redémarrage.
 
-Pour un lecteur déjà installé, copie le kit et exécute cette commande
-depuis son compte `soundlive`, par exemple via SSH. Pousse ensuite le
-client **1.4.12** depuis la régie pour charger le moteur mis à jour. Si le
+Pour un lecteur déjà installé, copie le nouveau ZIP, décompresse-le
+dans un nouveau dossier et exécute cette commande depuis le dossier
+`SoundLive-NDI` extrait, avec le compte `soundlive`, par exemple via SSH.
+Pousse ensuite le client **1.4.13** depuis la régie pour charger le moteur mis à jour. Si le
 client est déjà à jour, redémarre le lecteur après la commande.
 
 ```bash
@@ -394,7 +397,7 @@ privée utilisée par la régie pour signer le push des lecteurs reste distincte
 ```bash
 ssh-keygen -t ed25519 -f /chemin/prive/soundlive-publication
 python3 publier-version.py --cle /chemin/prive/soundlive-publication
-gh release create v1.4.22 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.22' --generate-notes
+gh release create v1.4.23 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.23' --generate-notes
 ```
 
 Adapte le tag au numéro de `SOFTWARE_VERSION` dans `tableau.py`. La version

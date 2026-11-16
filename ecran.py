@@ -738,11 +738,13 @@ class DashboardClient:
         self.version = digest(contents(CLIENT_DIR))
         self.preview_job = None
         self.display_key = None
+        self.display_info_pid = None
         self.display_info = {}
         self.display_check_at = 0
         self.portal = PortalCapture() if not WINDOWS else None
         self.internal_preview = None
         self.internal_preview_required = False
+        self.local_screen_capture = None
         self.internal_preview_error = ""
 
     def poll(self, report, display_pid=0):
@@ -754,17 +756,21 @@ class DashboardClient:
             try:
                 self.display_info = json.loads(self.preview_command("--info-ecran", str(display_pid), 3))
             except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
-                self.display_info = {}
+                if display_pid != self.display_info_pid:
+                    self.display_info = {}
+            else:
+                self.display_info_pid = display_pid
         uses_internal = self.internal_preview is not None
         uses_portal = (not self.internal_preview_required and self.portal is not None
                        and self.display_info.get("portal") is True)
-        uses_monitor = not self.internal_preview_required and self.display_info.get("capture") is True
+        monitor_capture, monitor_error = self.local_screen_capture or (self.display_info.get("capture") is True, "")
+        uses_monitor = not self.internal_preview_required and monitor_capture
         report.update(kind=DEVICE_KIND, latency_ms=self.latency_ms, latency_test=self.latency_test,
                       diagnostic=self.diagnostic.sample(server), can_update=self.can_update,
                       client_version=self.version, client_release=SOFTWARE_VERSION,
                       display=self.display_info, display_capture=uses_internal or uses_portal or uses_monitor,
                       display_preview_kind="player" if self.internal_preview_required else "monitor",
-                      display_preview_error=self.internal_preview_error,
+                      display_preview_error=self.internal_preview_error if self.internal_preview_required else monitor_error,
                       capture_needs_consent=uses_portal and self.portal.stream is None)
         if self.can_update:
             report["update_result"] = self.updater.report()
@@ -1209,8 +1215,22 @@ def desktop():
                         active_source=self.active_source if state == "Lecture" else None,
                         error=self.error, can_poweroff=True)
             display_pid = self.player.pid if state == "Lecture" and self.player else 0
+            display = self.window.get_display()
+            if DEVICE_KIND == "pi" and not self.dashboard.internal_preview_required:
+                if display.__gtype__.name == "GdkX11Display":
+                    self.dashboard.local_screen_capture = (True, "")
+                elif not shutil.which("grim"):
+                    self.dashboard.local_screen_capture = (False, "Capture Wayland : installe grim sur ce Raspberry Pi.")
+                elif display.get_n_monitors() == 0:
+                    self.dashboard.local_screen_capture = (False, "Aucun moniteur détecté sur ce Raspberry Pi.")
+                elif display_pid > 0 and display.get_n_monitors() > 1:
+                    self.dashboard.local_screen_capture = (
+                        False, "Capture Wayland : la sortie de lecture est indéterminée avec plusieurs moniteurs.")
+                else:
+                    self.dashboard.local_screen_capture = (True, "")
+                    if display.get_n_monitors() == 1:
+                        display_pid = -1
             if not display_pid and self.window.get_window():
-                display = self.window.get_display()
                 monitor = display.get_monitor_at_window(self.window.get_window())
                 display_pid = next((-index - 1 for index in range(display.get_n_monitors())
                                     if display.get_monitor(index) == monitor), 0)

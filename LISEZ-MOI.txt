@@ -3,7 +3,7 @@ SoundLive-NDI
 Auteur : DUVERNOY Matthieu & ChatGPT
 contact@soundlive.fr
 Société SoundLive
-Régie 1.4.22 · Lecteurs 1.4.12
+Régie 1.4.23 · Lecteurs 1.4.13
 
 1. SUR LE PC WINDOWS QUI DIFFUSE AVEC OBS
    Ferme l’ancien tableau et décompresse tout le ZIP dans le dossier de
@@ -234,7 +234,7 @@ RÉGIE SOUS UBUNTU DESKTOP
    Pour tester le push, commence par un seul récepteur déjà équipé pour les
    mises à jour signées. Laisse tourner son ancien client, puis clique sur
    « Mettre à jour le lecteur » sur sa fiche et confirme. Le lecteur doit
-   revenir en ligne avec « v1.4.12 · Dernière version » en vert.
+   revenir en ligne avec « v1.4.13 · Dernière version » en vert.
    Si la fiche indique « Installation locale requise » et que le lecteur
    utilise déjà lancer-client.py, vérifie la présence de ssh-keygen, copie
    regie-update.pub dans ~/.local/share/soundlive-ecrans/ et rouvre la session.
@@ -392,7 +392,7 @@ APERÇU DES SOURCES NDI
    Voir README.md pour les sessions compatibles avec la capture du moniteur.
    Avec le lecteur 1.4.9, le nom du réseau Wi-Fi connecté s’affiche aussi
    dans les informations et sous les débits de l’interface Wi-Fi.
-   Sur Ubuntu Wayland, le client 1.4.12 affiche le rendu SoundLive-NDI
+   Sur Ubuntu Wayland, le client 1.4.13 affiche le rendu SoundLive-NDI
    sans confirmation locale avec le moteur SDL à jour. La fiche indique
    le prérequis manquant si le rendu est indisponible. Voir README.md.
 
