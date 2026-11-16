@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.23** et le client **1.4.13**.
+Ce kit contient la régie **1.4.24** et le client **1.4.14**.
 
 ## Installer et lancer la régie
 
@@ -325,7 +325,7 @@ Une résolution précédée de **≈** est une estimation.
 
 #### Aperçu du lecteur Ubuntu sous Wayland
 
-Sur un lecteur Ubuntu dédié, le client **1.4.13** et son moteur SDL
+Sur un lecteur Ubuntu dédié, le client **1.4.14** et son moteur SDL
 mis à jour peuvent afficher dans la régie le **rendu SoundLive‑NDI**.
 L’image vient de la vidéo en cours de lecture ou de l’écran d’attente
 dessiné par le lecteur. Elle n’inclut que le contenu de SoundLive‑NDI.
@@ -334,7 +334,7 @@ Aucune confirmation locale n’est nécessaire, y compris après redémarrage.
 Pour un lecteur déjà installé, copie le nouveau ZIP, décompresse-le
 dans un nouveau dossier et exécute cette commande depuis le dossier
 `SoundLive-NDI` extrait, avec le compte `soundlive`, par exemple via SSH.
-Pousse ensuite le client **1.4.13** depuis la régie pour charger le moteur mis à jour. Si le
+Pousse ensuite le client **1.4.14** depuis la régie pour charger le moteur mis à jour. Si le
 client est déjà à jour, redémarre le lecteur après la commande.
 
 ```bash
@@ -370,9 +370,41 @@ sur sa fiche. Vérifie qu’il revient en ligne avec sa nouvelle version et la
 mention verte **Dernière version**. Pour déployer sur plusieurs écrans,
 choisis **Actions de groupe → Pousser la mise à jour client**.
 
-Le push client met à jour les composants Python des récepteurs déjà installés.
-Un changement de binaire NDI, de bibliothèques ou du lanceur client passe par
-l’installateur local.
+Le push client envoie un paquet signé contenant tous les fichiers de
+l’application, dont le lanceur, ainsi que le moteur disponible pour le
+lecteur. L’association, la configuration et la clé de confiance restent
+sur le lecteur. Le runtime NDI, SDL et les autres dépendances système sont
+fournis par l’installation locale. Sur les Pi avec `/opt/ndi-pi/bin/ffplay`,
+ce moteur système reste installé à part.
+
+1. Pour un lecteur antérieur à **1.4.14**, lance une première mise à jour
+   pour installer le nouveau mécanisme. Dès qu’il est revenu en ligne,
+   clique à nouveau sur **Mettre à jour le lecteur** pour envoyer le paquet
+   complet.
+2. Pour distribuer aussi le moteur, place dans le dossier de la régie
+   le binaire compilé pour les lecteurs concernés, sous le nom approprié.
+   Pour Linux, compile depuis ce kit sur un poste de l’architecture cible,
+   avec `bash installer-ubuntu.sh --mettre-a-jour-rendu` sur un lecteur de
+   préparation déjà associé, puis copie son fichier
+   `~/.local/share/soundlive-ecrans/lecteur-ndi-ubuntu` vers la régie.
+   Sous Windows, utilise la procédure de compilation Windows de ce guide.
+
+   | Lecteur | Fichier à placer dans le dossier de la régie |
+   | --- | --- |
+   | Linux SDL x86-64 | `lecteur-ndi-ubuntu-amd64` |
+   | Linux SDL ARM64 | `lecteur-ndi-ubuntu-arm64` |
+   | Windows x64 | `lecteur-ndi-windows.exe` |
+
+3. Relance le **lanceur** de la régie après avoir ajouté ou remplacé un
+   binaire. La régie sélectionne le paquet approprié à chaque lecteur.
+
+Le ZIP de sources ne fournit pas les moteurs précompilés. Si le binaire
+correspondant est absent, la régie distribue le dossier Python complet
+avec le lanceur et le lecteur utilise son moteur installé localement. Si
+un moteur a déjà été distribué depuis la régie, celle-ci signale l’absence
+du binaire au lieu de faire revenir le lecteur à son moteur de base. Le
+lecteur teste le démarrage d’un moteur livré avant son activation et
+conserve sa version précédente en cas d’échec.
 
 ## Publier une version du logiciel sur GitHub
 
@@ -397,13 +429,13 @@ privée utilisée par la régie pour signer le push des lecteurs reste distincte
 ```bash
 ssh-keygen -t ed25519 -f /chemin/prive/soundlive-publication
 python3 publier-version.py --cle /chemin/prive/soundlive-publication
-gh release create v1.4.23 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.23' --generate-notes
+gh release create v1.4.24 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.24' --generate-notes
 ```
 
 Adapte le tag au numéro de `SOFTWARE_VERSION` dans `tableau.py`. La version
-des lecteurs est définie dans `commun.py`. Une release
-Windows peut inclure le lecteur si le binaire a été compilé avant la création
-du ZIP. Le ZIP est importé par la régie après vérification de sa signature.
+des lecteurs est définie dans `commun.py`. Une release peut inclure les
+moteurs compilés sous les noms indiqués ci-dessus. Le ZIP est importé par
+la régie après vérification de sa signature.
 Ne publie jamais les clés privées, le certificat privé de la régie, son fichier
 d’accès ou les associations des récepteurs.
 

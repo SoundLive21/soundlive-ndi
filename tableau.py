@@ -25,12 +25,12 @@ from acces_regie import (PORT as REMOTE_PORT, SESSION_COOKIE, SESSION_WARNING, U
                          RemoteConnections, RemoteDashboard, prepare_access)
 from commun import APP_NAME, PREVIEW_LIMIT, SOFTWARE_VERSION as CLIENT_VERSION, options, release_number
 from diagnostic import NetworkRates, network_info
-from mise_a_jour import SAFE_ID, contents, digest, package, prepare_key
+from mise_a_jour import ENGINE_ASSETS, SAFE_ID, contents, digest, engine_name, full_contents, package, prepare_key
 from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.23"
+SOFTWARE_VERSION = "1.4.24"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -61,6 +61,14 @@ UPDATE_AGE = 120
 UPDATE_KEY = ROOT / ".soundlive-update" / "regie"
 UPDATE_FILES = contents(ROOT)
 UPDATE_DIGEST = digest(UPDATE_FILES)
+FULL_UPDATES = {}
+for target in ENGINE_ASSETS:
+    try:
+        files = full_contents(ROOT, target, release=True)
+    except (OSError, ValueError) as error:
+        print(f"Paquet client {target} : {error}", file=sys.stderr)
+        continue
+    FULL_UPDATES[target] = (files, digest(files))
 RECEIVER_PATHS = {"/api/enroll", "/api/poll", "/api/client-package", "/api/preview-result"}
 PREVIEWS = {}
 PREVIEW_WAIT = 16
@@ -209,15 +217,24 @@ def waiting_access(address, port):
     return ["".join("1" if dark else "0" for dark in row) for row in code.modules]
 
 
+def update_payload(report):
+    if report.get("update_target") is None:
+        return UPDATE_FILES, UPDATE_DIGEST
+    return FULL_UPDATES.get(report["update_target"])
+
+
 def update_availability(report, now, key_exists):
     if now - report.get("seen", 0) >= ONLINE_AGE:
         return "offline"
-    if report.get("client_version") == UPDATE_DIGEST:
-        return "current"
     if release_number(report.get("client_release")) > release_number(CLIENT_VERSION):
         return "newer"
+    payload = update_payload(report)
+    if payload and report.get("client_version") == payload[1]:
+        return "current"
     if not report.get("can_update"):
         return "unsupported"
+    if payload is None or (report.get("update_has_engine") and engine_name(report.get("update_target")) not in payload[0]):
+        return "package_missing"
     return "available" if key_exists else "key_required"
 
 
@@ -363,8 +380,9 @@ def batch(path, data, now):
                 state = "queued"
                 existing = update_view(key, report, now)
                 if not existing or existing["state"] not in ("queued", "installing"):
+                    files, version = update_payload(report)
                     CLIENT_UPDATES[key] = dict(id=secrets.token_hex(16), until=now + UPDATE_AGE,
-                                               version=UPDATE_DIGEST, files=UPDATE_FILES)
+                                               version=version, files=files)
             job = CLIENT_UPDATES.get(key)
             results.append(dict(id=key, name=row["name"], state=state,
                                 job=job["id"] if state == "queued" else None))
@@ -852,6 +870,8 @@ class Request(BaseHTTPRequestHandler):
             release = data.get("client_release")
             release = release if release_number(release) else None
             can_update = data.get("can_update") is True and version is not None
+            update_target = data.get("update_target")
+            update_target = update_target if isinstance(update_target, str) and update_target in ENGINE_ASSETS else None
             active_source = data.get("active_source")
             active_source = active_source[:256] if state == "Lecture" and isinstance(active_source, str) else None
             row["report"] = dict(seen=now, ip=self.client_address[0], state=state, boot=boot,
@@ -868,6 +888,7 @@ class Request(BaseHTTPRequestHandler):
                                  display_preview_kind="player" if data.get("display_preview_kind") == "player" else "monitor",
                                  display_preview_error=str(data.get("display_preview_error") or "")[:240],
                                  can_update=can_update, client_version=version, client_release=release,
+                                 update_target=update_target, update_has_engine=data.get("update_has_engine") is True,
                                  update_result=result,
                                  latency_ms=bounded_number(data.get("latency_ms"), 10000))
             power = row.get("power", {})

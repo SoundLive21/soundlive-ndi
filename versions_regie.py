@@ -33,7 +33,8 @@ FILES = frozenset((
     "ecran.py", "diagnostic.py", "mise_a_jour.py", "lancer-client.py",
     "installer-client.sh", "installer-client.cmd", "installer-client-windows.py",
     "installer-pi.sh", "installer-ubuntu.sh", "lecteur-ndi-ubuntu.c", "compiler-lecteur-windows.ps1",
-    "lecteur-ndi-windows.exe", "LISEZ-MOI.txt", "versions_regie.py", "publier-version.py", "README.md",
+    "lecteur-ndi-ubuntu-amd64", "lecteur-ndi-ubuntu-arm64", "lecteur-ndi-windows.exe",
+    "LISEZ-MOI.txt", "versions_regie.py", "publier-version.py", "README.md",
     ".gitignore", "LICENSE", "LICENSE.txt", "COPYING",
 ))
 REQUIRED = {"commun.py", "ecran.py", "diagnostic.py", "mise_a_jour.py", "tableau.py",

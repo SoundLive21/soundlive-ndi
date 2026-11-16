@@ -24,7 +24,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from commun import APP_NAME, COPYRIGHT, DEFAULT_SOURCE, PREVIEW_LIMIT, SOFTWARE_VERSION, client_lock, options, release_number
 from diagnostic import Diagnostic
-from mise_a_jour import ClientUpdate, LIMIT, RESTART, contents, digest
+from mise_a_jour import ClientUpdate, FULL_LIMIT, RESTART, digest, engine_name, full_contents, update_target
 
 HOME = Path.home()
 WINDOWS = sys.platform == "win32"
@@ -39,8 +39,14 @@ UBUNTU = os.environ.get("SOUNDLIVE_PLAYER") == "ubuntu"
 CLIENT_DIR = Path(__file__).resolve().parent
 APP = Path(os.environ.get("SOUNDLIVE_APP", CLIENT_DIR))
 DEVICE_KIND = "windows" if WINDOWS else os.environ.get("SOUNDLIVE_DEVICE_KIND", "ubuntu" if UBUNTU else "pi")
-PLAYER = str(APP / "lecteur-ndi-windows.exe" if WINDOWS else
-             APP / "lecteur-ndi-ubuntu" if UBUNTU else NDI / "bin/ffplay")
+PLAYER = NDI / "bin/ffplay"
+if WINDOWS or UBUNTU:
+    filename = "lecteur-ndi-windows.exe" if WINDOWS else "lecteur-ndi-ubuntu"
+    staged_player = CLIENT_DIR / filename
+    PLAYER = staged_player if staged_player.is_file() else APP / filename
+PLAYER = str(PLAYER)
+if UBUNTU:
+    os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(filter(None, (str(APP / "lib"), os.environ.get("LD_LIBRARY_PATH"))))
 READY = STATE / "video.prete"
 RENDER_PREVIEW = STATE / "apercu-interne"
 BOOT = "windows-" + secrets.token_hex(16) if WINDOWS else Path("/proc/sys/kernel/random/boot_id").read_text().strip()
@@ -669,9 +675,9 @@ def post(server, path, data, token=None):
     request = Request(server + path, json.dumps(data).encode(), headers, method="POST")
     try:
         if path == "/api/client-package":
-            with build_opener(NoRedirect).open(request, timeout=8) as response:
-                body = response.read(2 * LIMIT + 1)
-                if len(body) > 2 * LIMIT:
+            with build_opener(NoRedirect).open(request, timeout=20) as response:
+                body = response.read(2 * FULL_LIMIT + 1)
+                if len(body) > 2 * FULL_LIMIT:
                     raise ValueError("Paquet de mise à jour trop volumineux.")
                 return json.loads(body)
         with urlopen(request, timeout=3) as response:
@@ -735,7 +741,10 @@ class DashboardClient:
         self.latency_test = None
         self.updater = ClientUpdate(APP, CLIENT_DIR)
         self.can_update = "SOUNDLIVE_APP" in os.environ and self.updater.public.is_file()
-        self.version = digest(contents(CLIENT_DIR))
+        self.target = update_target()
+        files = full_contents(CLIENT_DIR, self.target, include_engine=CLIENT_DIR != APP)
+        self.version = digest(files)
+        self.has_versioned_engine = CLIENT_DIR != APP and engine_name(self.target) in files
         self.preview_job = None
         self.display_key = None
         self.display_info_pid = None
@@ -767,7 +776,8 @@ class DashboardClient:
         uses_monitor = not self.internal_preview_required and monitor_capture
         report.update(kind=DEVICE_KIND, latency_ms=self.latency_ms, latency_test=self.latency_test,
                       diagnostic=self.diagnostic.sample(server), can_update=self.can_update,
-                      client_version=self.version, client_release=SOFTWARE_VERSION,
+                      client_version=self.version, client_release=SOFTWARE_VERSION, update_target=self.target,
+                      update_has_engine=self.has_versioned_engine,
                       display=self.display_info, display_capture=uses_internal or uses_portal or uses_monitor,
                       display_preview_kind="player" if self.internal_preview_required else "monitor",
                       display_preview_error=self.internal_preview_error if self.internal_preview_required else monitor_error,

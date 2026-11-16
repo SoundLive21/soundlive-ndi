@@ -8,6 +8,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import subprocess
 import sys
@@ -15,6 +16,14 @@ from tempfile import TemporaryDirectory
 
 FILES = ("ecran.py", "commun.py", "diagnostic.py", "mise_a_jour.py")
 LIMIT = 512 * 1024
+FULL_LIMIT = 16 * 1024 * 1024
+FULL_FILES = (*FILES, "lancer-client.py")
+ENGINE_ASSETS = {
+    "linux-amd64": ("lecteur-ndi-ubuntu-amd64", "lecteur-ndi-ubuntu"),
+    "linux-arm64": ("lecteur-ndi-ubuntu-arm64", "lecteur-ndi-ubuntu"),
+    "windows-amd64": ("lecteur-ndi-windows.exe", "lecteur-ndi-windows.exe"),
+    "pi-ffplay": None,
+}
 NAMESPACE = "soundlive-update"
 SAFE_ID = re.compile(r"[a-f0-9]{64}")
 PUBLIC_KEY = "regie-update.pub"
@@ -29,8 +38,57 @@ def contents(folder):
 
 
 def digest(files):
-    checksums = {name: sha256(files[name]).hexdigest() for name in FILES}
+    checksums = {name: sha256(value).hexdigest() for name, value in files.items()}
     return sha256(json.dumps(checksums, sort_keys=True).encode("ascii")).hexdigest()
+
+
+def update_target():
+    machine = platform.machine().lower()
+    if sys.platform == "win32":
+        return "windows-amd64" if machine in ("amd64", "x86_64") else None
+    if os.environ.get("SOUNDLIVE_PLAYER") != "ubuntu":
+        return "pi-ffplay"
+    if machine in ("amd64", "x86_64"):
+        return "linux-amd64"
+    if machine in ("arm64", "aarch64"):
+        return "linux-arm64"
+    return None
+
+
+def engine_name(target):
+    engine = ENGINE_ASSETS.get(target)
+    return engine[1] if engine else None
+
+
+def check_engine(payload, target):
+    if target == "windows-amd64":
+        header = int.from_bytes(payload[60:64], "little")
+        valid = (payload.startswith(b"MZ") and header >= 64 and
+                 payload[header:header + 6] == b"PE\0\0\x64\x86")
+    else:
+        machine = b"\xb7\x00" if target == "linux-arm64" else b"\x3e\x00"
+        valid = payload.startswith(b"\x7fELF\x02\x01") and payload[18:20] == machine
+    if not valid:
+        raise ValueError("Le moteur fourni ne correspond pas à la plateforme du lecteur.")
+
+
+def full_contents(folder, target, *, release=False, include_engine=True):
+    files = contents(folder)
+    launcher = folder / "lancer-client.py"
+    if release or launcher.is_file():
+        files[launcher.name] = launcher.read_bytes()
+    engine = ENGINE_ASSETS.get(target) if include_engine else None
+    if engine:
+        asset, name = engine
+        path = folder / (asset if release else name)
+        if path.is_file() and not path.is_symlink():
+            if path.stat().st_size > FULL_LIMIT:
+                raise ValueError(f"Moteur trop volumineux : {path.name}.")
+            files[name] = path.read_bytes()
+            check_engine(files[name], target)
+    if sum(map(len, files.values())) > FULL_LIMIT:
+        raise ValueError("Le dossier applicatif est trop volumineux.")
+    return files
 
 
 def manifest(device, job, nonce, version):
@@ -76,15 +134,24 @@ def package(private, files, device, job, nonce, version):
                 files={name: b64encode(value).decode("ascii") for name, value in files.items()})
 
 
-def verify(public, bundle, device, job, nonce):
+def verify(public, bundle, device, job, nonce, target=None):
     version = bundle["version"]
     if not isinstance(version, str) or not SAFE_ID.fullmatch(version):
         raise ValueError("Empreinte de mise à jour invalide.")
     encoded = bundle["files"]
-    if not isinstance(encoded, dict) or set(encoded) != set(FILES):
+    if not isinstance(encoded, dict):
         raise ValueError("Contenu de mise à jour inattendu.")
-    files = {name: b64decode(encoded[name], validate=True) for name in FILES}
-    if sum(map(len, files.values())) > LIMIT or digest(files) != version:
+    names = set(encoded)
+    full = set(FULL_FILES)
+    engine = engine_name(target)
+    if names == set(FILES):
+        limit = LIMIT
+    elif target in ENGINE_ASSETS and (names == full or engine and names == full | {engine}):
+        limit = FULL_LIMIT
+    else:
+        raise ValueError("Contenu de mise à jour inattendu.")
+    files = {name: b64decode(value, validate=True) for name, value in encoded.items()}
+    if sum(map(len, files.values())) > limit or digest(files) != version:
         raise ValueError("Paquet de mise à jour altéré.")
     signature = b64decode(bundle["signature"], validate=True)
     key = public.read_text(encoding="ascii").split()
@@ -101,6 +168,8 @@ def verify(public, bundle, device, job, nonce):
                        "-s", sigfile, data=manifest(device, job, nonce, version))
         except RuntimeError as error:
             raise ValueError("Signature de la mise à jour non reconnue.") from error
+    if engine in files:
+        check_engine(files[engine], target)
     return files
 
 
@@ -132,10 +201,12 @@ class ClientUpdate:
         self.write(data)
 
     def stage(self, bundle, device, job, nonce):
-        files = verify(self.public, bundle, device, job, nonce)
+        target = update_target()
+        files = verify(self.public, bundle, device, job, nonce, target)
         version = bundle["version"]
         data = self.read()
-        if version == digest(contents(self.current)):
+        current = {name: (self.current / name).read_bytes() for name in files if (self.current / name).is_file()}
+        if set(current) == set(files) and version == digest(current):
             data["result"] = dict(id=job, state="updated", message="Déjà à jour.")
             self.write(data)
             return False
@@ -144,15 +215,38 @@ class ClientUpdate:
             staged = Path(tmp) / version
             staged.mkdir()
             for name, content in files.items():
-                compile(content, name, "exec")
-                (staged / name).write_bytes(content)
+                path = staged / name
+                if name.endswith(".py"):
+                    compile(content, name, "exec")
+                path.write_bytes(content)
+                if name == engine_name(target) and sys.platform != "win32":
+                    path.chmod(0o755)
+            env = {**os.environ, "SOUNDLIVE_APP": str(self.app)}
             result = subprocess.run([sys.executable, "-B", "-c", "import ecran"],
-                                    cwd=staged, capture_output=True, timeout=10)
+                                    cwd=staged, env=env, capture_output=True, timeout=10)
             if result.returncode:
                 raise ValueError("Le nouveau client ne peut pas démarrer.")
+            engine = engine_name(target)
+            if engine in files:
+                env["LD_LIBRARY_PATH"] = os.pathsep.join(filter(None, (str(self.app / "lib"), env.get("LD_LIBRARY_PATH"))))
+                if sys.platform == "win32":
+                    for dll in ("Processing.NDI.Lib.x64.dll", "SDL2.dll"):
+                        runtime = self.app / dll
+                        if not runtime.is_file():
+                            raise ValueError(f"Dépendance locale manquante : {dll}.")
+                        (staged / dll).write_bytes(runtime.read_bytes())
+                check = subprocess.run(
+                    [str(staged / engine), "--sources"], env=env, cwd=staged,
+                    capture_output=True, timeout=15,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                )
+                if check.returncode:
+                    detail = check.stderr.decode(errors="replace").strip()[:150]
+                    raise ValueError("Le nouveau moteur ne démarre pas avec les dépendances du lecteur."
+                                     + (" " + detail if detail else ""))
             destination = self.versions / version
             if destination.exists():
-                if digest(contents(destination)) != version:
+                if digest(full_contents(destination, target)) != version:
                     raise ValueError("La copie locale de cette version est altérée.")
             else:
                 staged.rename(destination)
@@ -187,6 +281,15 @@ class ClientUpdate:
     def ready(self):
         data = self.read()
         if data.get("trial") == "starting" and self.current.name == data.get("candidate"):
+            launcher = self.current / "lancer-client.py"
+            if launcher.is_file():
+                boot = self.app / "lancer-client.py"
+                with TemporaryDirectory(dir=self.app) as folder:
+                    temporary = Path(folder) / boot.name
+                    temporary.write_bytes(launcher.read_bytes())
+                    if boot.is_file():
+                        temporary.chmod(boot.stat().st_mode & 0o777)
+                    temporary.replace(boot)
             data["active"] = data.pop("candidate")
             data.pop("trial")
             data["result"] = dict(id=data.pop("trial_job"), state="updated", message="Client relancé.")
