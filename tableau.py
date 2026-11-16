@@ -30,7 +30,7 @@ from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.21"
+SOFTWARE_VERSION = "1.4.22"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -866,6 +866,8 @@ class Request(BaseHTTPRequestHandler):
                                  if "display_capture" in data else None,
                                  capture_needs_consent=data.get("capture_needs_consent") is True,
                                  display_preview_kind="player" if data.get("display_preview_kind") == "player" else "monitor",
+                                 display_preview_error=str(data.get("display_preview_error") or "")[:240]
+                                 if data.get("display_preview_kind") == "player" else "",
                                  can_update=can_update, client_version=version, client_release=release,
                                  update_result=result,
                                  latency_ms=bounded_number(data.get("latency_ms"), 10000))

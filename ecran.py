@@ -742,6 +742,8 @@ class DashboardClient:
         self.display_check_at = 0
         self.portal = PortalCapture() if not WINDOWS else None
         self.internal_preview = None
+        self.internal_preview_required = False
+        self.internal_preview_error = ""
 
     def poll(self, report, display_pid=0):
         server = self.identity["server"]
@@ -753,14 +755,16 @@ class DashboardClient:
                 self.display_info = json.loads(self.preview_command("--info-ecran", str(display_pid), 3))
             except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
                 self.display_info = {}
-        uses_internal = self.internal_preview is not None and self.display_info.get("portal") is True
-        uses_portal = not uses_internal and self.portal is not None and self.display_info.get("portal") is True
+        uses_internal = self.internal_preview is not None
+        uses_portal = (not self.internal_preview_required and self.portal is not None
+                       and self.display_info.get("portal") is True)
+        uses_monitor = not self.internal_preview_required and self.display_info.get("capture") is True
         report.update(kind=DEVICE_KIND, latency_ms=self.latency_ms, latency_test=self.latency_test,
                       diagnostic=self.diagnostic.sample(server), can_update=self.can_update,
                       client_version=self.version, client_release=SOFTWARE_VERSION,
-                      display=self.display_info, display_capture=uses_internal or uses_portal
-                      or self.display_info.get("capture") is True,
-                      display_preview_kind="player" if uses_internal else "monitor",
+                      display=self.display_info, display_capture=uses_internal or uses_portal or uses_monitor,
+                      display_preview_kind="player" if self.internal_preview_required else "monitor",
+                      display_preview_error=self.internal_preview_error,
                       capture_needs_consent=uses_portal and self.portal.stream is None)
         if self.can_update:
             report["update_result"] = self.updater.report()
@@ -780,6 +784,8 @@ class DashboardClient:
                 self.preview_job = job
                 if screen and uses_internal:
                     mode = "waiting" if report["state"] != "Lecture" else "player"
+                elif screen and self.internal_preview_required:
+                    mode = "unavailable"
                 else:
                     mode = "portal" if screen and uses_portal else "--capture-ecran" if screen else "--apercu-ndi"
                 argument = str(display_pid) if screen else source
@@ -820,6 +826,8 @@ class DashboardClient:
         try:
             if mode == "player":
                 png = player_render_preview()
+            elif mode == "unavailable":
+                raise RuntimeError(self.internal_preview_error)
             elif mode == "waiting":
                 png = self.internal_preview()
             elif mode == "portal":
@@ -888,16 +896,11 @@ def desktop():
             self.window = Gtk.Window(title=APP_NAME, decorated=False)
             self.window.connect("destroy", lambda *_: Gtk.main_quit())
             self.window.connect("key-press-event", self.key_press)
-            if self.dashboard and UBUNTU and "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper():
-                try:
-                    gi.require_foreign("cairo")
-                    check = subprocess.run([PLAYER, "--apercu-interne"], capture_output=True, timeout=2)
-                    if check.returncode == 0 and check.stdout.strip() == b"apercu-interne":
-                        RENDER_PREVIEW.with_suffix(".request").unlink(missing_ok=True)
-                        RENDER_PREVIEW.with_suffix(".rgb").unlink(missing_ok=True)
-                        self.dashboard.internal_preview = self.waiting_preview
-                except (ImportError, OSError, subprocess.SubprocessError):
-                    pass
+            wayland = (self.window.get_display().__gtype__.name == "GdkWaylandDisplay"
+                       or os.environ.get("XDG_SESSION_TYPE") == "wayland")
+            if self.dashboard and UBUNTU and wayland:
+                self.dashboard.internal_preview_required = True
+                self.prepare_internal_preview()
             css = Gtk.CssProvider()
             css.load_from_data(b"""
                 window {background-image:linear-gradient(145deg,#230c11,#100e11 46%,#08080a);}
@@ -987,6 +990,26 @@ def desktop():
             self.title.set_text("En attente du flux vidéo" if self.settings["enabled"] else "Diffusion arrêtée")
             self.window.fullscreen()
             self.window.show_all()
+
+        def prepare_internal_preview(self):
+            try:
+                check = subprocess.run([PLAYER, "--apercu-interne"], capture_output=True, timeout=2)
+                if check.returncode or check.stdout.strip() != b"apercu-interne":
+                    raise RuntimeError("Moteur SDL ancien. Sur le lecteur, lance installer-ubuntu.sh --mettre-a-jour-rendu puis redémarre-le.")
+                try:
+                    gi.require_foreign("cairo")
+                except ImportError as error:
+                    raise RuntimeError("Paquet python3-gi-cairo manquant sur le lecteur. Relance installer-ubuntu.sh --mettre-a-jour-rendu.") from error
+                RENDER_PREVIEW.with_suffix(".request").unlink(missing_ok=True)
+                RENDER_PREVIEW.with_suffix(".rgb").unlink(missing_ok=True)
+            except RuntimeError as error:
+                self.dashboard.internal_preview_error = str(error)
+            except (OSError, subprocess.SubprocessError):
+                self.dashboard.internal_preview_error = "Moteur SDL inaccessible. Relance installer-ubuntu.sh --mettre-a-jour-rendu puis redémarre le lecteur."
+            else:
+                self.dashboard.internal_preview = self.waiting_preview
+                self.dashboard.internal_preview_error = ""
+            print(self.dashboard.internal_preview_error or "Aperçu du rendu SoundLive-NDI actif.", file=self.log)
 
         def waiting_preview(self):
             import cairo

@@ -163,8 +163,13 @@ if $render_only; then
     if ! /usr/bin/python3 -c 'import cairo, gi; gi.require_foreign("cairo")' >/dev/null 2>&1; then
         sudo apt install -y python3-gi-cairo
     fi
-    "$temp/lecteur-ndi-ubuntu" --apercu-interne >/dev/null
     install -m 755 "$temp/lecteur-ndi-ubuntu" "$app/.lecteur-ndi-ubuntu.new"
+    if ! preview_check=$("$app/.lecteur-ndi-ubuntu.new" --apercu-interne) ||
+        [[ $preview_check != apercu-interne ]]; then
+        rm -f -- "$app/.lecteur-ndi-ubuntu.new"
+        echo "Le nouveau moteur ne démarre pas avec le runtime NDI installé. Lance la mise à jour complète avec --mettre-a-jour."
+        exit 1
+    fi
     mv -fT "$app/.lecteur-ndi-ubuntu.new" "$app/lecteur-ndi-ubuntu"
     echo "Moteur d’affichage mis à jour. Pousse ensuite le nouveau client depuis la régie."
     exit 0

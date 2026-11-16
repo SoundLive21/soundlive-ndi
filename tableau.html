@@ -1270,8 +1270,9 @@ function render(row) {
   const supported = row.report.display_capture === true;
   overview.available = row.online && supported;
   overview.needsConsent = row.report.capture_needs_consent === true;
-  overview.unavailable = !row.online ? "Lecteur hors ligne." : hasNewClient ?
-    "Capture indisponible dans cette session graphique." : "Mets à jour le lecteur pour activer la capture.";
+  overview.unavailable = !row.online ? "Lecteur hors ligne." :
+    row.report.display_preview_error || (hasNewClient ? "Capture indisponible dans cette session graphique." :
+      "Mets à jour le lecteur pour activer la capture.");
   if (!overview.available) {
     overview.snapshot = null;
     overview.error = "";
