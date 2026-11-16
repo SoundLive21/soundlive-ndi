@@ -410,7 +410,8 @@ def orient_desktop_linux(player_pid, orientation):
         raise RuntimeError(f"Installe {utility if wayland else 'x11-xserver-utils'} sur ce lecteur.")
 
     def command(*args):
-        result = subprocess.run([executable, *args], capture_output=True, text=True, timeout=2)
+        result = subprocess.run([executable, *args], capture_output=True, text=True, timeout=2,
+                                env={**os.environ, "LC_ALL": "C"})
         if result.returncode:
             message = result.stderr.strip() or "Le bureau a refusé l’orientation."
             raise RuntimeError(f"{utility} · {message}")
@@ -904,44 +905,59 @@ class DashboardClient:
         self.version = digest(files)
         self.has_versioned_engine = CLIENT_DIR != APP and engine_name(self.target) in files
         self.preview_job = None
-        self.display_key = None
-        self.display_info_pid = None
+        self.display_work = ThreadPoolExecutor(max_workers=1)
+        self.display_request = None
+        self.display_target = None
         self.display_info = {}
         self.display_check_at = 0
         self.orientation = orientation
         self.orientation_report = None
-        self.orientation_check_at = 0
-        self.orientation_display_pid = None
         self.portal = PortalCapture() if not WINDOWS else None
         self.internal_preview = None
         self.internal_preview_required = False
         self.local_screen_capture = None
         self.internal_preview_error = ""
 
+    def probe_display(self, display_pid, orientation):
+        status = dict(value=orientation)
+        try:
+            self.client_command("--orienter-ecran", f"{display_pid} {orientation}", 6)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+            status["error"] = ("La rotation n’a pas répondu dans le délai prévu."
+                               if isinstance(error, subprocess.TimeoutExpired) else str(error))
+        try:
+            info = json.loads(self.client_command("--info-ecran", str(display_pid), 3))
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+            info = None
+        return status, info
+
+    def refresh_display(self, display_pid, orientation):
+        target = (display_pid, orientation)
+        if self.display_request is not None:
+            if not self.display_request.done():
+                return
+            status, info = self.display_request.result()
+            self.display_request = None
+            if target == self.display_target:
+                self.orientation_report = status
+                if info is not None:
+                    self.display_info = info
+        now = time.monotonic()
+        changed = self.display_target != target
+        if changed or now >= self.display_check_at:
+            if self.display_target is None or self.display_target[0] != display_pid:
+                self.display_info = {}
+            self.display_target = target
+            self.display_check_at = now + (15 if changed or not self.orientation_report
+                                           or self.orientation_report.get("error") else 45)
+            self.display_request = self.display_work.submit(self.probe_display, *target)
+
+    def close(self):
+        self.display_work.shutdown(wait=False, cancel_futures=True)
+
     def poll(self, report, display_pid=0):
         server = self.identity["server"]
         token = self.identity["token"]
-        if self.orientation_display_pid != display_pid or time.monotonic() >= self.orientation_check_at:
-            self.orientation_display_pid = display_pid
-            self.orientation_check_at = time.monotonic() + 15
-            try:
-                changed = self.client_command("--orienter-ecran", f"{display_pid} {self.orientation}", 6)
-            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
-                self.orientation_report = dict(value=self.orientation, error=str(error))
-            else:
-                self.orientation_report = dict(value=self.orientation)
-                if changed == b"1":
-                    self.display_check_at = 0
-        if display_pid != self.display_key or time.monotonic() >= self.display_check_at:
-            self.display_key = display_pid
-            self.display_check_at = time.monotonic() + 15
-            try:
-                self.display_info = json.loads(self.client_command("--info-ecran", str(display_pid), 3))
-            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
-                if display_pid != self.display_info_pid:
-                    self.display_info = {}
-            else:
-                self.display_info_pid = display_pid
         uses_internal = self.internal_preview is not None
         uses_portal = (not self.internal_preview_required and self.portal is not None
                        and self.display_info.get("portal") is True)
@@ -964,12 +980,12 @@ class DashboardClient:
         except (OSError, RuntimeError, ValueError):
             self.latency_ms = None
             self.latency_test = None
+            self.refresh_display(display_pid, self.orientation)
             raise
         self.latency_ms = round((time.monotonic() - started) * 1000, 1)
-        orientation = options(reply["options"])["orientation"]
-        if self.orientation != orientation:
-            self.orientation = orientation
-            self.orientation_check_at = 0
+        if not (reply.get("reboot") or reply.get("poweroff")):
+            self.orientation = options(reply["options"])["orientation"]
+            self.refresh_display(display_pid, self.orientation)
         preview = reply.get("preview_request")
         if isinstance(preview, dict) and not (reply.get("reboot") or reply.get("poweroff")):
             job, source = preview.get("id"), preview.get("source")
@@ -1480,7 +1496,9 @@ def desktop():
                     except subprocess.TimeoutExpired:
                         screen.player.kill()
                         screen.player.wait()
-                screen.work.shutdown(wait=False, cancel_futures=True)
+                screen.work.shutdown(wait=True, cancel_futures=True)
+                if screen.dashboard:
+                    screen.dashboard.close()
             return RESTART if screen.restart_client else 0
 
 
@@ -1681,6 +1699,8 @@ def run_windows_screen(tk, log):
             stop_player()
         finally:
             work.shutdown(wait=True, cancel_futures=True)
+            if client:
+                client.close()
             root.destroy()
     return RESTART if restart else 0
 

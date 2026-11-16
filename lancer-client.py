@@ -9,9 +9,7 @@ from pathlib import Path
 import signal
 import subprocess
 import sys
-
-from mise_a_jour import ClientUpdate, RESTART
-from commun import client_lock
+import time
 
 APP = Path(__file__).resolve().parent
 
@@ -19,6 +17,9 @@ APP = Path(__file__).resolve().parent
 def main():
     if sys.platform != "win32" and os.geteuid() == 0:
         sys.exit("Lance SoundLive-NDI avec le compte de la session graphique.")
+    from mise_a_jour import ClientUpdate, RESTART
+    from commun import client_lock
+
     updater = ClientUpdate(APP, APP)
     updater.versions.mkdir(mode=0o700, exist_ok=True)
     with client_lock(updater.versions / "launcher.lock") as acquired:
@@ -26,6 +27,7 @@ def main():
             return
         stopping = False
         child = None
+        failures = 0
 
         def stop(*_):
             nonlocal stopping
@@ -42,6 +44,8 @@ def main():
                 updater.file.unlink(missing_ok=True)
                 reset.unlink(missing_ok=True)
             entry = updater.select()
+            print(f"Ouverture du client {entry}", flush=True)
+            started = time.monotonic()
             child = subprocess.Popen([sys.executable, "-B", str(entry)], env=env)
             try:
                 code = child.wait(timeout=30) if updater.read().get("trial") == "starting" else child.wait()
@@ -56,11 +60,36 @@ def main():
                         child.kill()
                         code = child.wait()
             child = None
-            if updater.rollback():
-                continue
-            if code != RESTART:
+            if stopping:
                 return
+            if updater.rollback():
+                failures = 0
+                continue
+            if code == RESTART:
+                failures = 0
+                continue
+            if code == 0:
+                return
+            if time.monotonic() - started >= 30:
+                failures = 0
+            failures += 1
+            print(f"Le client a quitté avec le code {code}. Échec {failures}/3.", flush=True)
+            if failures >= 3:
+                return code
+            time.sleep(3)
 
 
 if __name__ == "__main__":
-    main()
+    if sys.platform == "win32" or os.geteuid() == 0:
+        sys.exit(main())
+    state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "soundlive-ndi"
+    state.mkdir(parents=True, exist_ok=True)
+    with (state / "lancement.log").open("a", encoding="utf-8", buffering=1) as log:
+        # Le descripteur est aussi hérité par le processus graphique.
+        os.dup2(log.fileno(), 1)
+        os.dup2(log.fileno(), 2)
+        print(time.strftime("%Y-%m-%d %H:%M:%S · Démarrage du lanceur"), flush=True)
+        print(f"Session graphique : {os.environ.get('XDG_SESSION_TYPE') or 'indéterminée'}"
+              f" · DISPLAY={os.environ.get('DISPLAY', '')}"
+              f" · WAYLAND_DISPLAY={os.environ.get('WAYLAND_DISPLAY', '')}", flush=True)
+        sys.exit(main())

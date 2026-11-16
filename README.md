@@ -333,6 +333,10 @@ Le paysage est la valeur par défaut. Le client réapplique la valeur
 enregistrée à l’ouverture de sa session et reçoit les changements à la
 reconnexion. **Actions de groupe** permet d’appliquer le même réglage à
 plusieurs lecteurs. La fiche indique si le système a accepté la demande.
+À partir du client **1.4.16**, le lecteur contacte la régie avant de lancer
+la rotation et traite les opérations d’affichage en arrière-plan. Sous
+Linux, le journal `~/.local/state/soundlive-ndi/lancement.log` indique si
+le lanceur graphique a démarré et consigne les erreurs de démarrage.
 
 Sur Raspberry Pi OS, le bureau Wayland doit prendre en charge
 `wlr-randr` (`sudo apt install wlr-randr` si absent). En X11, utilise
