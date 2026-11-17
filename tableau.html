@@ -31,6 +31,10 @@ h2{margin:0;font-size:1.24rem;overflow-wrap:anywhere}.badge{flex:none;border-rad
 input,select,button{font:inherit;border-radius:8px;border:1px solid var(--edge);color:inherit}input:not([type=checkbox]):not([type=range]),select{padding:10px;background:#100d12;width:100%}input[type=range]{accent-color:var(--red);width:100%}input[type=checkbox]{accent-color:var(--red)}
 button{padding:9px 13px;cursor:pointer;background:#2b222f;font-weight:600;white-space:nowrap}button.primary{background:#df3453;color:#fff;border-color:#df3453}button:disabled{opacity:.44;cursor:default}button:hover:not(:disabled){filter:brightness(1.18)}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.actions .remove{margin-left:auto;color:#efacb7}.check{display:flex;align-items:center;gap:6px}
+.media-panel{margin-top:16px;padding:10px 12px;border:1px solid #6b3a43;border-radius:8px}
+.media-list{padding:0;margin:10px 0;list-style:none}
+.media-list li{display:flex;align-items:center;gap:12px;justify-content:space-between;padding:5px 0}
+.media-list li span{min-width:0;overflow-wrap:anywhere}
 .empty{padding:38px;border:1px dashed var(--edge);border-radius:14px;color:var(--sub)}
 dialog{width:min(480px,90vw);border:1px solid var(--edge);border-radius:14px;background:var(--panel);color:var(--text);padding:24px}dialog::backdrop{background:#0009}
 code{display:block;padding:11px;background:#100d12;border-radius:7px;overflow-wrap:anywhere;white-space:normal}
@@ -366,6 +370,16 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       <label class="check"><input type="checkbox" class="muted"> Couper le son</label>
       <div class="actions"><button class="primary" type="submit">Appliquer</button><button class="toggle" type="button"></button><button class="reboot" type="button">Redémarrer</button><button class="poweroff" type="button">Éteindre</button></div>
       </form>
+      <details class="media-panel" hidden>
+        <summary>Médias locaux</summary>
+        <p class="small media-state"></p>
+        <ul class="media-list"></ul>
+        <form class="media-upload">
+          <label>Images et vidéos<input type="file" multiple required accept=".jpg,.jpeg,.png,.mp4,.m4v,.mov,.webm,.mkv"></label>
+          <div class="actions"><button type="submit">Envoyer les fichiers</button><button type="button" class="media-mode"></button></div>
+          <p class="small media-transfer" role="status"></p>
+        </form>
+      </details>
       <p class="small error"></p>
       <div class="actions"><button class="info" type="button" hidden>Informations</button><button class="client-upgrade" type="button" hidden>Mettre à jour le lecteur</button><button class="remove" type="button">Retirer</button></div>
     </details>
@@ -522,13 +536,14 @@ function endRemoteSession(destination) {
   remoteSessionEnded = true;
   location.replace(destination);
 }
-async function call(path, data) {
+async function call(path, data, raw = false) {
   if (remoteSessionEnded) throw Error("Session distante fermée.");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 6000);
+  const timer = setTimeout(() => controller.abort(), raw ? 300000 : 6000);
   try {
     const res = await fetch(path, data === undefined ? {signal:controller.signal} : {
-      method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data),
+      method:"POST", headers:{"Content-Type":raw ? "application/octet-stream" : "application/json"},
+      body:raw ? data : JSON.stringify(data),
       signal:controller.signal
     });
     const result = await res.json();
@@ -1076,6 +1091,79 @@ function commonResolutions(rows) {
     return [value, first.filter(source => rows.every(row => row?.resolution_sources?.[value]?.includes(source)))];
   }));
 }
+function setupLocalMedia(card, id) {
+  const panel = select(card.el, ".media-panel");
+  const form = select(panel, ".media-upload");
+  const files = select(form, 'input[type="file"]');
+  const submit = select(form, 'button[type="submit"]');
+  const mode = select(form, ".media-mode");
+  const list = select(panel, ".media-list");
+  const transfer = select(form, ".media-transfer");
+  let uploading = false;
+  let previousItems = "";
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const chosen = [...files.files];
+    if (uploading || !chosen.length) return;
+    uploading = files.disabled = submit.disabled = true;
+    let sent = 0;
+    try {
+      for (const file of chosen) {
+        transfer.textContent = "Envoi à la régie · " + file.name;
+        const query = new URLSearchParams({id, name:file.name});
+        await call("/api/media-upload?" + query, file, true);
+        sent++;
+      }
+      transfer.textContent = sent + " fichier(s) enregistré(s) sur la régie.";
+    } catch (error) {
+      transfer.textContent = (sent ? sent + " fichier(s) enregistré(s) · " : "") + error.message;
+    } finally {
+      uploading = files.disabled = submit.disabled = false;
+      files.value = "";
+      await refresh(true);
+    }
+  };
+  mode.onclick = action(async () => {
+    await call("/api/media-settings", {id, enabled:!card.data.media.enabled});
+    await refresh(true);
+  });
+  return row => {
+    panel.hidden = !row.paired;
+    if (!row.paired) return;
+    const config = row.media || {items:[], enabled:false};
+    const report = row.report.media_status;
+    const ready = report?.revision === row.media_revision;
+    select(panel, ".media-state").textContent = !config.items.length ?
+      "Aucun média enregistré." : !row.online ? "Synchronisation à la reconnexion." :
+      !report ? "Mets à jour le lecteur pour recevoir les fichiers." :
+      report.error || (ready ? (config.enabled ? "Lecture locale sélectionnée · fichiers disponibles hors réseau."
+        : "Fichiers copiés sur le lecteur.") : "Transfert vers le lecteur en attente ou en cours…");
+    mode.textContent = config.enabled ? "Revenir à la diffusion NDI" : "Lancer la lecture locale";
+    mode.disabled = !config.items.length;
+    const itemsKey = JSON.stringify(config.items);
+    if (itemsKey !== previousItems) {
+      previousItems = itemsKey;
+      list.replaceChildren(...config.items.map(item => {
+        const line = document.createElement("li");
+        const name = document.createElement("span");
+        name.textContent = item.name + " · " + (item.size / (1024 * 1024)).toLocaleString("fr", {maximumFractionDigits:1}) + " Mio";
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "Supprimer";
+        remove.onclick = action(() => showAction({
+          title:"Supprimer ce média", detail:item.name, label:"Supprimer", successTitle:"Média supprimé",
+          async perform() {
+            await call("/api/media-settings", {id, file:item.id});
+            await refresh(true);
+            return card.data.name;
+          }
+        }));
+        line.append(name, remove);
+        return line;
+      }));
+    }
+  };
+}
 function cardFor(id) {
   if (cards.has(id)) return cards.get(id);
   const el = document.querySelector("#card").content.firstElementChild.cloneNode(true);
@@ -1092,6 +1180,7 @@ function cardFor(id) {
   select(el, ".resolution-controls").hidden = !resolutionControlsEnabled;
   limit.replaceChildren(new Option("À valider après essai", ""), ...resolutions.map(value => new Option(value, value)));
   const card = {el, ui, form, list, resolution, limit, dirty:false};
+  card.renderMedia = setupLocalMedia(card, id);
   card.preview = createPreview(select(el, ".screen-preview"), "Capture de l’écran", id, true);
   const controls = select(el, "details");
   try { controls.open = localStorage.getItem("soundlive-controls-" + id) === "open"; }
@@ -1252,6 +1341,7 @@ function render(row) {
   const card = cardFor(row.id);
   const {el, ui, form} = card;
   card.data = row;
+  card.renderMedia(row);
   select(el,"h2").textContent = row.name;
   ui.badge.textContent = row.online ? row.report.state : row.paired ? "Hors ligne" : "À associer";
   ui.badge.classList.toggle("online",row.online);
@@ -1287,9 +1377,12 @@ function render(row) {
     overview.nextAuto = 0;
   }
   renderPreview(overview);
-  select(stream, "span").textContent = playing && row.report.active_source ? "Flux en cours" :
+  select(stream, "span").textContent = playing && row.report.active_media ? "Média local en cours" :
+    playing && row.report.active_source ? "Flux en cours" :
+    row.media?.enabled ? "Liste de médias locaux sélectionnée" :
     playing ? "Source configurée · lecture signalée" : "Source configurée";
-  select(stream, "strong").textContent = (playing && row.report.active_source) || row.options?.source || "";
+  select(stream, "strong").textContent = (playing && (row.report.active_media || row.report.active_source)) ||
+    (row.media?.enabled ? "" : row.options?.source || "");
   ui.error.textContent = row.report.error || "";
   const updateStatus = select(el, ".update-status");
   const update = row.client_update?.state === "updated" ? null : row.client_update;

@@ -6,6 +6,7 @@
 import configparser
 from concurrent.futures import Future, ThreadPoolExecutor
 from base64 import b64encode
+from hashlib import sha256
 from http.client import HTTPException
 import json
 import os
@@ -21,11 +22,12 @@ import threading
 import time
 import warnings
 from urllib.error import HTTPError
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
-from commun import (APP_NAME, COPYRIGHT, DEFAULT_SOURCE, ORIENTATIONS, PREVIEW_LIMIT,
-                    SOFTWARE_VERSION, client_lock, options, release_number)
+from commun import (APP_NAME, COPYRIGHT, DEFAULT_SOURCE, MEDIA_CHUNK, MEDIA_EXTENSIONS,
+                    ORIENTATIONS, PREVIEW_LIMIT, SOFTWARE_VERSION, client_lock,
+                    media_config, media_revision, options, release_number)
 from diagnostic import Diagnostic
 from mise_a_jour import ClientUpdate, FULL_LIMIT, RESTART, digest, engine_name, update_target
 
@@ -895,6 +897,151 @@ def pair(server, code):
     write_json(PAIRING, dict(server=server, serial=board, **result))
     print("Écran associé. Ouvre une nouvelle session pour lancer le lecteur.")
 
+
+class LocalMedia:
+    def __init__(self, identity):
+        self.identity = identity
+        self.folder = STATE / "medias" / sha256((identity or {}).get("id", "").encode()).hexdigest()
+        self.manifest = self.folder / "lecture.json"
+        self.applied = {"enabled": False, "items": []}
+        try:
+            cached = read_json(self.manifest) if identity else None
+            if cached is not None:
+                self.applied = media_config(cached)
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        self.desired = None
+        self.request = None
+        self.retry_at = 0
+        self.error = ""
+        self.play_error = ""
+        self.executor = ThreadPoolExecutor(max_workers=1)
+        self.closed = threading.Event()
+        self.ffplay = shutil.which("ffplay")
+        if WINDOWS and (APP / "ffplay.exe").is_file():
+            self.ffplay = str(APP / "ffplay.exe")
+        elif not self.ffplay and not WINDOWS and not UBUNTU and (NDI / "bin/ffplay").is_file():
+            self.ffplay = str(NDI / "bin/ffplay")
+        self.index = 0
+        self.deadline = None
+
+    @property
+    def enabled(self):
+        return self.applied["enabled"]
+
+    def path(self, item):
+        return self.folder / (item["id"] + Path(item["name"]).suffix.lower())
+
+    def receive(self, value):
+        if value is None:
+            return
+        desired = media_config(value)
+        if desired != self.desired:
+            self.desired = desired
+            self.retry_at = 0
+
+    def report(self):
+        error = self.error or self.play_error
+        if not error and (self.desired or self.applied)["items"] and not self.ffplay:
+            error = "FFplay est absent sur le lecteur. Installe FFmpeg pour lire les médias locaux."
+        return dict(revision=media_revision(self.applied), error=error, local=self.enabled)
+
+    def synchronize(self, config):
+        self.folder.mkdir(parents=True, exist_ok=True)
+        opener = build_opener(NoRedirect)
+        for item in config["items"]:
+            target = self.path(item)
+            if target.is_file() and target.stat().st_size == item["size"]:
+                continue
+            temporary = target.with_suffix(".part")
+            query = urlencode({"id": self.identity["id"], "file": item["id"]})
+            request = Request(self.identity["server"] + "/api/client-media?" + query,
+                              headers={"Authorization": "Bearer " + self.identity["token"]})
+            try:
+                checksum = sha256()
+                remaining = item["size"]
+                with opener.open(request, timeout=8) as response, temporary.open("wb") as handle:
+                    while remaining and not self.closed.is_set():
+                        data = response.read(min(MEDIA_CHUNK, remaining))
+                        if not data:
+                            break
+                        handle.write(data)
+                        checksum.update(data)
+                        remaining -= len(data)
+                if remaining or checksum.hexdigest() != item["sha256"]:
+                    raise ValueError("Fichier local incomplet ou différent de celui envoyé par la régie.")
+                temporary.replace(target)
+            finally:
+                temporary.unlink(missing_ok=True)
+        return config
+
+    def tick(self):
+        now = time.monotonic()
+        changed = False
+        if self.request and self.request.done():
+            try:
+                config = self.request.result()
+                if config == self.desired:
+                    write_json(self.manifest, config)
+            except (OSError, HTTPException, ValueError) as error:
+                self.error = f"Transfert des médias : {error}"
+                self.retry_at = now + 8
+            else:
+                if config == self.desired:
+                    changed = config != self.applied and (self.enabled or config["enabled"])
+                    self.applied, self.error = config, ""
+                    if changed:
+                        self.index = 0
+                        self.play_error = ""
+            self.request = None
+        if self.desired is not None and not self.request and now >= self.retry_at:
+            if self.desired != self.applied or any(not self.path(item).is_file() for item in self.desired["items"]):
+                self.request = self.executor.submit(self.synchronize, self.desired)
+        return changed
+
+    def prune(self):
+        if self.folder.is_dir() and not self.request:
+            kept = {self.path(item) for item in self.applied["items"]}
+            for path in self.folder.iterdir():
+                if path.suffix in MEDIA_EXTENSIONS and path not in kept:
+                    try:
+                        path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+
+    def command(self, settings):
+        item = self.applied["items"][self.index]
+        if not self.ffplay:
+            raise OSError("Installe FFmpeg sur ce lecteur pour la lecture locale.")
+        path = self.path(item)
+        if not path.is_file():
+            raise OSError(f"Le fichier local {item['name']} est absent.")
+        container = MEDIA_EXTENSIONS[path.suffix]
+        image = container == "image2"
+        single = len(self.applied["items"]) == 1
+        self.deadline = time.monotonic() + 10 if image and not single else None
+        seek = [] if image else ["-loop", "0"] if single else ["-autoexit"]
+        still = ["-pattern_type", "none"] if image else []
+        volume = 0 if settings["muted"] else settings["volume"]
+        return ([self.ffplay, "-hide_banner", "-nostats", "-fs", "-showmode", "video",
+                 "-volume", str(volume), "-protocol_whitelist", "file", "-f", container, *still,
+                 *seek, "-i", str(path)], item["name"])
+
+    def finished(self, code):
+        if code:
+            name = self.applied["items"][self.index]["name"]
+            self.play_error = f"Impossible de lire {name}. Consulte gestion.log."
+        self.index = (self.index + 1) % len(self.applied["items"])
+        self.deadline = None
+
+    def elapsed(self):
+        return self.deadline is not None and time.monotonic() >= self.deadline
+
+    def close(self):
+        self.closed.set()
+        self.executor.shutdown(wait=False, cancel_futures=True)
+
+
 class DashboardClient:
     def __init__(self, identity, orientation):
         self.identity = identity
@@ -961,7 +1108,8 @@ class DashboardClient:
     def poll(self, report, display_pid=0):
         server = self.identity["server"]
         token = self.identity["token"]
-        uses_internal = self.internal_preview is not None
+        local_video = report.get("local_video") is True
+        uses_internal = self.internal_preview is not None and not local_video
         uses_portal = (not self.internal_preview_required and self.portal is not None
                        and self.display_info.get("portal") is True)
         monitor_capture, monitor_error = self.local_screen_capture or (self.display_info.get("capture") is True, "")
@@ -972,8 +1120,10 @@ class DashboardClient:
                       update_has_engine=self.has_versioned_engine,
                       orientation_status=self.orientation_report,
                       display=self.display_info, display_capture=uses_internal or uses_portal or uses_monitor,
-                      display_preview_kind="player" if self.internal_preview_required else "monitor",
-                      display_preview_error=self.internal_preview_error if self.internal_preview_required else monitor_error,
+                      display_preview_kind="player" if self.internal_preview_required and not local_video else "monitor",
+                      display_preview_error=("Aperçu de la lecture locale indisponible dans cette session Wayland."
+                                             if local_video and self.internal_preview_required else
+                                             self.internal_preview_error if self.internal_preview_required else monitor_error),
                       capture_needs_consent=uses_portal and self.portal.stream is None)
         if self.can_update:
             report["update_result"] = self.updater.report()
@@ -1089,11 +1239,13 @@ def desktop():
                 self.identity = None
                 print(error, file=log)
             self.dashboard = DashboardClient(self.identity, self.settings["orientation"]) if self.identity else None
+            self.media = LocalMedia(self.identity)
             self.connection_status = None
             self.regie_state = None
             self.sources = []
             self.player = None
             self.active_source = None
+            self.playing_local = False
             self.video_ready = False
             self.stop_at = None
             self.retry_at = 0
@@ -1200,7 +1352,8 @@ def desktop():
             return False
 
         def waiting(self):
-            self.title.set_text("En attente du flux vidéo" if self.settings["enabled"] else "Diffusion arrêtée")
+            text = ("En attente d’un média local" if self.media.enabled else "En attente du flux vidéo")
+            self.title.set_text(text if self.settings["enabled"] else "Diffusion arrêtée")
             self.window.fullscreen()
             self.window.show_all()
 
@@ -1296,6 +1449,9 @@ def desktop():
             return True
 
         def probe(self):
+            if self.media.enabled:
+                GLib.timeout_add_seconds(5, self.probe)
+                return GLib.SOURCE_REMOVE
             cmd = ["/usr/bin/timeout", "-k", "2s", "12s", PLAYER,
                    "-hide_banner", "-nostats", "-nodisp", "-an", "-f", "libndi_newtek",
                    "-wait_sources", "3", "-find_sources", "1", "-i", "dummy"]
@@ -1335,9 +1491,10 @@ def desktop():
                 print(error, file=self.log)
             if self.settings["source"] in self.sources:
                 self.misses = 0
-                if self.settings["enabled"] and self.player is None and GLib.get_monotonic_time() >= self.retry_at:
+                if (self.settings["enabled"] and not self.media.enabled and self.player is None
+                        and GLib.get_monotonic_time() >= self.retry_at):
                     self.start()
-            elif self.player is not None and not UBUNTU:
+            elif self.player is not None and not self.playing_local and not UBUNTU:
                 self.misses += 1
                 if self.misses >= 2:
                     self.terminate()
@@ -1351,18 +1508,29 @@ def desktop():
                 "-bandwidth", self.settings["bandwidth"], "-i", self.settings["source"],
             ]
             try:
-                if UBUNTU:
+                local = self.media.enabled
+                source = self.settings["source"]
+                if local:
+                    command, source = self.media.command(self.settings)
+                elif UBUNTU:
                     READY.unlink(missing_ok=True)
                     command = [PLAYER, self.settings["source"], self.settings["bandwidth"],
                                str(volume), str(READY)]
                 env = None
-                if self.dashboard and self.dashboard.internal_preview is not None:
+                if not local and self.dashboard and self.dashboard.internal_preview is not None:
                     env = {**os.environ, "SOUNDLIVE_RENDER_PREVIEW": str(RENDER_PREVIEW)}
                 self.player = subprocess.Popen(command, stdout=self.log, stderr=subprocess.STDOUT, env=env)
-                self.active_source = self.settings["source"]
-                self.video_ready = not UBUNTU
+                self.active_source = source
+                self.playing_local = local
+                self.video_ready = local or not UBUNTU
+                self.error = ""
+                if local:
+                    self.media.play_error = ""
             except OSError as error:
                 self.error = str(error)
+                if self.media.enabled:
+                    self.media.finished(1)
+                    self.retry_at = GLib.get_monotonic_time() + 2 * GLib.USEC_PER_SEC
                 print(error, file=self.log)
                 return
             if self.video_ready:
@@ -1374,17 +1542,26 @@ def desktop():
                 self.stop_at = GLib.get_monotonic_time() + 3 * GLib.USEC_PER_SEC
 
         def check(self):
+            if self.media.tick():
+                self.terminate()
+                self.waiting()
+                if self.player is None:
+                    self.media.prune()
             if self.player is not None:
                 now = GLib.get_monotonic_time()
                 status = self.player.poll()
                 if status is not None:
-                    if UBUNTU and status > 0 and self.stop_at is None:
+                    if self.playing_local and self.media.enabled and self.stop_at is None:
+                        self.media.finished(status)
+                    elif not self.playing_local and UBUNTU and status > 0 and self.stop_at is None:
                         self.error = "Le lecteur NDI a quitté avec une erreur. Consulte gestion.log."
                     self.player = self.stop_at = None
                     self.active_source = None
+                    self.playing_local = False
                     self.video_ready = False
-                    self.retry_at = now + 2 * GLib.USEC_PER_SEC
+                    self.retry_at = now if self.media.enabled and status <= 0 else now + 2 * GLib.USEC_PER_SEC
                     self.waiting()
+                    self.media.prune()
                 elif self.stop_at is not None:
                     if now >= self.stop_at:
                         self.player.kill()
@@ -1392,6 +1569,12 @@ def desktop():
                     self.video_ready = True
                     self.error = ""
                     self.window.hide()
+                elif self.playing_local and self.media.elapsed():
+                    self.media.finished(0)
+                    self.terminate()
+            if (self.media.enabled and self.settings["enabled"] and self.player is None
+                    and GLib.get_monotonic_time() >= self.retry_at):
+                self.start()
             return GLib.SOURCE_CONTINUE
 
         def poll(self):
@@ -1420,7 +1603,8 @@ def desktop():
             state = "Arrêté" if not self.settings["enabled"] else "Lecture" if self.video_ready else "En attente"
             data = dict(id=self.identity["id"], boot=BOOT, state=state, sources=self.sources,
                         active_source=self.active_source if state == "Lecture" else None,
-                        error=self.error, can_poweroff=True)
+                        error=self.error, can_poweroff=True, media_status=self.media.report(),
+                        local_video=self.playing_local)
             display_pid = self.player.pid if state == "Lecture" and self.player else 0
             display = self.window.get_display()
             if DEVICE_KIND == "pi" and not self.dashboard.internal_preview_required:
@@ -1446,6 +1630,7 @@ def desktop():
 
         def apply(self, result):
             new = options(result["options"])
+            self.media.receive(result.get("media"))
             message = waiting_update_message(result.get("reader_update"))
             self.update_label.set_text(message)
             self.update_label.set_visible(bool(message))
@@ -1502,6 +1687,7 @@ def desktop():
                 screen.work.shutdown(wait=True, cancel_futures=True)
                 if screen.dashboard:
                     screen.dashboard.close()
+                screen.media.close()
             return RESTART if screen.restart_client else 0
 
 
@@ -1524,6 +1710,7 @@ def run_windows_screen(tk, log):
         print(error, file=log)
     settings = initial_settings()
     client = DashboardClient(identity, settings["orientation"]) if identity else None
+    media = LocalMedia(identity)
     root = tk.Tk()
     root.title(APP_NAME)
     root.configure(background="#100e11")
@@ -1550,6 +1737,8 @@ def run_windows_screen(tk, log):
     waiting_data = None
     sources = []
     player = None
+    playing_local = False
+    local_name = ""
     failure = ""
     request = None
     discovery = None
@@ -1592,16 +1781,18 @@ def run_windows_screen(tk, log):
         return True
 
     def show_waiting():
-        status.configure(text="En attente du flux vidéo" if settings["enabled"] else "Diffusion arrêtée")
+        text = "En attente d’un média local" if media.enabled else "En attente du flux vidéo"
+        status.configure(text=text if settings["enabled"] else "Diffusion arrêtée")
         root.deiconify()
         root.attributes("-fullscreen", True)
 
     def stop_player():
-        nonlocal ready, player
+        nonlocal ready, player, playing_local
         if player and player.poll() is None:
             player.terminate()
             player.wait(timeout=4)
         player = None
+        playing_local = False
         ready = False
 
     def discover():
@@ -1614,13 +1805,18 @@ def run_windows_screen(tk, log):
     def update():
         nonlocal request, discovery, next_poll, next_probe, player, settings, sources
         nonlocal failure, restart, ready, power_id, retry_at
+        nonlocal playing_local, local_name
         now = time.monotonic()
         try:
+            if media.tick():
+                stop_player()
+                media.prune()
             if request and request.done():
                 finished, request = request, None
                 try:
                     answer = finished.result()
                     new = options(answer["options"])
+                    media.receive(answer.get("media"))
                     if new != settings:
                         write_json(LAST_SETTINGS, new)
                         playback_changed = new != {**settings, "orientation": new["orientation"]}
@@ -1658,29 +1854,51 @@ def run_windows_screen(tk, log):
                     sources = []
                     failure = str(error)[:240]
             if player and player.poll() is not None:
-                if player.returncode:
-                    failure = f"Le lecteur NDI a quitté avec le code {player.returncode}. Consulte gestion.log."
+                if playing_local:
+                    media.finished(player.returncode)
+                    retry_at = now + (2 if player.returncode else 0)
+                else:
+                    if player.returncode:
+                        failure = f"Le lecteur NDI a quitté avec le code {player.returncode}. Consulte gestion.log."
+                    retry_at = now + 3
+                    sources = []
                 stop_player()
-                retry_at = now + 3
-                sources = []
+            if player and playing_local and media.elapsed():
+                media.finished(0)
+                stop_player()
             if player and not ready and READY.exists():
                 ready = True
                 root.withdraw()
-            if not player and now >= retry_at and settings["enabled"] and settings["source"] in sources:
-                READY.unlink(missing_ok=True)
-                volume = 0 if settings["muted"] else settings["volume"]
-                player = subprocess.Popen([PLAYER, settings["source"], settings["bandwidth"], str(volume), str(READY)],
-                                          stdout=log, stderr=subprocess.STDOUT, creationflags=flags)
+            if not player and now >= retry_at and settings["enabled"]:
+                if media.enabled:
+                    try:
+                        command, local_name = media.command(settings)
+                        player = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, creationflags=flags)
+                    except OSError as error:
+                        print(error, file=log)
+                        media.finished(1)
+                        retry_at = now + 2
+                    else:
+                        playing_local = ready = True
+                        media.play_error = ""
+                        root.withdraw()
+                elif settings["source"] in sources:
+                    READY.unlink(missing_ok=True)
+                    volume = 0 if settings["muted"] else settings["volume"]
+                    player = subprocess.Popen([PLAYER, settings["source"], settings["bandwidth"], str(volume), str(READY)],
+                                              stdout=log, stderr=subprocess.STDOUT, creationflags=flags)
             if not ready:
                 show_waiting()
-            if not discovery and now >= next_probe:
+            if not media.enabled and not discovery and now >= next_probe:
                 discovery = work.submit(discover)
                 next_probe = now + 5
             if not request and now >= next_poll:
                 state = "Arrêté" if not settings["enabled"] else "Lecture" if ready else "En attente"
+                source = local_name if playing_local else settings["source"]
                 request = work.submit(client.poll, dict(id=identity["id"], boot=BOOT, state=state,
-                    sources=sources, active_source=settings["source"] if ready else None,
-                    error=failure, can_poweroff=True, can_reboot=True),
+                    sources=sources, active_source=source if ready else None,
+                    error=failure, can_poweroff=True, can_reboot=True,
+                    local_video=playing_local, media_status=media.report()),
                     player.pid if state == "Lecture" and player else os.getpid())
                 next_poll = now + 2
         except (OSError, ValueError, subprocess.SubprocessError) as error:
@@ -1704,6 +1922,7 @@ def run_windows_screen(tk, log):
             work.shutdown(wait=True, cancel_futures=True)
             if client:
                 client.close()
+            media.close()
             root.destroy()
     return RESTART if restart else 0
 

@@ -3,14 +3,59 @@
 # contact@soundlive.fr
 # Société SoundLive
 from contextlib import contextmanager
+from hashlib import sha256
+import json
+from pathlib import Path
+import re
 import sys
 
 DEFAULT_SOURCE = "OBS (Programme)"
 APP_NAME = "SoundLive-NDI"
 COPYRIGHT = "© 2026 Société SoundLive"
-SOFTWARE_VERSION = "1.4.19"
+SOFTWARE_VERSION = "1.4.20"
 PREVIEW_LIMIT = 160 * 1024
 ORIENTATIONS = ("landscape", "portrait-left", "portrait-right")
+MEDIA_FILE_LIMIT = 256 * 1024 * 1024
+MEDIA_TOTAL_LIMIT = 1024 * 1024 * 1024
+MEDIA_COUNT_LIMIT = 20
+MEDIA_CHUNK = 128 * 1024
+MEDIA_EXTENSIONS = {
+    ".jpg": "image2", ".jpeg": "image2", ".png": "image2",
+    ".mp4": "mov", ".m4v": "mov", ".mov": "mov", ".webm": "matroska", ".mkv": "matroska",
+}
+
+
+def media_name(name):
+    if (not isinstance(name, str) or not 0 < len(name) <= 180 or
+            not name.isprintable() or any(char in name for char in "/\\") or
+            Path(name).suffix.lower() not in MEDIA_EXTENSIONS):
+        raise ValueError("Choisis un fichier JPG, PNG, MP4, MOV, MKV ou WebM.")
+    return name
+
+
+def media_config(value):
+    if not isinstance(value, dict) or type(value.get("enabled")) is not bool:
+        raise ValueError("Mode de lecture locale invalide.")
+    items = value.get("items")
+    if not isinstance(items, list) or len(items) > MEDIA_COUNT_LIMIT:
+        raise ValueError("Liste de médias invalide.")
+    verified = []
+    for item in items:
+        identifier, checksum, size = item["id"], item["sha256"], item["size"]
+        if (not isinstance(identifier, str) or not re.fullmatch(r"[a-f0-9]{32}", identifier) or
+                not isinstance(checksum, str) or not re.fullmatch(r"[a-f0-9]{64}", checksum) or
+                type(size) is not int or not 0 < size <= MEDIA_FILE_LIMIT):
+            raise ValueError("Fichier média invalide.")
+        verified.append(dict(id=identifier, sha256=checksum, size=size, name=media_name(item["name"])))
+    if sum(item["size"] for item in verified) > MEDIA_TOTAL_LIMIT:
+        raise ValueError("Liste de médias trop volumineuse.")
+    if len({item["id"] for item in verified}) != len(verified):
+        raise ValueError("Liste de médias en double.")
+    return dict(enabled=value["enabled"] and bool(verified), items=verified)
+
+
+def media_revision(config):
+    return sha256(json.dumps(config, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
 @contextmanager

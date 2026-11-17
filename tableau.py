@@ -5,6 +5,7 @@
 # Société SoundLive
 import argparse
 from base64 import b64decode
+from hashlib import sha256
 import hmac
 from html import escape
 from ipaddress import IPv4Address
@@ -14,26 +15,31 @@ import json
 from pathlib import Path
 import re
 import secrets
+import shutil
 import socket
 import subprocess
 import sys
 import threading
 import time
+from tempfile import NamedTemporaryFile
 from urllib.parse import parse_qs, urlsplit
 
 from acces_regie import (PORT as REMOTE_PORT, SESSION_COOKIE, SESSION_WARNING, USERNAME,
                          RemoteConnections, RemoteDashboard, prepare_access)
-from commun import APP_NAME, ORIENTATIONS, PREVIEW_LIMIT, SOFTWARE_VERSION as CLIENT_VERSION, options, release_number
+from commun import (APP_NAME, MEDIA_CHUNK, MEDIA_COUNT_LIMIT, MEDIA_FILE_LIMIT, MEDIA_TOTAL_LIMIT,
+                    ORIENTATIONS, PREVIEW_LIMIT, SOFTWARE_VERSION as CLIENT_VERSION,
+                    media_config, media_name, media_revision, options, release_number)
 from diagnostic import NetworkRates, network_info
 from mise_a_jour import ENGINE_ASSETS, SAFE_ID, contents, digest, engine_name, full_contents, package, prepare_key
 from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.29"
+SOFTWARE_VERSION = "1.4.30"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
+MEDIA_ROOT = ROOT / ".soundlive-medias"
 REMOTE_ACCESS = ROOT / ".soundlive-acces"
 PAGE = ((ROOT / "tableau.html").read_bytes()
         .replace(b"__SOFTWARE_VERSION__", SOFTWARE_VERSION.encode("ascii"))
@@ -269,6 +275,8 @@ def remove_screens(targets):
     for key in targets:
         LATENCY_TESTS.pop(key, None)
         CLIENT_UPDATES.pop(key, None)
+        if targets[key].get("media"):
+            shutil.rmtree(MEDIA_ROOT / key, ignore_errors=True)
     for source in [source for source, job in PREVIEWS.items() if job["reader"] in targets]:
         del PREVIEWS[source]
 
@@ -396,6 +404,29 @@ def save():
     temporary = DATA.with_suffix(".tmp")
     temporary.write_text(json.dumps(SCREENS, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary.replace(DATA)
+
+
+def screen_media(row):
+    return row.get("media", {"enabled": False, "items": []})
+
+
+def save_media(row, config):
+    previous = row.get("media")
+    row["media"] = media_config(config)
+    try:
+        save()
+    except OSError:
+        if previous is None:
+            row.pop("media", None)
+        else:
+            row["media"] = previous
+        raise
+
+
+def media_quota(config, length):
+    if (len(config["items"]) >= MEDIA_COUNT_LIMIT or
+            sum(item["size"] for item in config["items"]) + length > MEDIA_TOTAL_LIMIT):
+        raise ValueError("Cet écran peut recevoir jusqu’à 20 fichiers et 1 Gio au total.")
 
 def token_matches(candidate, expected):
     return isinstance(candidate, str) and hmac.compare_digest(candidate.encode(), expected.encode())
@@ -671,6 +702,9 @@ class Request(BaseHTTPRequestHandler):
         url = urlsplit(self.path)
         path = url.path
         remote = getattr(self.server, "remote_dashboard", False)
+        if path == "/api/client-media":
+            self.send_media(url.query)
+            return
         if not self.dashboard(path):
             return
         if path == "/":
@@ -725,18 +759,30 @@ class Request(BaseHTTPRequestHandler):
                                             if (resolution := source_resolution(source))},
                         client_update=update_view(key, report, now),
                         update_availability=update_availability(report, now, key_exists),
+                        media=screen_media(row), media_revision=media_revision(screen_media(row)),
                     ))
             self.reply(200, rows)
         else:
             self.reply(404, {"error": "Page introuvable."})
 
     def do_POST(self):
-        path = urlsplit(self.path).path
+        url = urlsplit(self.path)
+        path = url.path
         remote = getattr(self.server, "remote_dashboard", False)
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             length = 0
+        if path == "/api/media-upload":
+            if self.dashboard(path, write=True):
+                try:
+                    self.upload_media(url.query, length)
+                except (ValueError, KeyError) as error:
+                    self.reply(400, {"error": str(error)})
+                except OSError as error:
+                    print(error, flush=True)
+                    self.reply(500, {"error": "Le fichier n’a pas pu être reçu ou enregistré par la régie."})
+            return
         limit = 4 * ((PREVIEW_LIMIT + 2) // 3) + 1024 if path == "/api/preview-result" else 16384
         if not 0 < length <= limit:
             self.reply(400, {"error": "Requête invalide."})
@@ -779,6 +825,83 @@ class Request(BaseHTTPRequestHandler):
             print(error, flush=True)
             status, result = 500, {"error": "Le serveur n’a pas pu terminer la demande."}
         self.reply(status, result)
+
+    def upload_media(self, raw_query, length):
+        if self.headers.get_content_type() != "application/octet-stream" or not 0 < length <= MEDIA_FILE_LIMIT:
+            raise ValueError("Envoie un fichier non vide de 256 Mio maximum.")
+        query = parse_qs(raw_query, max_num_fields=3)
+        key, name = query["id"][0], media_name(query["name"][0])
+        with LOCK:
+            row = SCREENS.get(key)
+            if not row or not row.get("token"):
+                raise ValueError("Cet écran doit être associé.")
+            media_quota(screen_media(row), length)
+        MEDIA_ROOT.mkdir(mode=0o700, exist_ok=True)
+        with NamedTemporaryFile(dir=MEDIA_ROOT, delete=False) as handle:
+            staged = Path(handle.name)
+            checksum = sha256()
+            try:
+                remaining = length
+                while remaining:
+                    data = self.rfile.read(min(remaining, MEDIA_CHUNK))
+                    if not data:
+                        raise ValueError("Le transfert du fichier a été interrompu.")
+                    handle.write(data)
+                    checksum.update(data)
+                    remaining -= len(data)
+                handle.close()
+                with LOCK:
+                    if SCREENS.get(key) is not row:
+                        raise ValueError("Cet écran a été retiré pendant le transfert.")
+                    config = screen_media(row)
+                    media_quota(config, length)
+                    identifier = secrets.token_hex(16)
+                    folder = MEDIA_ROOT / key
+                    folder.mkdir(mode=0o700, exist_ok=True)
+                    destination = folder / identifier
+                    staged.replace(destination)
+                    item = dict(id=identifier, name=name, size=length, sha256=checksum.hexdigest())
+                    try:
+                        save_media(row, {**config, "items": [*config["items"], item]})
+                    except (OSError, ValueError):
+                        destination.unlink(missing_ok=True)
+                        raise
+            finally:
+                handle.close()
+                staged.unlink(missing_ok=True)
+        self.reply(201, item)
+
+    def send_media(self, raw_query):
+        if getattr(self.server, "remote_dashboard", False):
+            self.reply(404, {"error": "Utilise le port d’association du récepteur."})
+            return
+        try:
+            query = parse_qs(raw_query, max_num_fields=3)
+            key, identifier = query["id"][0], query["file"][0]
+        except (KeyError, ValueError):
+            self.reply(400, {"error": "Fichier média invalide."})
+            return
+        with LOCK:
+            row = SCREENS.get(key)
+            token = row and row.get("token")
+            allowed = token and token_matches(self.headers.get("Authorization"), "Bearer " + token)
+            item = next((item for item in screen_media(row)["items"] if item["id"] == identifier), None) if allowed else None
+            try:
+                stream = (MEDIA_ROOT / key / identifier).open("rb") if item else None
+            except OSError:
+                stream = None
+        if not stream:
+            self.reply(404 if allowed else 403, {"error": "Fichier média indisponible."})
+            return
+        with stream:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(item["size"]))
+            self.end_headers()
+            try:
+                shutil.copyfileobj(stream, self.wfile, MEDIA_CHUNK)
+            except OSError:
+                pass
 
     def apply(self, path, data):
         now = time.time()
@@ -878,14 +1001,28 @@ class Request(BaseHTTPRequestHandler):
             update_target = update_target if isinstance(update_target, str) and update_target in ENGINE_ASSETS else None
             active_source = data.get("active_source")
             active_source = active_source[:256] if state == "Lecture" and isinstance(active_source, str) else None
+            active_media = active_source if data.get("local_video") is True else None
+            if active_media:
+                active_source = None
             orientation_status = data.get("orientation_status")
             if isinstance(orientation_status, dict) and orientation_status.get("value") in ORIENTATIONS:
                 orientation_status = dict(value=orientation_status["value"],
                                           error=str(orientation_status.get("error") or "")[:240])
             else:
                 orientation_status = None
+            cached_media = data.get("media_status")
+            if isinstance(cached_media, dict):
+                revision = cached_media.get("revision")
+                cached_media = dict(
+                    revision=revision if isinstance(revision, str) and SAFE_ID.fullmatch(revision) else None,
+                    error=str(cached_media.get("error") or "")[:240],
+                    local=cached_media.get("local") is True,
+                )
+            else:
+                cached_media = None
             row["report"] = dict(seen=now, ip=self.client_address[0], state=state, boot=boot,
                                  active_source=active_source,
+                                 active_media=active_media,
                                  sources=[s[:256] for s in sources[:32] if isinstance(s, str)],
                                  error=str(data.get("error", ""))[:240],
                                  can_poweroff=data.get("can_poweroff") is True,
@@ -893,6 +1030,7 @@ class Request(BaseHTTPRequestHandler):
                                  diagnostic=diagnostics, latency_test=test_result,
                                  display=display_report(data.get("display")),
                                  orientation_status=orientation_status,
+                                 media_status=cached_media,
                                  display_capture=data.get("display_capture") is True
                                  if "display_capture" in data else None,
                                  capture_needs_consent=data.get("capture_needs_consent") is True,
@@ -912,6 +1050,7 @@ class Request(BaseHTTPRequestHandler):
                                  automatic=item["automatic"]) for item in PREVIEWS.values()
                             if item["reader"] == key and item["state"] == "pending"), None)
             return 200, dict(options=row["options"],
+                             media=screen_media(row),
                              preview_request=preview,
                              waiting=dict(name=row["name"], group=row.get("group"),
                                           qr=getattr(self.server, "waiting_qr", None)),
@@ -924,6 +1063,25 @@ class Request(BaseHTTPRequestHandler):
         if path == "/api/remove":
             remove_screens({key: row})
             return 200, {"ok": True}
+        elif path == "/api/media-settings" and row.get("token"):
+            config = screen_media(row)
+            if "enabled" in data:
+                if type(data["enabled"]) is not bool:
+                    raise ValueError("Mode de lecture locale invalide.")
+                if data["enabled"] and not config["items"]:
+                    raise ValueError("Ajoute d’abord une image ou une vidéo.")
+                save_media(row, {**config, "enabled": data["enabled"]})
+            else:
+                identifier = data["file"]
+                remaining = [item for item in config["items"] if item["id"] != identifier]
+                if len(remaining) == len(config["items"]):
+                    return 404, {"error": "Ce fichier n’est plus dans la liste."}
+                save_media(row, {**config, "items": remaining})
+                try:
+                    (MEDIA_ROOT / key / identifier).unlink(missing_ok=True)
+                except OSError as error:
+                    print(error, flush=True)
+            return 200, {"media": screen_media(row)}
         elif path == "/api/latency":
             report = row.get("report", {})
             if now - report.get("seen", 0) >= ONLINE_AGE:

@@ -252,6 +252,32 @@ bascule.
 
 ## Utiliser le tableau de régie
 
+### Envoyer des médias à un écran
+
+Avec la régie **1.4.30** et les lecteurs **1.4.20**, ouvre la fiche de
+l’écran, puis **Commandes et réglages → Médias locaux**. Sélectionne
+les fichiers, clique sur **Envoyer les fichiers**, puis sur **Lancer la
+lecture locale**. Le portable ou le Pi reçoit les fichiers en arrière-plan.
+Attends que la fiche confirme leur disponibilité avant de couper le réseau.
+
+Le lecteur lit sa liste en boucle, dans l’ordre d’ajout. Avec plusieurs
+médias, chaque image reste dix secondes et chaque vidéo est lue jusqu’à sa
+fin. Une image seule reste affichée. Après un redémarrage, le lecteur reprend
+la liste depuis le début avec les fichiers déjà présents. Le bouton
+**Revenir à la diffusion NDI** rétablit la source NDI enregistrée.
+
+Formats acceptés : JPG, PNG, MP4, M4V, MOV, MKV et WebM. Limites par écran :
+20 fichiers, 256 Mio par fichier et 1 Gio au total. Pour un Raspberry Pi
+3 B+, un MP4 H.264 en 720p à 25 i/s permet de commencer avec un fichier
+adapté à ses capacités. Ubuntu a besoin de `ffplay` (`sudo apt install
+ffmpeg`). Sur un Pi avec l’ancien client NDI, le `ffplay` installé dans
+`/opt/ndi-pi/bin` peut servir à la lecture locale. Sous Windows, rends
+`ffplay.exe` accessible dans le PATH ou dans le dossier du client, puis
+relance le lecteur.
+
+Pour déplacer la régie avec ses listes et fichiers, copie aussi le dossier
+`.soundlive-medias` à côté de `ecrans.json`.
+
 - **Fiche d’écran** — La vue compacte montre la latence, le CPU, la RAM,
   la version du lecteur et le flux signalé. Déplie **Commandes et réglages**
   pour choisir une source, une qualité, le volume ou l’état muet, puis
