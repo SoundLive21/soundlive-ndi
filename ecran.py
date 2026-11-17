@@ -6,6 +6,7 @@
 import configparser
 from concurrent.futures import Future, ThreadPoolExecutor
 from base64 import b64encode
+from http.client import HTTPException
 import json
 import os
 import re
@@ -848,9 +849,11 @@ def post(server, path, data, token=None):
                 details = json.load(error)
                 message = details.get("error", error.reason)
                 code = details.get("code")
-            except (AttributeError, ValueError):
+            except (AttributeError, ValueError, HTTPException):
                 message = error.reason
         raise RegieResponseError(error.code, message, code) from error
+    except HTTPException as error:
+        raise OSError(f"Réponse HTTP interrompue ou invalide ({type(error).__name__}).") from error
 
 def server_address(server):
     url = urlsplit(server)

@@ -231,6 +231,12 @@ physique a un lien et une IPv4 utilisable. Elle réactive le Wi-Fi quand
 l’Ethernet perd sa connexion. L’adresse de la régie enregistrée sur le lecteur
 doit être joignable depuis les deux réseaux.
 
+À partir du client **1.4.19**, une réponse HTTP interrompue pendant la
+bascule est traitée comme une coupure. Le lecteur reprend ses échanges à
+la même adresse dès qu’elle répond. Si l’adresse de la régie a changé,
+relance la commande `ecran.py verifier` du client avec sa nouvelle URL
+pour vérifier et enregistrer l’adresse en conservant l’association.
+
 - **Raspberry Pi OS ou Ubuntu avec NetworkManager actif**. Depuis le dossier
   décompressé, lance `bash installer-client.sh --reseau-auto`. Pour retirer
   la bascule, lance `sudo systemctl disable --now soundlive-ndi-network.timer`
