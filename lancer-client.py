@@ -4,6 +4,7 @@
 # contact@soundlive.fr
 # Société SoundLive
 """Lance le client dans la session graphique et supervise un changement de version."""
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import signal
@@ -14,15 +15,36 @@ import time
 APP = Path(__file__).resolve().parent
 
 
+@contextmanager
+def launcher_lock(path):
+    # Le lanceur est mis à jour indépendamment du commun.py de l’installation initiale.
+    with path.open("a+b") as handle:
+        if sys.platform == "win32":
+            import msvcrt
+            handle.seek(0)
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                yield False
+                return
+        else:
+            import fcntl
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                yield False
+                return
+        yield True
+
+
 def main():
     if sys.platform != "win32" and os.geteuid() == 0:
         sys.exit("Lance SoundLive-NDI avec le compte de la session graphique.")
     from mise_a_jour import ClientUpdate, RESTART
-    from commun import client_lock
 
     updater = ClientUpdate(APP, APP)
     updater.versions.mkdir(mode=0o700, exist_ok=True)
-    with client_lock(updater.versions / "launcher.lock") as acquired:
+    with launcher_lock(updater.versions / "launcher.lock") as acquired:
         if not acquired:
             return
         stopping = False

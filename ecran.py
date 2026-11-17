@@ -26,7 +26,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 from commun import (APP_NAME, COPYRIGHT, DEFAULT_SOURCE, ORIENTATIONS, PREVIEW_LIMIT,
                     SOFTWARE_VERSION, client_lock, options, release_number)
 from diagnostic import Diagnostic
-from mise_a_jour import ClientUpdate, FULL_LIMIT, RESTART, digest, engine_name, full_contents, update_target
+from mise_a_jour import ClientUpdate, FULL_LIMIT, RESTART, digest, engine_name, update_target
 
 HOME = Path.home()
 WINDOWS = sys.platform == "win32"
@@ -901,7 +901,7 @@ class DashboardClient:
         self.updater = ClientUpdate(APP, CLIENT_DIR)
         self.can_update = "SOUNDLIVE_APP" in os.environ and self.updater.public.is_file()
         self.target = update_target()
-        files = full_contents(CLIENT_DIR, self.target, include_engine=CLIENT_DIR != APP)
+        files = self.updater.installed_files(self.target)
         self.version = digest(files)
         self.has_versioned_engine = CLIENT_DIR != APP and engine_name(self.target) in files
         self.preview_job = None

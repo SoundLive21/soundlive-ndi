@@ -337,6 +337,11 @@ plusieurs lecteurs. La fiche indique si le système a accepté la demande.
 la rotation et traite les opérations d’affichage en arrière-plan. Sous
 Linux, le journal `~/.local/state/soundlive-ndi/lancement.log` indique si
 le lanceur graphique a démarré et consigne les erreurs de démarrage.
+Si un ancien lecteur Linux journalise `cannot import name 'client_lock'`
+au redémarrage, copie le fichier `lancer-client.py` du kit **1.4.27** ou
+ultérieur dans `~/.local/share/soundlive-ecrans/` avec le compte du
+lecteur, puis redémarre. Le lanceur corrigé fonctionne avec les anciens
+modules présents dans ce dossier et reprend la version active du client.
 
 Sur Raspberry Pi OS, le bureau Wayland doit prendre en charge
 `wlr-randr` (`sudo apt install wlr-randr` si absent). En X11, utilise

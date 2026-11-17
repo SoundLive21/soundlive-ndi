@@ -92,13 +92,25 @@ LAUNCHER
     chmod 755 "$app/demarrer-ubuntu"
 }
 
+install_autostart() {
+    mkdir -p "$autostart"
+    cat >"$autostart/ndi-ecran.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=SoundLive-NDI
+Exec="$app/demarrer-ubuntu"
+Terminal=false
+DESKTOP
+}
+
 if $client_only; then
-    if [[ ! -x "$app/demarrer-ubuntu" || ! -x "$app/lecteur-ndi-ubuntu" || ! -r "$app/lib/libndi.so.6" ]]; then
+    if [[ ! -x "$app/lecteur-ndi-ubuntu" || ! -r "$app/lib/libndi.so.6" ]]; then
         echo "Installation Ubuntu incomplète. Lance la mise à jour complète avec --mettre-a-jour."
         exit 1
     fi
     check_association "${@:2}"
     install_client
+    install_autostart
     echo "Client Ubuntu et diagnostic.py mis à jour. Redémarre le portable ou rouvre sa session graphique."
     exit 0
 fi
@@ -192,7 +204,7 @@ else
     check_association "${@:2}"
 fi
 
-mkdir -p "$app/lib" "$autostart"
+mkdir -p "$app/lib"
 install_client
 install -m 755 "$temp/lecteur-ndi-ubuntu" "$app/.lecteur-ndi-ubuntu.new"
 install -m 644 "$temp/lib/libndi.so.6" "$app/lib/.libndi.so.6.new"
@@ -205,13 +217,7 @@ if [[ $sdk == "$temp/NDI SDK for Linux" ]]; then
 fi
 sudo install -o root -g root -m 0440 "$rule" /etc/sudoers.d/soundlive-ecrans
 
-cat >"$autostart/ndi-ecran.desktop" <<DESKTOP
-[Desktop Entry]
-Type=Application
-Name=SoundLive-NDI
-Exec="$app/demarrer-ubuntu"
-Terminal=false
-DESKTOP
+install_autostart
 
 echo "Installation terminée. Pour tester depuis un terminal de la session Ubuntu :"
 echo "  ~/.local/share/soundlive-ecrans/demarrer-ubuntu"

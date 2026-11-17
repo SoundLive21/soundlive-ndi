@@ -30,7 +30,7 @@ from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.26"
+SOFTWARE_VERSION = "1.4.28"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -243,10 +243,14 @@ def update_view(key, report, now):
     if not job:
         return None
     result = report.get("update_result")
-    if result and result["id"] == job["id"] and result["state"] == "failed":
-        return result
-    if report.get("client_version") == job["version"] and result and result["id"] == job["id"] and result["state"] == "updated":
-        return result
+    if result and result["id"] == job["id"]:
+        if result["state"] == "failed":
+            return result
+        if result["state"] == "updated":
+            if report.get("client_version") == job["version"]:
+                return result
+            return dict(id=job["id"], state="failed",
+                        message="Le lecteur a répondu, mais son empreinte diffère du paquet envoyé.")
     if now >= job["until"]:
         return dict(id=job["id"], state="expired", message="Pas de confirmation du récepteur.")
     if result and result["id"] == job["id"] and result["state"] == "installing":

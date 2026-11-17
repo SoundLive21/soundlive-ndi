@@ -200,13 +200,16 @@ class ClientUpdate:
         data["result"] = dict(id=job, state="failed", message=str(error)[:240])
         self.write(data)
 
+    def installed_files(self, target):
+        # Le moteur de l’installation de base reste local jusqu’à son déploiement par la régie.
+        return full_contents(self.current, target, include_engine=self.current != self.app)
+
     def stage(self, bundle, device, job, nonce):
         target = update_target()
         files = verify(self.public, bundle, device, job, nonce, target)
         version = bundle["version"]
         data = self.read()
-        current = {name: (self.current / name).read_bytes() for name in files if (self.current / name).is_file()}
-        if set(current) == set(files) and version == digest(current):
+        if version == digest(self.installed_files(target)):
             data["result"] = dict(id=job, state="updated", message="Déjà à jour.")
             self.write(data)
             return False
