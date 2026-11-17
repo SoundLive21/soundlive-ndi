@@ -27,7 +27,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from acces_regie import (PORT as REMOTE_PORT, SESSION_COOKIE, SESSION_WARNING, USERNAME,
                          RemoteConnections, RemoteDashboard, prepare_access)
-from commun import (APP_NAME, MEDIA_CHUNK, MEDIA_COUNT_LIMIT, MEDIA_FILE_LIMIT, MEDIA_FOLDER_LIMIT,
+from commun import (APP_NAME, MEDIA_CHUNK, MEDIA_COUNT_LIMIT, MEDIA_DISK_PERCENT, MEDIA_FILE_LIMIT, MEDIA_FOLDER_LIMIT,
                     MEDIA_LIBRARY_LIMIT, MEDIA_TOTAL_LIMIT,
                     ORIENTATIONS, PREVIEW_LIMIT, SOFTWARE_VERSION as CLIENT_VERSION,
                     media_available, media_config, media_disk, media_name, media_revision, options, release_number)
@@ -37,7 +37,7 @@ from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.33"
+SOFTWARE_VERSION = "1.4.34"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -52,6 +52,7 @@ REMOTE_ACCESS = ROOT / ".soundlive-acces"
 PAGE = ((ROOT / "tableau.html").read_bytes()
         .replace(b"__SOFTWARE_VERSION__", SOFTWARE_VERSION.encode("ascii"))
         .replace(b"__CLIENT_VERSION__", CLIENT_VERSION.encode("ascii"))
+        .replace(b"__MEDIA_DISK_PERCENT__", str(MEDIA_DISK_PERCENT).encode("ascii"))
         .replace(b"__RESOLUTION_CONTROLS_ENABLED__", str(RESOLUTION_CONTROLS_ENABLED).lower().encode("ascii"))
         .replace(b"__PREVIEW_INTERVAL__", str(PREVIEW_AUTO_INTERVAL).encode("ascii")))
 LOGIN_PAGE = (ROOT / "acces-refuse.html").read_text(encoding="utf-8")
@@ -429,12 +430,14 @@ def catalog_items(row):
     return [item for folder in media_folders(row).values() for item in folder["items"]]
 
 
-def save_media(row, folders, active, enabled, *, resume=False):
-    fields = ("media", "media_folders", "media_folder")
+def save_media(row, folders, active, enabled, *, resume=False, empty=False):
+    fields = ("media", "media_folders", "media_folder", "media_generation")
     previous = {field: row[field] for field in fields if field in row}
     settings, version = row["options"], row["version"]
     row.update(media_folders=folders, media_folder=active,
                media=media_config(dict(enabled=enabled, items=folders[active]["items"])))
+    if empty:
+        row["media_generation"] = row.get("media_generation", 0) + 1
     if resume and not settings["enabled"]:
         row.update(options={**settings, "enabled": True}, version=version + 1)
     try:
@@ -467,7 +470,7 @@ def media_quota(row, folder, length):
     if disk is None:
         raise ValueError("Espace disque du lecteur inconnu. Connecte un lecteur à jour avant d’ajouter des fichiers.")
     if length > disk["available"]:
-        raise ValueError("Ce fichier ferait dépasser le seuil de 80 % sur le lecteur.")
+        raise ValueError(f"Ce fichier ferait dépasser le seuil de {MEDIA_DISK_PERCENT} % sur le lecteur.")
 
 
 def media_location(folders, identifier):
@@ -926,9 +929,10 @@ class Request(BaseHTTPRequestHandler):
             if folder is None:
                 raise ValueError("Ce dossier n’existe plus.")
             media_quota(row, folder, length)
+            generation = row.get("media_generation", 0)
         MEDIA_ROOT.mkdir(mode=0o700, exist_ok=True)
         if length > media_available(media_disk(MEDIA_ROOT)):
-            raise ValueError("Ce fichier ferait dépasser le seuil de 80 % sur la régie.")
+            raise ValueError(f"Ce fichier ferait dépasser le seuil de {MEDIA_DISK_PERCENT} % sur la régie.")
         with NamedTemporaryFile(dir=MEDIA_ROOT, delete=False, buffering=0) as handle:
             staged = Path(handle.name)
             checksum = sha256()
@@ -940,7 +944,7 @@ class Request(BaseHTTPRequestHandler):
                         raise ValueError("Le transfert du fichier a été interrompu.")
                     with MEDIA_WRITE_LOCK:
                         if len(data) > media_available(media_disk(MEDIA_ROOT)):
-                            raise ValueError("Le disque de la régie a atteint le seuil de 80 %.")
+                            raise ValueError(f"Le disque de la régie a atteint le seuil de {MEDIA_DISK_PERCENT} %.")
                         handle.write(data)
                     checksum.update(data)
                     remaining -= len(data)
@@ -948,6 +952,8 @@ class Request(BaseHTTPRequestHandler):
                 with LOCK:
                     if SCREENS.get(key) is not row:
                         raise ValueError("Cet écran a été retiré pendant le transfert.")
+                    if row.get("media_generation", 0) != generation:
+                        raise ValueError("L’envoi a été annulé parce que les dossiers ont été vidés.")
                     folders = media_folders(row)
                     folder = folders.get(folder_id)
                     if folder is None:
@@ -1047,6 +1053,10 @@ class Request(BaseHTTPRequestHandler):
                 folder_id = secrets.token_hex(8)
                 folder = dict(items=[])
             folders[folder_id] = {**folder, "name": name}
+        elif action == "empty-all":
+            removed = catalog_items(row)
+            folders = {identifier: {**entry, "items": []} for identifier, entry in folders.items()}
+            enabled = False
         elif action == "remove-folder":
             if folder_id == MEDIA_DEFAULT_FOLDER:
                 raise ValueError("Le dossier par défaut peut être renommé.")
@@ -1080,7 +1090,8 @@ class Request(BaseHTTPRequestHandler):
             folders[source] = {**original, "items": items}
         else:
             raise ValueError("Action média inconnue.")
-        save_media(row, folders, active, enabled, resume=action == "play" and enabled)
+        save_media(row, folders, active, enabled, resume=action == "play" and enabled,
+                   empty=action == "empty-all")
         for item in removed:
             try:
                 (MEDIA_ROOT / key / item["id"]).unlink(missing_ok=True)

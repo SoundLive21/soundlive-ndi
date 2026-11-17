@@ -254,7 +254,7 @@ bascule.
 
 ### Organiser et lire des images et des vidéos
 
-Avec la régie **1.4.33** et le client **1.4.23**, ouvre **Images et vidéos**
+Avec la régie **1.4.34** et le client **1.4.24**, ouvre **Images et vidéos**
 dans les commandes d’un écran. Pour la même opération sur plusieurs
 lecteurs, sélectionne-les dans **Actions de groupe → Gérer les images et
 vidéos autonomes**. La fenêtre propose les dossiers communs au groupe.
@@ -277,8 +277,16 @@ fin. Une image seule reste affichée. Après un redémarrage, le lecteur reprend
 la liste depuis le début avec les fichiers déjà présents. Le bouton
 **Revenir à la diffusion NDI** rétablit la source NDI enregistrée.
 
+**Vider tous les dossiers** efface les fichiers de tous les dossiers des
+lecteurs sélectionnés, y compris les dossiers propres à un seul écran. La
+confirmation liste les écrans et le nombre de fichiers. Les dossiers sont
+conservés et la lecture locale s’arrête. Les copies des lecteurs hors ligne
+sont supprimées à leur reconnexion.
+
 La fenêtre indique l’espace libre sur la régie et sur chaque lecteur.
-L’ajout est bloqué si les fichiers feraient dépasser **80 % d’occupation**
+La tuile **Disque** sur chaque fiche affiche l’occupation et l’espace libre,
+en orange à partir de 80 % et en rouge à partir de 90 %.
+L’ajout est bloqué si les fichiers feraient dépasser **90 % d’occupation**
 sur la régie ou le lecteur. Le lecteur vérifie aussi son espace réel lors
 de la copie. Après un redémarrage de la régie, connecte les lecteurs pour
 qu’ils lui remontent leur espace disque.

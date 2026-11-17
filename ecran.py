@@ -25,7 +25,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
-from commun import (APP_NAME, COPYRIGHT, DEFAULT_SOURCE, MEDIA_CHUNK, MEDIA_EXTENSIONS, MEDIA_LIBRARY_LIMIT,
+from commun import (APP_NAME, COPYRIGHT, DEFAULT_SOURCE, MEDIA_CHUNK, MEDIA_DISK_PERCENT, MEDIA_EXTENSIONS, MEDIA_LIBRARY_LIMIT,
                     ORIENTATIONS, PREVIEW_LIMIT, SOFTWARE_VERSION, client_lock,
                     media_available, media_config, media_disk, media_items, media_revision, options, release_number)
 from diagnostic import Diagnostic
@@ -948,6 +948,7 @@ class LocalMedia:
             pass
         self.desired = None
         self.catalog = None
+        self.catalog_ids = None
         self.request = None
         self.retry_at = 0
         self.error = ""
@@ -977,6 +978,7 @@ class LocalMedia:
         if desired != self.desired or library != self.catalog:
             self.desired = desired
             self.catalog = library
+            self.catalog_ids = frozenset(item["id"] for item in library)
             self.retry_at = 0
 
     def report(self):
@@ -1008,17 +1010,21 @@ class LocalMedia:
         except OSError:
             return False
 
+    def download_wanted(self, item):
+        catalog_ids = self.catalog_ids
+        return not self.closed.is_set() and (catalog_ids is None or item["id"] in catalog_ids)
+
     def synchronize(self, items):
         self.folder.mkdir(parents=True, exist_ok=True)
         opener = build_opener(NoRedirect)
         for item in items:
-            if self.closed.is_set():
-                return
+            if not self.download_wanted(item):
+                continue
             target = self.path(item)
             if self.downloaded(item):
                 continue
             if item["size"] > media_available(media_disk(self.folder)):
-                raise ValueError("Le fichier ferait dépasser le seuil de 80 % du disque du lecteur.")
+                raise ValueError(f"Le fichier ferait dépasser le seuil de {MEDIA_DISK_PERCENT} % du disque du lecteur.")
             temporary = target.with_suffix(".part")
             query = urlencode({"id": self.identity["id"], "file": item["id"]})
             request = Request(self.identity["server"] + "/api/client-media?" + query,
@@ -1027,20 +1033,23 @@ class LocalMedia:
                 checksum = sha256()
                 remaining = item["size"]
                 with opener.open(request, timeout=8) as response, temporary.open("wb") as handle:
-                    while remaining and not self.closed.is_set():
+                    while remaining and self.download_wanted(item):
                         data = response.read(min(MEDIA_CHUNK, remaining))
-                        if not data:
+                        if not data or not self.download_wanted(item):
                             break
                         if len(data) > media_available(media_disk(self.folder)):
-                            raise ValueError("Le disque du lecteur a atteint le seuil de 80 %.")
+                            raise ValueError(f"Le disque du lecteur a atteint le seuil de {MEDIA_DISK_PERCENT} %.")
                         handle.write(data)
                         checksum.update(data)
                         remaining -= len(data)
+                if not self.download_wanted(item):
+                    continue
                 if remaining or checksum.hexdigest() != item["sha256"]:
                     raise ValueError("Fichier local incomplet ou différent de celui envoyé par la régie.")
                 temporary.replace(target)
             finally:
                 temporary.unlink(missing_ok=True)
+
     def tick(self):
         now = time.monotonic()
         changed = False
