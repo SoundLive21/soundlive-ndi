@@ -38,7 +38,7 @@ from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.36"
+SOFTWARE_VERSION = "1.4.38"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -1211,6 +1211,8 @@ class Request(BaseHTTPRequestHandler):
             folders[folder_id] = {**folder, "items": items}
         elif action in ("remove-file", "move", "order"):
             source, index, item = media_location(folders, data["file"])
+            if action == "move" and data.get("source_folder", source) != source:
+                return 409, {"error": "Le fichier a changé de dossier. Réessaie avec la liste à jour."}
             original = folders[source]
             items = list(original["items"])
             if action == "order":

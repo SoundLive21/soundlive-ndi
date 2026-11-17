@@ -16,7 +16,7 @@ header{border-bottom:1px solid var(--edge);background:#130f15;padding:17px 6vw;d
 .release{font-size:.82rem;color:var(--sub);font-variant-numeric:tabular-nums}
 .release[data-state="current"]{color:var(--green)}
 .release[data-state="available"]{color:#ffc078}
-main{width:min(1120px,90vw);margin:55px auto 80px}h1{margin:0;font-size:clamp(1.15rem,3.7vw,1.9rem);letter-spacing:-.035em;line-height:1.15;white-space:nowrap}
+main{width:min(1120px,90vw);margin:55px auto 80px}h1{margin:0;font-size:clamp(1.28rem,4.8vw,2.45rem);letter-spacing:-.035em;line-height:1.15;white-space:nowrap}
 .heading{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:22px}
 #message{min-height:1.5em;margin:0 0 14px;color:var(--sub)}#message[data-error="true"]{color:#ff8fa0}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,330px),1fr));gap:16px;align-items:start}
@@ -60,15 +60,18 @@ button{padding:9px 13px;cursor:pointer;background:#2b222f;font-weight:600;white-
 .media-bulk{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
 .media-bulk[hidden]{display:none}
 .media-bulk label{margin:0}
+.media-bulk .action-row{margin:0}
 .media-bulk button{font-size:.8rem;white-space:normal}
 .media-preview{align-self:start;overflow-wrap:anywhere}
+.media-preview h3,.media-preview-meta,#media-preview-hint{text-align:center}
 .media-preview h3{font-size:1.05rem;margin:0;line-height:1.35}
 #media-preview-hint:empty{display:none}
 .media-preview-meta{margin:4px 0 12px}
 .media-preview img,.media-preview video{display:block;width:100%;max-height:340px;object-fit:contain;background:#100d12}
-.media-download{display:inline-flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid #8d4658;border-radius:8px;background:#482431;color:var(--text);text-decoration:none;font-size:.88rem;font-weight:650;margin-top:12px}
+.media-download{display:flex;align-items:center;justify-content:center;gap:8px;padding:9px 12px;border:1px solid #8d4658;border-radius:8px;background:#482431;color:var(--text);text-decoration:none;font-weight:600;text-align:center}
 .media-download:hover{background:#643044}
-.media-download svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.media-download:focus-visible{outline:2px solid #ff91a5;outline-offset:2px}
+.media-download svg{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .media-progress{display:grid;gap:5px;margin-top:10px}
 .media-progress progress,.media-row-main progress{width:100%;height:8px;accent-color:var(--green)}
 .media-progress[hidden]{display:none}
@@ -146,7 +149,10 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .traffic-panel h2{grid-column:1/-1;font-size:1rem}
 .traffic-panel label{margin:0}
 .regie-system{grid-column:1/-1;border-top:1px solid var(--edge);padding-top:12px}
-.regie-system .metrics{margin:0 0 8px;grid-template-columns:repeat(2,minmax(0,1fr))}
+.regie-system .metrics{margin:0 0 8px}
+.regie-system .metric.disk{grid-column:auto;display:grid}
+.regie-system .metric.disk strong{margin-inline-start:0}
+.regie-system .disk-free{grid-column:1/-1}
 .regie-system summary{color:#ffd0dc;cursor:pointer;font-size:.88rem}
 .regie-system .facts{margin:5px 0 0}
 .traffic-readings{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
@@ -360,8 +366,10 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
         </form>
         <div class="media-bulk" id="media-bulk" hidden>
           <label class="check"><input type="checkbox" id="media-select-all"> Tout sélectionner</label>
-          <button type="button" id="media-download-selected" disabled>Télécharger</button>
-          <button type="button" class="button-red" id="media-remove-selected" disabled>Supprimer</button>
+          <div class="action-row">
+            <button type="button" id="media-download-selected" disabled>Télécharger</button>
+            <button type="button" class="button-red" id="media-remove-selected" disabled>Supprimer</button>
+          </div>
         </div>
         <ol class="media-list" id="media-list"></ol>
       </div>
@@ -369,11 +377,14 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
         <p class="small" id="media-preview-hint">Choisis un fichier pour l’afficher.</p>
         <div id="media-player"></div>
         <div id="media-file-actions" hidden>
-          <div class="actions"><button type="button" id="media-up">Monter</button>
-            <button type="button" id="media-down">Descendre</button>
-            <button type="button" id="media-file-remove">Supprimer le fichier</button></div>
-          <label>Dossier de destination<select id="media-move-to"></select></label>
-          <button type="button" id="media-move">Déplacer le fichier</button>
+          <div class="action-row">
+            <a class="media-download" id="media-file-download" download>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v13m-5-5 5 5 5-5M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
+              Télécharger
+            </a>
+            <button type="button" class="button-red" id="media-file-remove">Supprimer</button>
+          </div>
+          <label>Déplacer vers<select id="media-move-to"></select></label>
         </div>
       </section>
     </div>
@@ -1312,6 +1323,7 @@ const mediaResult = select(mediaDialog, "#media-result");
 const mediaStatus = select(mediaDialog, "#media-status");
 const mediaPlayer = select(mediaDialog, "#media-player");
 const mediaHint = select(mediaDialog, "#media-preview-hint");
+const mediaFileDownload = select(mediaDialog, "#media-file-download");
 const mediaDestination = select(mediaDialog, "#media-move-to");
 const mediaFolderForm = select(mediaDialog, "#media-folder-edit");
 const mediaName = mediaFolderForm.elements.namedItem("name");
@@ -1351,13 +1363,13 @@ function mediaEntries(folder) {
   const files = new Map();
   for (const target of folder?.targets || []) {
     const counts = new Map();
-    target.folder.items.forEach((item, index) => {
+    target.folder.items.forEach(item => {
       const same = JSON.stringify([item.name, item.sha256]);
       const repeat = counts.get(same) || 0;
       counts.set(same, repeat + 1);
       const key = same + ":" + repeat;
       if (!files.has(key)) files.set(key, {key, item, targets:[]});
-      files.get(key).targets.push({...target, item, index});
+      files.get(key).targets.push({...target, item});
     });
   }
   return files;
@@ -1422,6 +1434,7 @@ function mediaPreview(selected) {
   if (!entry) {
     mediaPlayer.replaceChildren();
     mediaPlayer.dataset.source = "";
+    mediaFileDownload.removeAttribute("href");
     mediaHint.textContent = "Choisis un fichier pour l’afficher.";
     return;
   }
@@ -1446,12 +1459,9 @@ function mediaPreview(selected) {
     if (mediaPlayer.dataset.source === url) mediaHint.textContent = "Aperçu indisponible dans ce navigateur.";
   });
   player.src = url;
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = entry.item.name;
-  link.className = "media-download";
-  link.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v13m-5-5 5 5 5-5M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg> Télécharger le fichier';
-  mediaPlayer.replaceChildren(title, metadata, player, link);
+  mediaFileDownload.href = url;
+  mediaFileDownload.download = entry.item.name;
+  mediaPlayer.replaceChildren(title, metadata, player);
 }
 function mediaCopyState(entry) {
   let stored = 0, bytes = 0;
@@ -1586,11 +1596,10 @@ function renderMediaManager(preferFolder) {
     metadata.textContent = mediaFormat(selected.item.size) + " · " + state.text;
     metadata.title = state.details;
   }
-  mediaSelect(mediaDestination, folders.filter(([key]) => key !== mediaFolders.value));
+  const destinations = folders.filter(([key]) => key !== mediaFolders.value);
+  mediaSelect(mediaDestination, [["","Choisir un dossier…"], ...destinations]);
+  mediaDestination.disabled = mediaBusy || !destinations.length;
   select(mediaDialog,"#media-file-remove").disabled = mediaBusy;
-  select(mediaDialog,"#media-move").disabled = mediaBusy || !mediaDestination.value;
-  select(mediaDialog,"#media-up").disabled = mediaBusy || !selected?.targets.some(({index}) => index > 0);
-  select(mediaDialog,"#media-down").disabled = mediaBusy || !selected?.targets.some(({index,folder}) => index + 1 < folder.items.length);
 }
 function openMediaManager(ids) {
   if (mediaBusy) return;
@@ -1613,7 +1622,6 @@ mediaDialog.addEventListener("close", () => {
   mediaPlayer.dataset.source = "";
 });
 mediaFolders.onchange = () => { mediaFileKey = ""; mediaSelected.clear(); renderMediaManager(); };
-mediaDestination.onchange = () => renderMediaManager();
 
 async function mediaBatch(targets, perform, done, preferFolder) {
   if (mediaBusy) return;
@@ -1740,32 +1748,47 @@ select(mediaDialog,"#media-empty-all").onclick = action(() => {
 });
 select(mediaDialog,"#media-folder-remove").onclick = action(() => {
   const folder = selectedMediaFolder();
-  showAction({title:"Supprimer ce dossier",detail:folder.name + " et ses fichiers sur les écrans sélectionnés.",
+  if (!folder || mediaBusy) return;
+  const screens = folder.targets.map(target => target.row.name).join(", ");
+  showAction({title:"Supprimer ce dossier",detail:"Le dossier « " + folder.name + " » et tous ses fichiers seront supprimés sur " + screens + ".",
     label:"Supprimer",successTitle:"Résultat par écran",
     async perform() {
       await mediaBatch(folder.targets,target=>mediaChange(target,{action:"remove-folder"}),"Dossier supprimé","general");
       return mediaResult.textContent;
     }});
 });
-for (const [id,delta] of [["media-up",-1],["media-down",1]]) {
-  select(mediaDialog,"#"+id).onclick = action(() => {
-    const targets = selectedMediaEntry().targets.filter(({index,folder})=>index+delta>=0 && index+delta<folder.items.length);
-    return mediaBatch(targets,target=>mediaChange(target,{action:"order",file:target.item.id,delta}),"Ordre mis à jour");
-  });
-}
 select(mediaDialog,"#media-file-remove").onclick = action(() => {
   const entry = selectedMediaEntry();
-  showAction({title:"Supprimer ce fichier",detail:entry.item.name,label:"Supprimer",successTitle:"Résultat par écran",
+  const folder = selectedMediaFolder();
+  if (!entry || !folder || mediaBusy) return;
+  const screens = entry.targets.map(target => target.row.name).join(", ");
+  showAction({title:"Supprimer ce fichier",
+    detail:"« " + entry.item.name + " » sera supprimé du dossier « " + folder.name + " » sur " + screens + ".",
+    label:"Supprimer",successTitle:"Résultat par écran",
     async perform() {
-      await mediaBatch(entry.targets,target=>mediaChange(target,{action:"remove-file",file:target.item.id}),"Fichier supprimé");
+      await mediaBatch(entry.targets,target=>mediaChange(target,{action:"remove-files",files:[target.item.id]}),"Fichier supprimé");
       return mediaResult.textContent;
     }});
 });
-select(mediaDialog,"#media-move").onclick = action(() => {
-  const destinations = mediaGroups(mediaRows()).get(mediaDestination.value);
-  const targets = selectedMediaEntry().targets;
-  return mediaBatch(targets,target=>mediaChange(target,{action:"move",file:target.item.id,
-    folder:destinations.targets.find(entry=>entry.row.id===target.row.id).id}),"Fichier déplacé");
+mediaDestination.onchange = action(() => {
+  const destinationKey = mediaDestination.value;
+  mediaDestination.value = "";
+  if (!destinationKey || destinationKey === mediaFolders.value || mediaBusy) return;
+  const groups = mediaGroups(mediaRows());
+  const source = groups.get(mediaFolders.value);
+  const destination = groups.get(destinationKey);
+  const entry = mediaEntries(source).get(mediaFileKey);
+  if (!entry || !destination) return;
+  const destinationIds = new Map(destination.targets.map(target => [target.row.id, target.id]));
+  const screens = entry.targets.map(target => target.row.name).join(", ");
+  showAction({title:"Déplacer ce fichier",
+    detail:"« " + entry.item.name + " »\n" + source.name + " → " + destination.name + "\n" + screens,
+    label:"Déplacer",successTitle:"Résultat par écran",
+    async perform() {
+      await mediaBatch(entry.targets,target=>mediaChange(target,{action:"move",file:target.item.id,
+        source_folder:target.id,folder:destinationIds.get(target.row.id)}),"Fichier déplacé");
+      return mediaResult.textContent;
+    }});
 });
 function uploadMedia(path, file, progress) {
   return new Promise((resolve, reject) => {
@@ -2091,7 +2114,8 @@ function render(row) {
     card.editVersion = row.version;
   }
   syncSourceChoice(card);
-  ui.toggle.textContent = row.options.enabled ? "Stopper la diffusion" : "Reprendre la diffusion";
+  ui.toggle.textContent = row.options.enabled ? "Stop" : "Reprendre";
+  ui.toggle.setAttribute("aria-label", row.options.enabled ? "Stopper la diffusion" : "Reprendre la diffusion");
   ui.reboot.disabled = !row.online || row.report.can_reboot === false;
   ui.poweroff.disabled = !row.online || !row.report.can_poweroff;
   ui.poweroff.title = row.online && !row.report.can_poweroff ? "Extinction distante indisponible sur ce lecteur." : "";
