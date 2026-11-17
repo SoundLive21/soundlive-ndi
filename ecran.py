@@ -518,6 +518,23 @@ def fit_local_image(pixbuf, width, height):
     return pixbuf.scale_simple(*size, GdkPixbuf.InterpType.BILINEAR)
 
 
+def local_image_preview(pixbuf, screen_size):
+    from gi.repository import GdkPixbuf
+
+    width, height = preview_size(*screen_size)
+    picture = fit_local_image(pixbuf, width, height)
+    picture_width, picture_height = picture.get_width(), picture.get_height()
+    x, y = (width - picture_width) // 2, (height - picture_height) // 2
+    frame = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, width, height)
+    frame.fill(0)
+    picture.composite(frame, x, y, picture_width, picture_height, x, y, 1, 1,
+                      GdkPixbuf.InterpType.NEAREST, 255)
+    ok, png = frame.save_to_bufferv("png", [], [])
+    if not ok:
+        raise RuntimeError("Impossible d’encoder l’aperçu de l’image locale.")
+    return bytes(png)
+
+
 def player_render_preview():
     import struct
     import zlib
@@ -1145,13 +1162,12 @@ class DashboardClient:
     def close(self):
         self.display_work.shutdown(wait=False, cancel_futures=True)
 
-    def poll(self, report, display_pid=0):
+    def poll(self, report, display_pid=0, image_preview=None):
         server = self.identity["server"]
         token = self.identity["token"]
         local_video = report.get("local_video") is True
-        local_image = report.get("local_image") is True
-        uses_internal = self.internal_preview is not None and (not local_video or local_image)
-        uses_portal = (not self.internal_preview_required and self.portal is not None
+        uses_internal = self.internal_preview is not None and not local_video
+        uses_portal = (image_preview is None and not self.internal_preview_required and self.portal is not None
                        and self.display_info.get("portal") is True)
         monitor_capture, monitor_error = self.local_screen_capture or (self.display_info.get("capture") is True, "")
         uses_monitor = not self.internal_preview_required and monitor_capture
@@ -1160,10 +1176,11 @@ class DashboardClient:
                       client_version=self.version, client_release=SOFTWARE_VERSION, update_target=self.target,
                       update_has_engine=self.has_versioned_engine,
                       orientation_status=self.orientation_report,
-                      display=self.display_info, display_capture=uses_internal or uses_portal or uses_monitor,
-                      display_preview_kind="player" if self.internal_preview_required and (not local_video or local_image) else "monitor",
-                      display_preview_error=("Aperçu de la lecture locale indisponible dans cette session Wayland."
-                                             if local_video and not local_image and self.internal_preview_required else
+                      display=self.display_info, display_capture=bool(image_preview or uses_internal or uses_portal or uses_monitor),
+                      display_preview_kind="player" if image_preview or (self.internal_preview_required and not local_video) else "monitor",
+                      display_preview_error=("" if image_preview else
+                                             "Aperçu de la vidéo locale indisponible dans cette session Wayland."
+                                             if local_video and self.internal_preview_required else
                                              self.internal_preview_error if self.internal_preview_required else monitor_error),
                       capture_needs_consent=uses_portal and self.portal.stream is None)
         if self.can_update:
@@ -1186,13 +1203,15 @@ class DashboardClient:
             screen = preview.get("screen") is True
             if isinstance(job, str) and (screen or isinstance(source, str)) and job != self.preview_job:
                 self.preview_job = job
-                if screen and uses_internal:
-                    mode = "waiting" if local_image or report["state"] != "Lecture" else "player"
+                argument = str(display_pid) if screen else source
+                if screen and image_preview:
+                    mode, argument = "local-image", image_preview
+                elif screen and uses_internal:
+                    mode = "waiting" if report["state"] != "Lecture" else "player"
                 elif screen and self.internal_preview_required:
                     mode = "unavailable"
                 else:
                     mode = "portal" if screen and uses_portal else "--capture-ecran" if screen else "--apercu-ndi"
-                argument = str(display_pid) if screen else source
                 threading.Thread(target=self.send_preview,
                                  args=(job, mode, argument, screen, preview.get("automatic") is not True),
                                  daemon=True).start()
@@ -1230,6 +1249,8 @@ class DashboardClient:
         try:
             if mode == "player":
                 png = player_render_preview()
+            elif mode == "local-image":
+                png = local_image_preview(*argument)
             elif mode == "unavailable":
                 raise RuntimeError(self.internal_preview_error)
             elif mode == "waiting":
@@ -1289,6 +1310,7 @@ def desktop():
             self.playing_local = False
             self.local_pixbuf = None
             self.local_image_size = None
+            self.local_map_deadline = 0
             self.video_ready = False
             self.stop_at = None
             self.retry_at = 0
@@ -1332,14 +1354,10 @@ def desktop():
             self.waiting_box = box
             self.pages.add_named(box, "waiting")
             self.window.add(self.pages)
-            self.image_page = Gtk.Overlay()
-            background = Gtk.Box()
-            background.get_style_context().add_class("local-image")
-            self.image_page.add(background)
+            self.image_page = Gtk.Layout()
+            self.image_page.get_style_context().add_class("local-image")
             self.local_image = Gtk.Image()
-            self.local_image.set_halign(Gtk.Align.CENTER)
-            self.local_image.set_valign(Gtk.Align.CENTER)
-            self.image_page.add_overlay(self.local_image)
+            self.image_page.put(self.local_image, 0, 0)
             self.image_page.connect("size-allocate", self.resize_local_image)
             self.pages.add_named(self.image_page, "image")
             brand = Gtk.Label()
@@ -1419,7 +1437,11 @@ def desktop():
             size = allocation.width, allocation.height
             if self.local_pixbuf is not None and min(size) > 1 and self.local_image_size != size:
                 self.local_image_size = size
-                self.local_image.set_from_pixbuf(fit_local_image(self.local_pixbuf, *size))
+                self.image_page.set_size(*size)
+                fitted = fit_local_image(self.local_pixbuf, *size)
+                self.local_image.set_from_pixbuf(fitted)
+                self.image_page.move(self.local_image, (size[0] - fitted.get_width()) // 2,
+                                     (size[1] - fitted.get_height()) // 2)
 
         def show_local_image(self, path, name):
             display = self.window.get_display()
@@ -1430,11 +1452,13 @@ def desktop():
             self.local_image_size = None
             self.resize_local_image(self.image_page, allocation)
             self.active_source = name
-            self.playing_local = self.video_ready = True
-            self.media.schedule_image()
+            self.playing_local = True
+            self.video_ready = False
+            self.local_map_deadline = time.monotonic() + 5
             self.media.play_error = self.error = ""
-            self.window.show_all()
+            self.window.fullscreen()
             self.pages.set_visible_child(self.image_page)
+            self.window.present()
 
         def prepare_internal_preview(self):
             try:
@@ -1660,10 +1684,23 @@ def desktop():
                 elif self.playing_local and self.media.elapsed():
                     self.media.finished(0)
                     self.terminate()
-            if self.local_pixbuf is not None and self.media.elapsed():
-                self.media.finished(0)
-                self.terminate()
-                self.waiting()
+            if self.local_pixbuf is not None:
+                if not self.video_ready:
+                    if self.image_page.get_mapped() and self.local_image.get_mapped() and self.local_image_size:
+                        self.video_ready = True
+                        self.media.schedule_image()
+                        print(f"Image locale affichée : {self.active_source}", file=self.log)
+                    elif time.monotonic() >= self.local_map_deadline:
+                        error = "Impossible d’afficher la fenêtre de l’image locale."
+                        self.media.finished(1, error)
+                        print(error, file=self.log)
+                        self.terminate()
+                        self.waiting()
+                        self.retry_at = GLib.get_monotonic_time() + 2 * GLib.USEC_PER_SEC
+                elif self.media.elapsed():
+                    self.media.finished(0)
+                    self.terminate()
+                    self.waiting()
             if (self.media.enabled and self.settings["enabled"] and self.player is None and self.local_pixbuf is None
                     and GLib.get_monotonic_time() >= self.retry_at):
                 self.start()
@@ -1696,7 +1733,7 @@ def desktop():
             data = dict(id=self.identity["id"], boot=BOOT, state=state, sources=self.sources,
                         active_source=self.active_source if state == "Lecture" else None,
                         error=self.error, can_poweroff=True, media_status=self.media.report(),
-                        local_video=self.playing_local, local_image=self.local_pixbuf is not None)
+                        local_video=self.playing_local)
             display_pid = self.player.pid if state == "Lecture" and self.player else 0
             display = self.window.get_display()
             if DEVICE_KIND == "pi" and not self.dashboard.internal_preview_required:
@@ -1717,7 +1754,8 @@ def desktop():
                 monitor = display.get_monitor_at_window(self.window.get_window())
                 display_pid = next((-index - 1 for index in range(display.get_n_monitors())
                                     if display.get_monitor(index) == monitor), 0)
-            self.request = self.work.submit(self.dashboard.poll, data, display_pid)
+            picture = (self.local_pixbuf, self.local_image_size) if self.local_pixbuf is not None and self.video_ready else None
+            self.request = self.work.submit(self.dashboard.poll, data, display_pid, picture)
             return GLib.SOURCE_CONTINUE
 
         def apply(self, result):

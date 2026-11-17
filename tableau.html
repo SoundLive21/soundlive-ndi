@@ -1136,8 +1136,10 @@ function setupLocalMedia(card, id) {
     select(panel, ".media-state").textContent = !config.items.length ?
       "Aucun média enregistré." : !row.online ? "Synchronisation à la reconnexion." :
       !report ? "Mets à jour le lecteur pour recevoir les fichiers." :
-      report.error || (ready ? (config.enabled ? "Lecture locale sélectionnée · fichiers disponibles hors réseau."
-        : "Fichiers copiés sur le lecteur.") : "Transfert vers le lecteur en attente ou en cours…");
+      report.error || (ready ? (!config.enabled ? "Fichiers copiés sur le lecteur." :
+        !row.options.enabled ? "Lecture locale en pause · clique sur Reprendre." :
+        row.report.active_media ? "Lecture locale en cours · fichiers disponibles hors réseau." :
+        "Fichiers copiés · démarrage de la lecture locale…") : "Transfert vers le lecteur en attente ou en cours…");
     mode.textContent = config.enabled ? "Revenir à la diffusion NDI" : "Lancer la lecture locale";
     mode.disabled = !config.items.length;
     const itemsKey = JSON.stringify(config.items);

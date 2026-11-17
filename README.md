@@ -258,7 +258,10 @@ Avec la régie **1.4.30** et les lecteurs **1.4.20**, ouvre la fiche de
 l’écran, puis **Commandes et réglages → Médias locaux**. Sélectionne
 les fichiers, clique sur **Envoyer les fichiers**, puis sur **Lancer la
 lecture locale**. Le portable ou le Pi reçoit les fichiers en arrière-plan.
-Attends que la fiche confirme leur disponibilité avant de couper le réseau.
+Le lecteur reste connecté à la régie pendant la lecture locale. À partir de
+la régie **1.4.32**, **Lancer la lecture locale** reprend aussi la lecture
+si l’écran avait été arrêté. Attends de voir **Lecture locale en cours**
+avant de couper le réseau.
 
 Le lecteur lit sa liste en boucle, dans l’ordre d’ajout. Avec plusieurs
 médias, chaque image reste dix secondes et chaque vidéo est lue jusqu’à sa

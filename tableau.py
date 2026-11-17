@@ -35,7 +35,7 @@ from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.31"
+SOFTWARE_VERSION = "1.4.32"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -410,12 +410,16 @@ def screen_media(row):
     return row.get("media", {"enabled": False, "items": []})
 
 
-def save_media(row, config):
+def save_media(row, config, *, resume=False):
     previous = row.get("media")
+    settings, version = row["options"], row["version"]
     row["media"] = media_config(config)
+    if resume and not settings["enabled"]:
+        row.update(options={**settings, "enabled": True}, version=version + 1)
     try:
         save()
     except OSError:
+        row.update(options=settings, version=version)
         if previous is None:
             row.pop("media", None)
         else:
@@ -1070,7 +1074,7 @@ class Request(BaseHTTPRequestHandler):
                     raise ValueError("Mode de lecture locale invalide.")
                 if data["enabled"] and not config["items"]:
                     raise ValueError("Ajoute d’abord une image ou une vidéo.")
-                save_media(row, {**config, "enabled": data["enabled"]})
+                save_media(row, {**config, "enabled": data["enabled"]}, resume=data["enabled"])
             else:
                 identifier = data["file"]
                 remaining = [item for item in config["items"] if item["id"] != identifier]
