@@ -38,7 +38,7 @@ from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.38"
+SOFTWARE_VERSION = "1.4.39"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -988,6 +988,7 @@ class Request(BaseHTTPRequestHandler):
                 raise ValueError("Ce dossier n’existe plus.")
             media_quota(row, folder, length)
             generation = row.get("media_generation", 0)
+            folder_generation = folder.get("generation", 0)
         MEDIA_ROOT.mkdir(mode=0o700, exist_ok=True)
         if length > media_available(media_disk(MEDIA_ROOT)):
             raise ValueError(f"Ce fichier ferait dépasser le seuil de {MEDIA_DISK_PERCENT} % sur la régie.")
@@ -1016,6 +1017,8 @@ class Request(BaseHTTPRequestHandler):
                     folder = folders.get(folder_id)
                     if folder is None:
                         raise ValueError("Ce dossier a été supprimé pendant le transfert.")
+                    if folder.get("generation", 0) != folder_generation:
+                        raise ValueError("L’envoi a été annulé parce que le dossier a été vidé.")
                     media_quota(row, folder, length)
                     identifier = secrets.token_hex(16)
                     directory = MEDIA_ROOT / key
@@ -1176,6 +1179,9 @@ class Request(BaseHTTPRequestHandler):
             removed = catalog_items(row)
             folders = {identifier: {**entry, "items": []} for identifier, entry in folders.items()}
             enabled = False
+        elif action == "empty-folder":
+            removed = folder["items"]
+            folders[folder_id] = {**folder, "items": [], "generation": folder.get("generation", 0) + 1}
         elif action == "remove-folder":
             if folder_id == MEDIA_DEFAULT_FOLDER:
                 raise ValueError("Le dossier par défaut peut être renommé.")

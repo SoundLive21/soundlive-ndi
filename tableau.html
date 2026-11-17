@@ -41,8 +41,6 @@ button{padding:9px 13px;cursor:pointer;background:#2b222f;font-weight:600;white-
 .action-row button,.full-action{white-space:normal}
 .full-action{width:100%;margin-top:12px}
 .button-red{background:#a62541;border-color:#bc3d55;color:#fff}
-.button-blue{background:#23548b;border-color:#3d74aa;color:#fff}
-.button-orange{background:#8d470d;border-color:#a86228;color:#fff}
 #media-manager{width:min(920px,94vw)}
 .media-heading,.disk-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .media-disks{display:grid;gap:8px;margin:15px 0;max-height:220px;overflow:auto}
@@ -344,6 +342,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       <div class="actions">
         <button type="submit" value="create">Nouveau dossier</button>
         <button type="submit" value="rename">Renommer le dossier</button>
+        <button type="button" id="media-empty-folder">Vider le dossier en cours</button>
         <button type="button" id="media-folder-remove">Supprimer le dossier</button>
       </div>
     </form>
@@ -495,8 +494,10 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
         <p class="small resolution-help">Choisis la résolution la plus élevée testée sur ce lecteur.</p>
         <label>Résolution du flux<select class="resolution"></select></label>
       </div>
-      <label>Sources NDI détectées<select class="detected-sources"></select></label>
-      <label>Source NDI<input class="source" maxlength="256" required></label>
+      <div class="ndi-sources">
+        <label>Sources NDI détectées<select class="detected-sources"></select></label>
+        <label>Source NDI<input class="source" maxlength="256" required></label>
+      </div>
       <label>Qualité<select class="bandwidth"><option value="0">High · Résolution de la source</option><option value="1">Low · Aperçu NDI</option></select></label>
       <label>Orientation de l’écran<select class="orientation"><option value="landscape">Paysage</option><option value="portrait-left">Portrait gauche</option><option value="portrait-right">Portrait droite</option></select>
         <span class="small orientation-status"></span>
@@ -504,12 +505,12 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       <label><span>Volume <output></output></span><input class="volume" type="range" min="0" max="100"></label>
       <label class="check"><input type="checkbox" class="muted"> Couper le son</label>
       <button class="manage-media full-action" type="button" hidden aria-haspopup="dialog">Images et vidéos</button>
-      <div class="action-row"><button class="primary" type="submit">Appliquer</button><button class="toggle button-blue" type="button"></button></div>
-      <div class="action-row"><button class="reboot button-orange" type="button">Redémarrer</button><button class="poweroff button-red" type="button">Éteindre</button></div>
+      <div class="action-row"><button class="primary" type="submit">Appliquer</button><button class="toggle" type="button"></button></div>
+      <div class="action-row"><button class="reboot" type="button">Redémarrer</button><button class="poweroff" type="button">Éteindre</button></div>
       </form>
       <p class="small error"></p>
       <button class="client-upgrade full-action" type="button" hidden>Mettre à jour le lecteur</button>
-      <div class="action-row"><button class="info" type="button" hidden>Informations</button><button class="remove button-red" type="button">Retirer</button></div>
+      <div class="action-row"><button class="info" type="button" hidden>Informations</button><button class="remove" type="button">Retirer</button></div>
     </details>
   </article>
 </template>
@@ -1575,6 +1576,7 @@ function renderMediaManager(preferFolder) {
   select(mediaDialog,"#media-launch").disabled = mediaBusy || folder.targets.some(({folder}) => !folder.items.length);
   select(mediaDialog,"#media-ndi").disabled = mediaBusy || !rows.some(row => row.media.enabled);
   select(mediaDialog,"#media-empty-all").disabled = mediaBusy || !rows.some(mediaFileCount);
+  select(mediaDialog,"#media-empty-folder").disabled = mediaBusy || !folder.targets.some(target => target.folder.items.length);
   select(mediaDialog,"#media-folder-remove").disabled = mediaBusy || mediaFolders.value === "general";
   for (const button of mediaFolderForm.querySelectorAll('button[type="submit"]')) button.disabled = mediaBusy;
   mediaInput.disabled = mediaBusy || rows.some(row => !row.media_disk?.available) || mediaRegieDisk?.available === 0;
@@ -1737,12 +1739,26 @@ select(mediaDialog,"#media-ndi").onclick = action(() =>
   mediaBatch(selectedMediaFolder().targets,target=>mediaChange(target,{action:"play",enabled:false}),"Retour au NDI demandé"));
 select(mediaDialog,"#media-empty-all").onclick = action(() => {
   const targets = mediaRows().map(row => ({row, count:mediaFileCount(row)})).filter(({count}) => count > 0);
+  if (mediaBusy || !targets.length) return;
   const detail = targets.map(({row,count}) => row.name + " · " + count + " fichier" + (count > 1 ? "s" : "")).join("\n");
   showAction({title:"Vider tous les dossiers",detail:detail +
     "\n\nLes fichiers seront supprimés et les dossiers conservés. Les lecteurs hors ligne seront vidés à leur reconnexion.",
     label:"Vider les dossiers",successTitle:"Résultat par écran",
     async perform() {
       await mediaBatch(targets,({row})=>call("/api/media-settings",{id:row.id,action:"empty-all"}),"Suppression enregistrée");
+      return mediaResult.textContent;
+    }});
+});
+select(mediaDialog,"#media-empty-folder").onclick = action(() => {
+  const folder = selectedMediaFolder();
+  if (mediaBusy || !folder?.targets.some(target => target.folder.items.length)) return;
+  const targets = folder.targets;
+  const detail = targets.map(({row,folder:entry}) => row.name + " · " + entry.items.length + " fichier(s)").join("\n");
+  showAction({title:"Vider le dossier « " + folder.name + " »",
+    detail:detail + "\n\nLes fichiers seront supprimés. Le dossier sera conservé. Les lecteurs hors ligne appliqueront la suppression à leur reconnexion.",
+    label:"Vider le dossier", successTitle:"Résultat par écran",
+    async perform() {
+      await mediaBatch(targets,target=>mediaChange(target,{action:"empty-folder"}),"Dossier vidé");
       return mediaResult.textContent;
     }});
 });
@@ -1854,7 +1870,7 @@ function cardFor(id) {
   if (cards.has(id)) return cards.get(id);
   const el = document.querySelector("#card").content.firstElementChild.cloneNode(true);
   const form = select(el, ".config");
-  const fields = ["source","bandwidth","volume","orientation","orientation-status","muted","toggle","reboot","poweroff",
+  const fields = ["ndi-sources","source","bandwidth","volume","orientation","orientation-status","muted","toggle","reboot","poweroff",
                   "pending","badge","address","error","remove","info","metrics","connection","cpu","ram","disk",
                   "screen-traffic","rate-rx","rate-tx","traffic-interface-label"];
   const ui = Object.fromEntries(fields.map(key => [key, select(el, "."+key)]));
@@ -1925,16 +1941,20 @@ function cardFor(id) {
     select(el,"output").value = ui.volume.value + " %";
   });
   form.onsubmit = action(() => {
-    const settings = {source:ui.source.value, bandwidth:ui.bandwidth.value, volume:Number(ui.volume.value),
+    const current = card.data.options;
+    const local = card.data.media?.enabled === true;
+    const settings = {source:local ? current.source : ui.source.value, bandwidth:ui.bandwidth.value, volume:Number(ui.volume.value),
                       orientation:ui.orientation.value,
-                      muted:ui.muted.checked, enabled:card.data.options.enabled};
+                      muted:ui.muted.checked, enabled:current.enabled};
     const version = card.editVersion;
     const quality = ui.bandwidth.selectedOptions[0].textContent;
-    const requested = card.resolutionChoice || undefined;
+    const requested = local ? undefined : card.resolutionChoice || undefined;
     const volume = settings.muted ? "Son coupé" : "Volume " + settings.volume + " %";
+    const mode = local ? ["Média local", settings.bandwidth !== current.bandwidth ? "Qualité NDI · " + quality : ""] :
+      [settings.source, quality];
     showAction({
       title:"Appliquer les réglages à " + card.data.name,
-      detail:settings.source + " · " + quality + " · " + volume + " · " + ui.orientation.selectedOptions[0].textContent,
+      detail:[...mode, volume, ui.orientation.selectedOptions[0].textContent].filter(Boolean).join(" · "),
       label:"Appliquer",
       successTitle:"Réglages enregistrés",
       async perform() {
@@ -1953,6 +1973,7 @@ function cardFor(id) {
     showAction({
       title:(current.enabled ? "Arrêter la diffusion sur " : "Reprendre la diffusion sur ") + card.data.name,
       detail:current.enabled ? "Le récepteur restera allumé et affichera l’écran d’attente." :
+        card.data.media?.enabled ? "Le récepteur reprendra la lecture du dossier sélectionné." :
         "Le récepteur attendra la source NDI enregistrée si elle est indisponible.",
       label:current.enabled ? "Arrêter" : "Reprendre",
       successTitle:current.enabled ? "Arrêt demandé" : "Reprise demandée",
@@ -2001,6 +2022,9 @@ function cardFor(id) {
 }
 function syncSourceChoice(card) {
   const {data:row, ui, list, resolution} = card;
+  const local = row.media?.enabled === true;
+  ui["ndi-sources"].hidden = ui.source.disabled = local;
+  if (local) return;
   const available = row.resolution_sources || {};
   const tagged = resolutionControlsEnabled ? row.source_resolutions || {} : {};
   const activeResolution = Object.hasOwn(tagged, ui.source.value) ? tagged[ui.source.value] : "";
