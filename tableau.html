@@ -50,7 +50,7 @@ code{display:block;padding:11px;background:#100d12;border-radius:7px;overflow-wr
 @media(max-width:460px){main{margin-top:35px}header #count{display:none}article{padding:16px}.heading{align-items:flex-start}}
 .device-meta{display:flex;align-items:center;gap:8px;min-height:20px;margin:8px 0 15px;color:var(--sub);font-size:.82rem;flex-wrap:wrap}
 .address{margin:0}.device-kind:empty{display:none}
-.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:0 0 18px}
+.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 18px}
 .metrics[hidden]{display:none}
 .metric{--tone:#c6b7c8;display:grid;grid-template-columns:16px minmax(0,1fr);align-items:center;text-align:left;gap:5px 6px;padding:9px 8px;min-width:0;background:#17131a;border:1px solid var(--edge);border-radius:9px}
 .metric[data-level="good"],.test-result[data-level="good"]{--tone:#8de0ad}
@@ -58,7 +58,9 @@ code{display:block;padding:11px;background:#100d12;border-radius:7px;overflow-wr
 .metric[data-level="bad"],.test-result[data-level="bad"]{--tone:#ff8598}
 .metric span{font-size:.74rem;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .metric strong{grid-column:1/-1;color:var(--tone);font-size:.94rem;white-space:nowrap;font-variant-numeric:tabular-nums}
-.metric .disk-free{grid-column:1/-1;white-space:normal}
+.metric.disk{grid-column:1/-1;display:flex;flex-wrap:wrap;column-gap:8px}
+.metric.disk strong{margin-inline-start:auto}
+.metric .disk-free{white-space:normal;font-size:.82rem}
 .metric .disk-free:empty{display:none}
 .metric svg{color:var(--tone);width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linejoin:round;stroke-linecap:round}
 .metric.connection:hover:not(:disabled){border-color:var(--tone)}
@@ -77,7 +79,6 @@ dialog#diagnostics{width:min(570px,92vw)}
 .interfaces li{margin:6px 0;overflow-wrap:anywhere}.test-result{color:var(--tone,var(--sub));font-size:.88rem}
 button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #ff91a5;outline-offset:3px}
 @media(max-width:460px){.heading button{white-space:normal}.dialog-body{padding:18px}.metric span{font-size:.7rem}}
-@media(max-width:380px){.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 #confirm-action[data-state="success"] .dialog-heading svg{background:#20362a;color:var(--green)}
 #confirm-action .dialog-heading path{display:none}
 #confirm-action[data-state="confirm"] .icon-confirm,
