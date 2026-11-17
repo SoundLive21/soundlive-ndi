@@ -499,6 +499,25 @@ def preview_size(width, height):
     return max(1, round(width * scale)), max(1, round(height * scale))
 
 
+def load_local_image(path, width, height):
+    from gi.repository import GdkPixbuf
+
+    # Appliquer l’orientation EXIF avant le calcul du cadrage.
+    side = max(width, height, 1)
+    return GdkPixbuf.Pixbuf.new_from_file_at_scale(str(path), side, side, True).apply_embedded_orientation()
+
+
+def fit_local_image(pixbuf, width, height):
+    from gi.repository import GdkPixbuf
+
+    original_width, original_height = pixbuf.get_width(), pixbuf.get_height()
+    scale = min(width / original_width, height / original_height)
+    size = max(1, round(original_width * scale)), max(1, round(original_height * scale))
+    if size == (original_width, original_height):
+        return pixbuf
+    return pixbuf.scale_simple(*size, GdkPixbuf.InterpType.BILINEAR)
+
+
 def player_render_preview():
     import struct
     import zlib
@@ -942,9 +961,18 @@ class LocalMedia:
 
     def report(self):
         error = self.error or self.play_error
-        if not error and (self.desired or self.applied)["items"] and not self.ffplay:
-            error = "FFplay est absent sur le lecteur. Installe FFmpeg pour lire les médias locaux."
+        items = (self.desired or self.applied)["items"]
+        if not error and self.needs_ffplay(items) and not self.ffplay:
+            error = self.missing_ffplay()
         return dict(revision=media_revision(self.applied), error=error, local=self.enabled)
+
+    def needs_ffplay(self, items):
+        return any(WINDOWS or MEDIA_EXTENSIONS[self.path(item).suffix] != "image2" for item in items)
+
+    @staticmethod
+    def missing_ffplay():
+        return ("FFplay est absent. Rends ffplay.exe accessible au lecteur."
+                if WINDOWS else "FFplay est absent. Installe FFmpeg pour lire les vidéos locales.")
 
     def synchronize(self, config):
         self.folder.mkdir(parents=True, exist_ok=True)
@@ -1009,26 +1037,38 @@ class LocalMedia:
                     except OSError:
                         pass
 
-    def command(self, settings):
+    def selected_file(self):
         item = self.applied["items"][self.index]
-        if not self.ffplay:
-            raise OSError("Installe FFmpeg sur ce lecteur pour la lecture locale.")
         path = self.path(item)
         if not path.is_file():
             raise OSError(f"Le fichier local {item['name']} est absent.")
+        return path, item["name"]
+
+    def schedule_image(self):
+        self.deadline = time.monotonic() + 10 if len(self.applied["items"]) > 1 else None
+
+    def command(self, settings):
+        path, name = self.selected_file()
+        if not self.ffplay:
+            raise OSError(self.missing_ffplay())
         container = MEDIA_EXTENSIONS[path.suffix]
         image = container == "image2"
         single = len(self.applied["items"]) == 1
-        self.deadline = time.monotonic() + 10 if image and not single else None
+        if image:
+            self.schedule_image()
+        else:
+            self.deadline = None
         seek = [] if image else ["-loop", "0"] if single else ["-autoexit"]
         still = ["-pattern_type", "none"] if image else []
         volume = 0 if settings["muted"] else settings["volume"]
         return ([self.ffplay, "-hide_banner", "-nostats", "-fs", "-showmode", "video",
                  "-volume", str(volume), "-protocol_whitelist", "file", "-f", container, *still,
-                 *seek, "-i", str(path)], item["name"])
+                 *seek, "-i", str(path)], name)
 
-    def finished(self, code):
-        if code:
+    def finished(self, code, error=None):
+        if error:
+            self.play_error = str(error)
+        elif code:
             name = self.applied["items"][self.index]["name"]
             self.play_error = f"Impossible de lire {name}. Consulte gestion.log."
         self.index = (self.index + 1) % len(self.applied["items"])
@@ -1109,7 +1149,8 @@ class DashboardClient:
         server = self.identity["server"]
         token = self.identity["token"]
         local_video = report.get("local_video") is True
-        uses_internal = self.internal_preview is not None and not local_video
+        local_image = report.get("local_image") is True
+        uses_internal = self.internal_preview is not None and (not local_video or local_image)
         uses_portal = (not self.internal_preview_required and self.portal is not None
                        and self.display_info.get("portal") is True)
         monitor_capture, monitor_error = self.local_screen_capture or (self.display_info.get("capture") is True, "")
@@ -1120,9 +1161,9 @@ class DashboardClient:
                       update_has_engine=self.has_versioned_engine,
                       orientation_status=self.orientation_report,
                       display=self.display_info, display_capture=uses_internal or uses_portal or uses_monitor,
-                      display_preview_kind="player" if self.internal_preview_required and not local_video else "monitor",
+                      display_preview_kind="player" if self.internal_preview_required and (not local_video or local_image) else "monitor",
                       display_preview_error=("Aperçu de la lecture locale indisponible dans cette session Wayland."
-                                             if local_video and self.internal_preview_required else
+                                             if local_video and not local_image and self.internal_preview_required else
                                              self.internal_preview_error if self.internal_preview_required else monitor_error),
                       capture_needs_consent=uses_portal and self.portal.stream is None)
         if self.can_update:
@@ -1146,7 +1187,7 @@ class DashboardClient:
             if isinstance(job, str) and (screen or isinstance(source, str)) and job != self.preview_job:
                 self.preview_job = job
                 if screen and uses_internal:
-                    mode = "waiting" if report["state"] != "Lecture" else "player"
+                    mode = "waiting" if local_image or report["state"] != "Lecture" else "player"
                 elif screen and self.internal_preview_required:
                     mode = "unavailable"
                 else:
@@ -1246,6 +1287,8 @@ def desktop():
             self.player = None
             self.active_source = None
             self.playing_local = False
+            self.local_pixbuf = None
+            self.local_image_size = None
             self.video_ready = False
             self.stop_at = None
             self.retry_at = 0
@@ -1269,6 +1312,7 @@ def desktop():
             css = Gtk.CssProvider()
             css.load_from_data(b"""
                 window {background-image:linear-gradient(145deg,#230c11,#100e11 46%,#08080a);}
+                .local-image {background:#000;}
                 label {color:white;}
                 .line {background:#d93249;border-radius:3px;min-height:5px;}
                 .waiting-status {color:#dfcbd1;font-size:22px;}
@@ -1284,7 +1328,20 @@ def desktop():
             box.set_halign(Gtk.Align.CENTER)
             box.set_valign(Gtk.Align.CENTER)
             box.set_border_width(16)
-            self.window.add(box)
+            self.pages = Gtk.Stack()
+            self.waiting_box = box
+            self.pages.add_named(box, "waiting")
+            self.window.add(self.pages)
+            self.image_page = Gtk.Overlay()
+            background = Gtk.Box()
+            background.get_style_context().add_class("local-image")
+            self.image_page.add(background)
+            self.local_image = Gtk.Image()
+            self.local_image.set_halign(Gtk.Align.CENTER)
+            self.local_image.set_valign(Gtk.Align.CENTER)
+            self.image_page.add_overlay(self.local_image)
+            self.image_page.connect("size-allocate", self.resize_local_image)
+            self.pages.add_named(self.image_page, "image")
             brand = Gtk.Label()
             brand.set_markup(f'<span size="46000" weight="bold">{APP_NAME}</span>')
             box.pack_start(brand, False, False, 0)
@@ -1356,6 +1413,28 @@ def desktop():
             self.title.set_text(text if self.settings["enabled"] else "Diffusion arrêtée")
             self.window.fullscreen()
             self.window.show_all()
+            self.pages.set_visible_child(self.waiting_box)
+
+        def resize_local_image(self, _widget, allocation):
+            size = allocation.width, allocation.height
+            if self.local_pixbuf is not None and min(size) > 1 and self.local_image_size != size:
+                self.local_image_size = size
+                self.local_image.set_from_pixbuf(fit_local_image(self.local_pixbuf, *size))
+
+        def show_local_image(self, path, name):
+            display = self.window.get_display()
+            window = self.window.get_window()
+            monitor = display.get_monitor_at_window(window) if window else display.get_primary_monitor()
+            allocation = monitor.get_geometry() if monitor else self.window.get_allocation()
+            self.local_pixbuf = load_local_image(path, allocation.width, allocation.height)
+            self.local_image_size = None
+            self.resize_local_image(self.image_page, allocation)
+            self.active_source = name
+            self.playing_local = self.video_ready = True
+            self.media.schedule_image()
+            self.media.play_error = self.error = ""
+            self.window.show_all()
+            self.pages.set_visible_child(self.image_page)
 
         def prepare_internal_preview(self):
             try:
@@ -1511,6 +1590,10 @@ def desktop():
                 local = self.media.enabled
                 source = self.settings["source"]
                 if local:
+                    path, name = self.media.selected_file()
+                    if MEDIA_EXTENSIONS[path.suffix] == "image2":
+                        self.show_local_image(path, name)
+                        return
                     command, source = self.media.command(self.settings)
                 elif UBUNTU:
                     READY.unlink(missing_ok=True)
@@ -1526,10 +1609,10 @@ def desktop():
                 self.error = ""
                 if local:
                     self.media.play_error = ""
-            except OSError as error:
+            except (OSError, GLib.Error) as error:
                 self.error = str(error)
                 if self.media.enabled:
-                    self.media.finished(1)
+                    self.media.finished(1, error)
                     self.retry_at = GLib.get_monotonic_time() + 2 * GLib.USEC_PER_SEC
                 print(error, file=self.log)
                 return
@@ -1537,6 +1620,11 @@ def desktop():
                 self.window.hide()
 
         def terminate(self):
+            if self.local_pixbuf is not None:
+                self.local_pixbuf = None
+                self.local_image.clear()
+                self.active_source = None
+                self.playing_local = self.video_ready = False
             if self.player is not None and self.player.poll() is None and self.stop_at is None:
                 self.player.terminate()
                 self.stop_at = GLib.get_monotonic_time() + 3 * GLib.USEC_PER_SEC
@@ -1572,7 +1660,11 @@ def desktop():
                 elif self.playing_local and self.media.elapsed():
                     self.media.finished(0)
                     self.terminate()
-            if (self.media.enabled and self.settings["enabled"] and self.player is None
+            if self.local_pixbuf is not None and self.media.elapsed():
+                self.media.finished(0)
+                self.terminate()
+                self.waiting()
+            if (self.media.enabled and self.settings["enabled"] and self.player is None and self.local_pixbuf is None
                     and GLib.get_monotonic_time() >= self.retry_at):
                 self.start()
             return GLib.SOURCE_CONTINUE
@@ -1604,7 +1696,7 @@ def desktop():
             data = dict(id=self.identity["id"], boot=BOOT, state=state, sources=self.sources,
                         active_source=self.active_source if state == "Lecture" else None,
                         error=self.error, can_poweroff=True, media_status=self.media.report(),
-                        local_video=self.playing_local)
+                        local_video=self.playing_local, local_image=self.local_pixbuf is not None)
             display_pid = self.player.pid if state == "Lecture" and self.player else 0
             display = self.window.get_display()
             if DEVICE_KIND == "pi" and not self.dashboard.internal_preview_required:
@@ -1876,7 +1968,7 @@ def run_windows_screen(tk, log):
                         player = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, creationflags=flags)
                     except OSError as error:
                         print(error, file=log)
-                        media.finished(1)
+                        media.finished(1, error)
                         retry_at = now + 2
                     else:
                         playing_local = ready = True

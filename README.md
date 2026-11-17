@@ -269,8 +269,10 @@ la liste depuis le début avec les fichiers déjà présents. Le bouton
 Formats acceptés : JPG, PNG, MP4, M4V, MOV, MKV et WebM. Limites par écran :
 20 fichiers, 256 Mio par fichier et 1 Gio au total. Pour un Raspberry Pi
 3 B+, un MP4 H.264 en 720p à 25 i/s permet de commencer avec un fichier
-adapté à ses capacités. Ubuntu a besoin de `ffplay` (`sudo apt install
-ffmpeg`). Sur un Pi avec l’ancien client NDI, le `ffplay` installé dans
+adapté à ses capacités. À partir du lecteur **1.4.21**, Raspberry Pi OS et
+Ubuntu affichent les JPG et PNG avec GTK, en respectant l’orientation EXIF
+du JPEG. La lecture des vidéos nécessite `ffplay` (`sudo apt install ffmpeg`).
+Sur un Pi avec l’ancien client NDI, le `ffplay` installé dans
 `/opt/ndi-pi/bin` peut servir à la lecture locale. Sous Windows, rends
 `ffplay.exe` accessible dans le PATH ou dans le dossier du client, puis
 relance le lecteur.
