@@ -100,7 +100,7 @@ class Launcher:
         actions.grid(row=3, sticky="ew", pady=12)
         self.start_button = ttk.Button(actions, text="Démarrer la régie", command=self.start)
         self.stop_button = ttk.Button(actions, text="Arrêter la régie", command=self.stop)
-        self.open_button = ttk.Button(actions, text="Ouvrir le tableau", command=self.open_dashboard)
+        self.open_button = ttk.Button(actions, text="Ouvrir la console", command=self.open_dashboard)
         self.release_button = ttk.Button(actions, text="Versions publiées", command=self.publications)
         for button in (self.start_button, self.stop_button, self.open_button):
             button.pack(side="left", padx=(0, 8))

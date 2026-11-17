@@ -36,12 +36,17 @@ h2{margin:0;font-size:1.24rem;overflow-wrap:anywhere}.badge{flex:none;border-rad
 .address{color:var(--sub);font-family:monospace;margin:8px 0 18px}.small{font-size:.88rem;color:var(--sub)}label[hidden]{display:none}label{display:grid;gap:6px;font-size:.88rem;color:#e1d6e2;margin:12px 0}
 input,select,button{font:inherit;border-radius:8px;border:1px solid var(--edge);color:inherit}input:not([type=checkbox]):not([type=range]),select{padding:10px;background:#100d12;width:100%}input[type=range]{accent-color:var(--red);width:100%}input[type=checkbox]{accent-color:var(--red)}
 button{padding:9px 13px;cursor:pointer;background:#2b222f;font-weight:600;white-space:nowrap}button.primary{background:#df3453;color:#fff;border-color:#df3453}button:disabled{opacity:.44;cursor:default}button:hover:not(:disabled){filter:brightness(1.18)}
-.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.actions .remove{margin-left:auto;color:#efacb7}.check{display:flex;align-items:center;gap:6px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}button.remove{color:#efacb7}.check{display:flex;align-items:center;gap:6px}
 .action-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
 .action-row button,.full-action{white-space:normal}
 .full-action{width:100%;margin-top:12px}
 .button-red{background:#a62541;border-color:#bc3d55;color:#fff}
 #media-manager{width:min(920px,94vw)}
+#media-folder-edit .actions{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}
+@media(max-width:640px){
+  #media-folder-edit .actions{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #media-empty-all{grid-column:1/-1}
+}
 .media-heading,.disk-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .media-disks{display:grid;gap:8px;margin:15px 0;max-height:220px;overflow:auto}
 .disk-card,.media-preview{border:1px solid var(--edge);border-radius:10px;padding:12px;min-width:0}
@@ -338,18 +343,18 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
     <div class="media-disks" id="media-disks" aria-label="Espace disque"></div>
     <label>Dossier<select id="media-folders"></select></label>
     <form id="media-folder-edit">
-      <label>Nom du dossier<input name="name" maxlength="64" autocomplete="off"></label>
+      <label>Nom du nouveau dossier<input name="name" maxlength="64" autocomplete="off"></label>
       <div class="actions">
-        <button type="submit" value="create">Nouveau dossier</button>
-        <button type="submit" value="rename">Renommer le dossier</button>
+        <button type="submit">Nouveau dossier</button>
+        <button type="button" id="media-rename-open">Renommer le dossier</button>
         <button type="button" id="media-empty-folder">Vider le dossier en cours</button>
         <button type="button" id="media-folder-remove">Supprimer le dossier</button>
+        <button type="button" class="remove" id="media-empty-all">Vider tous les dossiers</button>
       </div>
     </form>
     <div class="actions">
       <button class="primary" type="button" id="media-launch">Lancer ce dossier</button>
       <button type="button" id="media-ndi">Revenir à la diffusion NDI</button>
-      <button type="button" class="remove" id="media-empty-all">Vider tous les dossiers</button>
     </div>
     <p class="small" id="media-status"></p>
     <div class="media-grid">
@@ -389,6 +394,17 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
     </div>
     <p class="small" id="media-result" role="status"></p>
   </div>
+</dialog>
+<dialog id="media-rename" aria-labelledby="media-rename-title">
+  <form class="dialog-body">
+    <h2 id="media-rename-title">Renommer le dossier</h2>
+    <label>Nouveau nom<input name="name" maxlength="64" required autocomplete="off" autofocus></label>
+    <p class="small" id="media-rename-error" role="alert" hidden></p>
+    <div class="actions">
+      <button type="button">Annuler</button>
+      <button type="submit" class="primary">Renommer</button>
+    </div>
+  </form>
 </dialog>
 <dialog id="confirm-action" aria-labelledby="confirm-title" aria-describedby="confirm-detail">
   <form class="dialog-body" method="dialog">
@@ -1328,6 +1344,12 @@ const mediaFileDownload = select(mediaDialog, "#media-file-download");
 const mediaDestination = select(mediaDialog, "#media-move-to");
 const mediaFolderForm = select(mediaDialog, "#media-folder-edit");
 const mediaName = mediaFolderForm.elements.namedItem("name");
+const mediaRenameDialog = document.querySelector("#media-rename");
+const mediaRenameForm = select(mediaRenameDialog, "form");
+const mediaRenameName = mediaRenameForm.elements.namedItem("name");
+const mediaRenameError = select(mediaRenameDialog, "#media-rename-error");
+const mediaRenameCancel = select(mediaRenameForm, 'button[type="button"]');
+const mediaRenameSubmit = select(mediaRenameForm, 'button[type="submit"]');
 const mediaBulk = select(mediaDialog, "#media-bulk");
 const mediaSelectAll = select(mediaBulk, "#media-select-all");
 const mediaDownloadSelected = select(mediaBulk, "#media-download-selected");
@@ -1338,6 +1360,7 @@ let mediaFileKey = "";
 let mediaBusy = false;
 let mediaExporting = false;
 let mediaRegieDisk = null;
+let mediaRenameFolder = null;
 const mediaSelected = new Set();
 
 function mediaRows() {
@@ -1578,7 +1601,8 @@ function renderMediaManager(preferFolder) {
   select(mediaDialog,"#media-empty-all").disabled = mediaBusy || !rows.some(mediaFileCount);
   select(mediaDialog,"#media-empty-folder").disabled = mediaBusy || !folder.targets.some(target => target.folder.items.length);
   select(mediaDialog,"#media-folder-remove").disabled = mediaBusy || mediaFolders.value === "general";
-  for (const button of mediaFolderForm.querySelectorAll('button[type="submit"]')) button.disabled = mediaBusy;
+  select(mediaFolderForm,'button[type="submit"]').disabled = mediaBusy;
+  select(mediaFolderForm,"#media-rename-open").disabled = mediaBusy;
   mediaInput.disabled = mediaBusy || rows.some(row => !row.media_disk?.available) || mediaRegieDisk?.available === 0;
   select(mediaUpload, "button").disabled = mediaInput.disabled;
   const uploadHint = select(mediaUpload, "#media-upload-hint");
@@ -1620,6 +1644,7 @@ function openMediaManager(ids) {
   mediaReadRegieDisk();
 }
 mediaDialog.addEventListener("close", () => {
+  if (mediaRenameDialog.open) mediaRenameDialog.close();
   mediaPlayer.replaceChildren();
   mediaPlayer.dataset.source = "";
 });
@@ -1639,6 +1664,7 @@ async function mediaBatch(targets, perform, done, preferFolder) {
     }
     await refresh(true);
     mediaResult.textContent = [success ? done + " · " + success + " écran(s)" : "", ...failures].filter(Boolean).join("\n");
+    return failures;
   } finally {
     mediaBusy = false;
     renderMediaManager(preferFolder);
@@ -1719,19 +1745,61 @@ mediaRemoveSelected.onclick = action(() => {
     }});
 });
 
-mediaFolderForm.onsubmit = action(event => {
+mediaFolderForm.onsubmit = action(() => {
   const name = mediaName.value.trim();
   if (!name) { mediaResult.textContent = "Saisis le nom du dossier."; mediaName.focus(); return; }
-  const operation = event.submitter?.value || "create";
   const current = selectedMediaFolder();
   if (!current) return;
   const matches = item => item.name.normalize().toLocaleLowerCase("fr") === name.normalize().toLocaleLowerCase("fr");
-  const task = target => operation === "create" && Object.values(target.row.media_folders).some(matches) ?
-    Promise.resolve() : mediaChange(target,{action:operation,name});
+  const task = target => Object.values(target.row.media_folders).some(matches) ?
+    Promise.resolve() : mediaChange(target,{action:"create",name});
   mediaName.value = "";
-  const prefer = operation === "rename" && mediaFolders.value === "general" ? "general" :
-    "name:" + name.normalize().toLocaleLowerCase("fr");
-  return mediaBatch(current.targets,task,operation === "create" ? "Dossier disponible" : "Dossier renommé",prefer);
+  return mediaBatch(current.targets,task,"Dossier disponible",folderKey("",{name}));
+});
+select(mediaFolderForm,"#media-rename-open").onclick = action(() => {
+  const folder = selectedMediaFolder();
+  if (!folder || mediaBusy || mediaRenameDialog.open) return;
+  mediaRenameFolder = folder;
+  mediaRenameName.value = folder.name;
+  mediaRenameError.hidden = true;
+  mediaRenameDialog.showModal();
+  mediaRenameName.select();
+});
+mediaRenameCancel.onclick = () => mediaRenameDialog.close();
+mediaRenameDialog.addEventListener("cancel", event => {
+  if (mediaRenameSubmit.disabled) event.preventDefault();
+});
+mediaRenameDialog.addEventListener("close", () => {
+  if (!mediaRenameDialog.open) mediaRenameFolder = null;
+});
+mediaRenameForm.onsubmit = action(async () => {
+  if (!mediaRenameFolder || mediaBusy) return;
+  const name = mediaRenameName.value.trim();
+  if (!name) {
+    mediaRenameError.textContent = "Saisis le nouveau nom du dossier.";
+    mediaRenameError.hidden = false;
+    mediaRenameName.focus();
+    return;
+  }
+  const {targets} = mediaRenameFolder;
+  mediaRenameError.hidden = true;
+  mediaRenameName.disabled = mediaRenameCancel.disabled = mediaRenameSubmit.disabled = true;
+  try {
+    const failures = await mediaBatch(targets, target => mediaChange(target,{action:"rename",name}),
+      "Dossier renommé",folderKey(targets[0].id,{name}));
+    if (failures.length) {
+      mediaRenameError.textContent = failures.join(" · ");
+      mediaRenameError.hidden = false;
+    } else {
+      mediaRenameDialog.close();
+    }
+  } catch (error) {
+    mediaRenameError.textContent = error.message;
+    mediaRenameError.hidden = false;
+  } finally {
+    mediaRenameName.disabled = mediaRenameCancel.disabled = mediaRenameSubmit.disabled = false;
+    if (mediaRenameDialog.open) mediaRenameName.focus();
+  }
 });
 select(mediaDialog,"#media-launch").onclick = action(() =>
   mediaBatch(selectedMediaFolder().targets,target=>mediaChange(target,{action:"play",enabled:true}),"Lecture demandée"));
