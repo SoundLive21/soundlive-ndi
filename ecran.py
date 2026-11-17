@@ -949,6 +949,7 @@ class LocalMedia:
         self.desired = None
         self.catalog = None
         self.catalog_ids = None
+        self.transfer = None
         self.request = None
         self.retry_at = 0
         self.error = ""
@@ -992,8 +993,10 @@ class LocalMedia:
             disk = None
         catalog = self.catalog if self.catalog is not None else self.applied["items"]
         cached = [item["id"] for item in catalog if self.downloaded(item)]
+        transfer = self.transfer
         return dict(revision=media_revision(self.applied), error=error, local=self.enabled,
-                    disk=disk, cached=cached)
+                    disk=disk, cached=cached,
+                    transfer=dict(id=transfer[0], received=transfer[1]) if transfer else None)
 
     def needs_ffplay(self, items):
         return any(WINDOWS or MEDIA_EXTENSIONS[self.path(item).suffix] != "image2" for item in items)
@@ -1032,6 +1035,7 @@ class LocalMedia:
             try:
                 checksum = sha256()
                 remaining = item["size"]
+                self.transfer = (item["id"], 0)
                 with opener.open(request, timeout=8) as response, temporary.open("wb") as handle:
                     while remaining and self.download_wanted(item):
                         data = response.read(min(MEDIA_CHUNK, remaining))
@@ -1042,12 +1046,14 @@ class LocalMedia:
                         handle.write(data)
                         checksum.update(data)
                         remaining -= len(data)
+                        self.transfer = (item["id"], item["size"] - remaining)
                 if not self.download_wanted(item):
                     continue
                 if remaining or checksum.hexdigest() != item["sha256"]:
                     raise ValueError("Fichier local incomplet ou différent de celui envoyé par la régie.")
                 temporary.replace(target)
             finally:
+                self.transfer = None
                 temporary.unlink(missing_ok=True)
 
     def tick(self):

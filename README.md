@@ -254,7 +254,7 @@ bascule.
 
 ### Organiser et lire des images et des vidéos
 
-Avec la régie **1.4.34** et le client **1.4.24**, ouvre **Images et vidéos**
+Avec la régie **1.4.36** et le client **1.4.25**, ouvre **Images et vidéos**
 dans les commandes d’un écran. Pour la même opération sur plusieurs
 lecteurs, sélectionne-les dans **Actions de groupe → Gérer les images et
 vidéos autonomes**. La fenêtre propose les dossiers communs au groupe.
@@ -265,7 +265,12 @@ sélectionné. Les médias des versions précédentes se retrouvent dans
 Utilise la fenêtre pour créer ou renommer un dossier, envoyer, déplacer ou
 supprimer des fichiers, modifier leur ordre et ouvrir l’aperçu d’une image
 ou d’une vidéo. Pour une vidéo, l’aperçu dépend des formats décodés par ton
-navigateur. Tu peux télécharger le fichier original à partir de la fenêtre.
+navigateur. Tu peux télécharger le fichier original depuis l’aperçu. Coche
+plusieurs fichiers pour les supprimer ensemble ou les télécharger dans un
+ZIP. Glisse une ligne par sa poignée ou utilise les flèches au clavier pour
+modifier sa position. En groupe, un déplacement s’applique aux lecteurs
+qui possèdent les deux fichiers. La progression indique l’envoi à la régie
+puis la copie sur les lecteurs. La copie atteint 100 % après vérification.
 **Lancer ce dossier** lance la liste choisie en boucle, y compris sur un
 lecteur en ligne ou précédemment arrêté. Les lecteurs téléchargent leurs
 fichiers en arrière-plan. Attends **Lecture locale en cours** avant de

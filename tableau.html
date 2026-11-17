@@ -16,12 +16,18 @@ header{border-bottom:1px solid var(--edge);background:#130f15;padding:17px 6vw;d
 .release{font-size:.82rem;color:var(--sub);font-variant-numeric:tabular-nums}
 .release[data-state="current"]{color:var(--green)}
 .release[data-state="available"]{color:#ffc078}
-main{width:min(1120px,90vw);margin:55px auto 80px}h1{margin:0;font-size:clamp(2.2rem,6vw,4rem);letter-spacing:-.06em;line-height:1}
+main{width:min(1120px,90vw);margin:55px auto 80px}h1{margin:0;font-size:clamp(1.15rem,3.7vw,1.9rem);letter-spacing:-.035em;line-height:1.15;white-space:nowrap}
 .heading{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:22px}
 #message{min-height:1.5em;margin:0 0 14px;color:var(--sub)}#message[data-error="true"]{color:#ff8fa0}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,330px),1fr));gap:16px;align-items:start}
 .screen-group+.screen-group{margin-top:30px}.screen-group-title{font-size:1.16rem;overflow-wrap:anywhere}
 .screen-group-title small{font-size:.8rem;color:var(--sub);font-weight:400;margin-left:8px}
+.drag-handle{padding:4px;color:var(--sub);background:transparent;border:0;line-height:1;cursor:grab;flex:none}
+.drag-handle:active{cursor:grabbing}
+.drag-handle svg{width:16px;height:16px;display:block;fill:currentColor}
+.screen-group-title .drag-handle{display:inline-flex;vertical-align:middle;margin-left:8px}
+.card-heading .drag-handle{margin-left:auto}
+.drop-target{outline:2px solid #a9d6ff;outline-offset:2px;border-radius:8px}
 article{border:1px solid var(--edge);border-radius:16px;background:var(--panel);padding:22px;min-width:0}
 .card-heading,.row{display:flex;gap:12px;align-items:center;justify-content:space-between}
 h2{margin:0;font-size:1.24rem;overflow-wrap:anywhere}.badge{flex:none;border-radius:20px;background:#382b36;color:#f5d1df;padding:5px 10px;font-size:.82rem}.badge.online{background:#20362a;color:var(--green)}
@@ -31,17 +37,41 @@ h2{margin:0;font-size:1.24rem;overflow-wrap:anywhere}.badge{flex:none;border-rad
 input,select,button{font:inherit;border-radius:8px;border:1px solid var(--edge);color:inherit}input:not([type=checkbox]):not([type=range]),select{padding:10px;background:#100d12;width:100%}input[type=range]{accent-color:var(--red);width:100%}input[type=checkbox]{accent-color:var(--red)}
 button{padding:9px 13px;cursor:pointer;background:#2b222f;font-weight:600;white-space:nowrap}button.primary{background:#df3453;color:#fff;border-color:#df3453}button:disabled{opacity:.44;cursor:default}button:hover:not(:disabled){filter:brightness(1.18)}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.actions .remove{margin-left:auto;color:#efacb7}.check{display:flex;align-items:center;gap:6px}
+.action-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
+.action-row button,.full-action{white-space:normal}
+.full-action{width:100%;margin-top:12px}
+.button-red{background:#a62541;border-color:#bc3d55;color:#fff}
+.button-blue{background:#23548b;border-color:#3d74aa;color:#fff}
+.button-orange{background:#8d470d;border-color:#a86228;color:#fff}
 #media-manager{width:min(920px,94vw)}
 .media-heading,.disk-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .media-disks{display:grid;gap:8px;margin:15px 0;max-height:220px;overflow:auto}
 .disk-card,.media-preview{border:1px solid var(--edge);border-radius:10px;padding:12px;min-width:0}
 .disk-card meter{display:block;width:100%;height:12px;margin:5px 0}
 .media-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px}
-.media-list{padding:0;margin:10px 0;list-style:none;display:grid;gap:5px;max-height:300px;overflow:auto}
-.media-list button{text-align:left;width:100%;white-space:normal;overflow-wrap:anywhere}
-.media-list button[aria-pressed="true"]{border-color:#df3453;background:#482431}
+.media-list{padding:3px;margin:8px -3px;list-style:none;display:grid;gap:7px;max-height:350px;overflow:auto}
+.media-list li{display:grid;align-items:center;grid-template-columns:min-content 20px min-content minmax(0,1fr);gap:6px;border:1px solid var(--edge);border-radius:8px;padding:7px 8px;background:#17131a}
+.media-list li:has([aria-pressed="true"]){border-color:#df3453;background:#38222f}
+.media-position{color:var(--sub);text-align:center;font-variant-numeric:tabular-nums}
+.media-list input{margin:0}
+.media-row-main{min-width:0;display:grid;gap:4px}
+.media-row-main button{text-align:left;padding:0;border:0;background:transparent;white-space:normal;overflow-wrap:anywhere}
+.media-row-main small{color:var(--sub);overflow-wrap:anywhere}
+.media-bulk{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
+.media-bulk[hidden]{display:none}
+.media-bulk label{margin:0}
+.media-bulk button{font-size:.8rem;white-space:normal}
 .media-preview{align-self:start;overflow-wrap:anywhere}
+.media-preview h3{font-size:1.05rem;margin:0;line-height:1.35}
+#media-preview-hint:empty{display:none}
+.media-preview-meta{margin:4px 0 12px}
 .media-preview img,.media-preview video{display:block;width:100%;max-height:340px;object-fit:contain;background:#100d12}
+.media-download{display:inline-flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid #8d4658;border-radius:8px;background:#482431;color:var(--text);text-decoration:none;font-size:.88rem;font-weight:650;margin-top:12px}
+.media-download:hover{background:#643044}
+.media-download svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.media-progress{display:grid;gap:5px;margin-top:10px}
+.media-progress progress,.media-row-main progress{width:100%;height:8px;accent-color:var(--green)}
+.media-progress[hidden]{display:none}
 #media-result{white-space:pre-wrap}
 @media(max-width:700px){.media-grid{grid-template-columns:1fr}.disk-row{flex-wrap:wrap}}
 .empty{padding:38px;border:1px dashed var(--edge);border-radius:14px;color:var(--sub)}
@@ -115,6 +145,10 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .traffic-panel{display:grid;grid-template-columns:minmax(190px,1fr) minmax(230px,1fr);gap:12px 24px;padding:18px 20px;margin:0 0 16px;background:var(--panel);border:1px solid var(--edge);border-radius:14px}
 .traffic-panel h2{grid-column:1/-1;font-size:1rem}
 .traffic-panel label{margin:0}
+.regie-system{grid-column:1/-1;border-top:1px solid var(--edge);padding-top:12px}
+.regie-system .metrics{margin:0 0 8px;grid-template-columns:repeat(2,minmax(0,1fr))}
+.regie-system summary{color:#ffd0dc;cursor:pointer;font-size:.88rem}
+.regie-system .facts{margin:5px 0 0}
 .traffic-readings{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .traffic-readings .metric strong{white-space:normal}
 .metric[data-level="rx"]{--tone:#9adcf7}
@@ -171,6 +205,23 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       </div>
     </div>
     <p class="small" id="traffic-help">Trafic total de l’interface sélectionnée, NDI compris lorsque ce PC diffuse.</p>
+    <div class="regie-system">
+      <div class="metrics" aria-label="Utilisation de la régie">
+        <div class="metric cpu">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 3v3m6-3v3M9 18v3m6-3v3M3 9h3m-3 6h3m12-6h3m-3 6h3"/></svg>
+          <span>CPU</span><strong>—</strong>
+        </div>
+        <div class="metric ram">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="7" width="20" height="10" rx="2"/><path d="M6 10v4m4-4v4m4-4v4m4-4v4M5 17v3m5-3v3m4-3v3m5-3v3"/></svg>
+          <span>RAM</span><strong>—</strong>
+        </div>
+        <div class="metric disk">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 13h18m-14 3.5h.01m4 0h.01"/></svg>
+          <span>Disque</span><strong>—</strong><span class="disk-free"></span>
+        </div>
+      </div>
+      <details><summary>Informations système de la régie</summary><dl class="facts"></dl></details>
+    </div>
   </section>
   <details class="preview-section" id="source-previews">
     <summary>Aperçu des sources NDI disponibles</summary>
@@ -302,8 +353,17 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
           <label>Images et vidéos<input type="file" multiple required accept=".jpg,.jpeg,.png,.mp4,.m4v,.mov,.webm,.mkv"></label>
           <button type="submit">Envoyer les fichiers</button>
           <p class="small" id="media-upload-hint" hidden></p>
+          <div class="media-progress" id="media-upload-status" hidden>
+            <span class="small" id="media-upload-text"></span>
+            <progress max="100" value="0" aria-labelledby="media-upload-text"></progress>
+          </div>
         </form>
-        <ul class="media-list" id="media-list"></ul>
+        <div class="media-bulk" id="media-bulk" hidden>
+          <label class="check"><input type="checkbox" id="media-select-all"> Tout sélectionner</label>
+          <button type="button" id="media-download-selected" disabled>Télécharger</button>
+          <button type="button" class="button-red" id="media-remove-selected" disabled>Supprimer</button>
+        </div>
+        <ol class="media-list" id="media-list"></ol>
       </div>
       <section class="media-preview" aria-label="Aperçu du fichier">
         <p class="small" id="media-preview-hint">Choisis un fichier pour l’afficher.</p>
@@ -432,10 +492,13 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       </label>
       <label><span>Volume <output></output></span><input class="volume" type="range" min="0" max="100"></label>
       <label class="check"><input type="checkbox" class="muted"> Couper le son</label>
-      <div class="actions"><button class="primary" type="submit">Appliquer</button><button class="toggle" type="button"></button><button class="reboot" type="button">Redémarrer</button><button class="poweroff" type="button">Éteindre</button></div>
+      <button class="manage-media full-action" type="button" hidden aria-haspopup="dialog">Images et vidéos</button>
+      <div class="action-row"><button class="primary" type="submit">Appliquer</button><button class="toggle button-blue" type="button"></button></div>
+      <div class="action-row"><button class="reboot button-orange" type="button">Redémarrer</button><button class="poweroff button-red" type="button">Éteindre</button></div>
       </form>
       <p class="small error"></p>
-      <div class="actions"><button class="manage-media" type="button" hidden aria-haspopup="dialog">Images et vidéos</button><button class="info" type="button" hidden>Informations</button><button class="client-upgrade" type="button" hidden>Mettre à jour le lecteur</button><button class="remove" type="button">Retirer</button></div>
+      <button class="client-upgrade full-action" type="button" hidden>Mettre à jour le lecteur</button>
+      <div class="action-row"><button class="info" type="button" hidden>Informations</button><button class="remove button-red" type="button">Retirer</button></div>
     </details>
   </article>
 </template>
@@ -592,28 +655,30 @@ function endRemoteSession(destination) {
   remoteSessionEnded = true;
   location.replace(destination);
 }
-async function call(path, data, raw = false) {
+function apiResult(status, result) {
+  if (result.code === "remote_blocked") {
+    endRemoteSession("/connexion");
+  } else if (status === 401 && result.code === "remote_disconnected") {
+    endRemoteSession("/connexion?etat=expiree");
+  }
+  if (status < 200 || status >= 300) {
+    const error = Error(result.error || "Erreur du serveur.");
+    error.status = status;
+    throw error;
+  }
+  return result;
+}
+async function call(path, data) {
   if (remoteSessionEnded) throw Error("Session distante fermée.");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), raw ? 300000 : 6000);
+  const timer = setTimeout(() => controller.abort(), 6000);
   try {
     const res = await fetch(path, data === undefined ? {signal:controller.signal} : {
-      method:"POST", headers:{"Content-Type":raw ? "application/octet-stream" : "application/json"},
-      body:raw ? data : JSON.stringify(data),
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(data),
       signal:controller.signal
     });
-    const result = await res.json();
-    if (result.code === "remote_blocked") {
-      endRemoteSession("/connexion");
-    } else if (res.status === 401 && result.code === "remote_disconnected") {
-      endRemoteSession("/connexion?etat=expiree");
-    }
-    if (!res.ok) {
-      const error = Error(result.error || "Erreur du serveur.");
-      error.status = res.status;
-      throw error;
-    }
-    return result;
+    return apiResult(res.status, await res.json());
   } catch (error) {
     if (error.name === "AbortError") throw Error("La gestion des écrans ne répond pas.");
     throw error;
@@ -843,6 +908,8 @@ if (!logoutButton.hidden) {
 const trafficInterface = document.querySelector("#traffic-interface");
 const trafficTx = document.querySelector("#traffic-tx");
 const trafficRx = document.querySelector("#traffic-rx");
+const regieSystem = document.querySelector(".regie-system");
+const regieTiles = Object.fromEntries(["cpu","ram","disk"].map(key => [key, select(regieSystem,"." + key)]));
 const trafficFormat = new Intl.NumberFormat("fr-FR", {maximumFractionDigits:2});
 function rateText(rate) {
   return Number.isFinite(rate) ? trafficFormat.format(rate) + " Mbit/s" : "—";
@@ -874,10 +941,12 @@ async function refreshTraffic() {
   if (trafficBusy || remoteSessionEnded || document.hidden) return;
   trafficBusy = true;
   try {
-    const {interfaces, available} = await call("/api/interface-traffic");
+    const {interfaces, available, diagnostic} = await call("/api/interface-traffic");
     updateTrafficInterfaces(interfaces, available);
+    renderRegieSystem(diagnostic);
   } catch {
     updateTrafficInterfaces([], false);
+    renderRegieSystem();
   } finally {
     trafficBusy = false;
   }
@@ -893,6 +962,63 @@ function action(run) {
     try { await run(event); }
     catch (error) { notice(error.message, true); }
   };
+}
+let sortableDrag = null;
+function sortHandle(target, scope, key, keys, move, label) {
+  const handle = document.createElement("button");
+  handle.type = "button";
+  handle.className = "drag-handle";
+  handle.draggable = true;
+  handle.title = label + " · Glisser ou utiliser les flèches";
+  handle.setAttribute("aria-label", handle.title);
+  handle.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6" cy="4" r="1.3"/><circle cx="10" cy="4" r="1.3"/><circle cx="6" cy="8" r="1.3"/><circle cx="10" cy="8" r="1.3"/><circle cx="6" cy="12" r="1.3"/><circle cx="10" cy="12" r="1.3"/></svg>';
+  handle.onclick = event => { event.preventDefault(); event.stopPropagation(); };
+  handle.onkeydown = event => {
+    const delta = {ArrowUp:-1, ArrowLeft:-1, ArrowDown:1, ArrowRight:1}[event.key];
+    if (!delta || handle.disabled) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const order = keys();
+    const destination = order[order.indexOf(key) + delta];
+    if (destination !== undefined) Promise.resolve(move(key, destination)).catch(error => notice(error.message, true));
+  };
+  const clear = () => {
+    sortableDrag?.highlight?.classList.remove("drop-target");
+    sortableDrag = null;
+  };
+  handle.ondragstart = event => {
+    if (handle.disabled) { event.preventDefault(); return; }
+    event.stopPropagation();
+    clear();
+    sortableDrag = {scope:scope(), key, highlight:null};
+    event.dataTransfer.setData("text/plain", label);
+    event.dataTransfer.effectAllowed = "move";
+  };
+  handle.ondragend = clear;
+  target.addEventListener("dragover", event => {
+    if (!sortableDrag || sortableDrag.scope !== scope() || sortableDrag.key === key || handle.disabled) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    if (sortableDrag.highlight !== target) {
+      sortableDrag.highlight?.classList.remove("drop-target");
+      sortableDrag.highlight = target;
+      target.classList.add("drop-target");
+    }
+  });
+  target.addEventListener("dragleave", event => {
+    if (sortableDrag?.highlight !== target || target.contains(event.relatedTarget)) return;
+    target.classList.remove("drop-target");
+    sortableDrag.highlight = null;
+  });
+  target.addEventListener("drop", action(event => {
+    if (!sortableDrag || sortableDrag.scope !== scope() || sortableDrag.key === key || handle.disabled) return;
+    event.stopPropagation();
+    const source = sortableDrag.key;
+    clear();
+    return move(source, key);
+  }));
+  return handle;
 }
 function showAction({title, detail, label, successTitle, perform}) {
   if (confirmation.open) return;
@@ -956,7 +1082,21 @@ function memoryLoad(data) {
     100 * data.ram_used / data.ram_total : null;
 }
 function diskLoad(disk) {
-  return disk?.total > 0 ? 100 * disk.used / disk.total : null;
+  return disk?.total > 0 && Number.isFinite(disk.used) ? 100 * disk.used / disk.total : null;
+}
+function diagnosticDisk(data) {
+  return {total:data?.disk_total, used:data?.disk_used, free:data?.disk_free};
+}
+function renderSystemMetrics(ui, stats, disk, online = true) {
+  metric(ui.cpu, percent(stats?.cpu_pct), severity(stats?.cpu_pct, loadLimits));
+  const ram = memoryLoad(stats);
+  metric(ui.ram, percent(ram), severity(ram, loadLimits));
+  const load = diskLoad(disk);
+  const free = disk.free;
+  metric(ui.disk, percent(load), online ? severity(load, diskLimits) : "unknown");
+  select(ui.disk, ".disk-free").textContent = Number.isFinite(free) ? mediaFormat(free) + " libres" : "";
+  ui.disk.title = !Number.isFinite(free) ? "Mesure indisponible" :
+    online ? "Espace disque" : "Hors ligne · dernière mesure reçue";
 }
 function latencyText(value) {
   return Number.isFinite(value) ? Math.round(value) + " ms" : "—";
@@ -969,16 +1109,7 @@ function renderMetrics({data, ui}) {
   const connection = data.online ? latencyText(latency) : "Hors ligne";
   metric(ui.connection, connection, data.online ? severity(latency, latencyLimits) : "bad");
   ui.connection.setAttribute("aria-label", "Réseau " + connection + ". Informations et test de latence");
-  metric(ui.cpu, percent(stats?.cpu_pct), severity(stats?.cpu_pct, loadLimits));
-  const ram = memoryLoad(stats);
-  metric(ui.ram, percent(ram), severity(ram, loadLimits));
-  const disk = data.media_disk;
-  const load = diskLoad(disk);
-  const free = disk ? disk.free : data.report.diagnostic?.disk_free;
-  metric(ui.disk, percent(load), data.online ? severity(load, diskLimits) : "unknown");
-  select(ui.disk, ".disk-free").textContent = Number.isFinite(free) ? mediaFormat(free) + " libres" : "";
-  ui.disk.title = !Number.isFinite(free) ? "Mesure indisponible" :
-    data.online ? "Espace disque du lecteur" : "Hors ligne · dernière mesure reçue";
+  renderSystemMetrics(ui, stats, data.media_disk || diagnosticDisk(data.report.diagnostic), data.online);
 }
 function receiverChoices(row) {
   return (row.report.diagnostic?.interfaces || []).filter(item => item.connected);
@@ -1013,6 +1144,32 @@ function gib(bytes) {
 function displayResolution(display) {
   return display ? (display.estimated ? "≈ " : "") + display.width + " × " + display.height + " px" : "—";
 }
+function systemFacts(data, diskLabel) {
+  return [
+    ["Système", data.os || "—"],
+    ["Architecture", data.architecture || "—"],
+    ["Modèle", data.model || "—"],
+    ["Processeur", [data.cpu, data.cores ? data.cores + " cœurs logiques" : ""].filter(Boolean).join(" · ") || "—"],
+    ["Mémoire", data.ram_total > 0 ? gib(data.ram_used) + " utilisée sur " + gib(data.ram_total) : "—"],
+    [diskLabel, data.disk_total > 0 ? gib(data.disk_free) + " libre sur " + gib(data.disk_total) : "—"],
+  ];
+}
+function renderFacts(list, facts) {
+  const signature = JSON.stringify(facts);
+  if (list.dataset.facts === signature) return;
+  list.dataset.facts = signature;
+  list.replaceChildren(...facts.flatMap(([label, value]) => {
+    const dt = document.createElement("dt");
+    const dd = document.createElement("dd");
+    dt.textContent = label;
+    dd.textContent = value;
+    return [dt, dd];
+  }));
+}
+function renderRegieSystem(stats = {}) {
+  renderSystemMetrics(regieTiles, stats, diagnosticDisk(stats));
+  renderFacts(select(regieSystem,".facts"), systemFacts(stats || {}, "Disque des médias"));
+}
 function renderDiagnostics(card) {
   const row = card.data;
   const report = row.report;
@@ -1026,20 +1183,9 @@ function renderDiagnostics(card) {
     ["Résolution de l’écran", displayResolution(report.display)],
     ["Type / modèle de l’écran", report.display?.model || "—"],
     ["Sortie d’affichage", report.display?.connector || "—"],
-    ["Système", data.os || "—"],
-    ["Architecture", data.architecture || "—"],
-    ["Modèle", data.model || "—"],
-    ["Processeur", [data.cpu, data.cores ? data.cores + " cœurs logiques" : ""].filter(Boolean).join(" · ") || "—"],
-    ["Mémoire", data.ram_total > 0 ? gib(data.ram_used) + " utilisée sur " + gib(data.ram_total) : "—"],
-    ["Disque système", data.disk_total > 0 ? gib(data.disk_free) + " libre sur " + gib(data.disk_total) : "—"],
+    ...systemFacts(data, "Disque système"),
   ];
-  select(diagnostics, ".facts").replaceChildren(...facts.flatMap(([label, value]) => {
-    const dt = document.createElement("dt");
-    const dd = document.createElement("dd");
-    dt.textContent = label;
-    dd.textContent = value;
-    return [dt, dd];
-  }));
+  renderFacts(select(diagnostics, ".facts"), facts);
   const interfaces = data.interfaces || [];
   const choices = receiverChoices(row);
   receiverInterfaceLabel.hidden = !row.online || choices.length < 2;
@@ -1169,10 +1315,17 @@ const mediaHint = select(mediaDialog, "#media-preview-hint");
 const mediaDestination = select(mediaDialog, "#media-move-to");
 const mediaFolderForm = select(mediaDialog, "#media-folder-edit");
 const mediaName = mediaFolderForm.elements.namedItem("name");
+const mediaBulk = select(mediaDialog, "#media-bulk");
+const mediaSelectAll = select(mediaBulk, "#media-select-all");
+const mediaDownloadSelected = select(mediaBulk, "#media-download-selected");
+const mediaRemoveSelected = select(mediaBulk, "#media-remove-selected");
+const mediaUploadStatus = select(mediaUpload, "#media-upload-status");
 let mediaIds = [];
 let mediaFileKey = "";
 let mediaBusy = false;
+let mediaExporting = false;
 let mediaRegieDisk = null;
+const mediaSelected = new Set();
 
 function mediaRows() {
   return mediaIds.map(id => cards.get(id)?.data).filter(row => row?.paired);
@@ -1261,6 +1414,9 @@ function mediaSelect(selectBox, options, desired) {
   if (options.some(([key]) => key === desired)) selectBox.value = desired;
   else if (!options.some(([key]) => key === selectBox.value)) selectBox.selectedIndex = 0;
 }
+function mediaURL(entry) {
+  return "/api/media-preview?" + new URLSearchParams({id:entry.row.id,file:entry.item.id});
+}
 function mediaPreview(selected) {
   const entry = selected?.targets[0];
   if (!entry) {
@@ -1269,10 +1425,14 @@ function mediaPreview(selected) {
     mediaHint.textContent = "Choisis un fichier pour l’afficher.";
     return;
   }
-  const url = "/api/media-preview?" + new URLSearchParams({id:entry.row.id,file:entry.item.id});
+  const url = mediaURL(entry);
   if (mediaPlayer.dataset.source === url) return;
   mediaPlayer.dataset.source = url;
-  mediaHint.textContent = entry.item.name;
+  mediaHint.textContent = "";
+  const title = document.createElement("h3");
+  title.textContent = entry.item.name;
+  const metadata = document.createElement("p");
+  metadata.className = "small media-preview-meta";
   const image = /\.(jpe?g|png)$/i.test(entry.item.name);
   const player = document.createElement(image ? "img" : "video");
   if (image) player.alt = entry.item.name;
@@ -1283,14 +1443,100 @@ function mediaPreview(selected) {
     player.setAttribute("aria-label", entry.item.name);
   }
   player.addEventListener("error", () => {
-    if (mediaPlayer.dataset.source === url) mediaHint.textContent = "Aperçu indisponible dans ce navigateur · " + entry.item.name;
+    if (mediaPlayer.dataset.source === url) mediaHint.textContent = "Aperçu indisponible dans ce navigateur.";
   });
   player.src = url;
   const link = document.createElement("a");
   link.href = url;
   link.download = entry.item.name;
-  link.textContent = "Télécharger";
-  mediaPlayer.replaceChildren(player, link);
+  link.className = "media-download";
+  link.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v13m-5-5 5 5 5-5M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg> Télécharger le fichier';
+  mediaPlayer.replaceChildren(title, metadata, player, link);
+}
+function mediaCopyState(entry) {
+  let stored = 0, bytes = 0;
+  const details = [];
+  for (const {row, item} of entry.targets) {
+    const status = row.report.media_status;
+    const cached = status?.cached?.includes(item.id);
+    const received = row.online && status?.transfer?.id === item.id ? status.transfer.received : 0;
+    if (cached) stored++;
+    bytes += cached ? item.size : Math.min(item.size, received);
+    const progress = cached ? 100 : Math.min(99, Math.floor(100 * received / item.size));
+    details.push(row.name + " · " + progress + " %" + (row.online ? "" : " · hors ligne"));
+  }
+  const total = entry.targets.length;
+  const progress = stored === total ? 100 : Math.min(99, Math.floor(100 * bytes / (entry.item.size * total)));
+  const text = total === 1 ?
+    "Copie sur le lecteur " + progress + " %" + (entry.targets[0].row.online ? "" : " · hors ligne") :
+    "Copie " + progress + " % · " + stored + "/" + total + " lecteurs prêts";
+  return {progress, text, details:details.join("\n")};
+}
+function renderMediaLibrary(entries) {
+  for (const key of mediaSelected) if (!entries.has(key)) mediaSelected.delete(key);
+  const signature = JSON.stringify([mediaFolders.value, ...entries.keys()]);
+  if (mediaList.dataset.entries !== signature) {
+    mediaList.dataset.entries = signature;
+    const scroll = mediaList.scrollTop;
+    mediaList.replaceChildren(...[...entries.values()].map((entry, index) => {
+      const line = document.createElement("li");
+      line.dataset.key = entry.key;
+      const handle = sortHandle(line, () => mediaList, entry.key,
+        () => [...mediaEntries(selectedMediaFolder()).keys()], reorderMedia,
+        "Déplacer " + entry.item.name);
+      const position = document.createElement("span");
+      position.className = "media-position";
+      position.textContent = index + 1;
+      position.setAttribute("aria-label", "Position " + (index + 1));
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      check.setAttribute("aria-label", "Sélectionner " + entry.item.name);
+      check.onchange = () => {
+        if (check.checked) mediaSelected.add(entry.key);
+        else mediaSelected.delete(entry.key);
+        updateMediaSelection(entries.size);
+      };
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = entry.item.name;
+      button.onclick = () => {
+        mediaFileKey = entry.key;
+        renderMediaManager();
+      };
+      const main = document.createElement("div");
+      main.className = "media-row-main";
+      const status = document.createElement("small");
+      const progress = document.createElement("progress");
+      progress.max = 100;
+      progress.setAttribute("aria-label", "Copie de " + entry.item.name + " sur les lecteurs");
+      main.append(button, status, progress);
+      line.append(handle, position, check, main);
+      return line;
+    }));
+    mediaList.scrollTop = scroll;
+  }
+  for (const line of mediaList.children) {
+    const entry = entries.get(line.dataset.key);
+    const state = mediaCopyState(entry);
+    select(line,".drag-handle").disabled = mediaBusy || entries.size < 2;
+    const check = select(line,"input");
+    check.checked = mediaSelected.has(entry.key);
+    check.disabled = mediaBusy;
+    select(line,".media-row-main button").setAttribute("aria-pressed", String(entry.key === mediaFileKey));
+    const status = select(line,"small");
+    status.textContent = mediaFormat(entry.item.size) + " · " + state.text;
+    status.title = state.details;
+    select(line,"progress").value = state.progress;
+  }
+  updateMediaSelection(entries.size);
+}
+function updateMediaSelection(count) {
+  mediaBulk.hidden = !count;
+  mediaSelectAll.checked = count > 0 && mediaSelected.size === count;
+  mediaSelectAll.indeterminate = mediaSelected.size > 0 && mediaSelected.size < count;
+  mediaSelectAll.disabled = mediaBusy;
+  mediaRemoveSelected.disabled = mediaBusy || !mediaSelected.size;
+  mediaDownloadSelected.disabled = mediaRemoveSelected.disabled || mediaExporting;
 }
 function renderMediaManager(preferFolder) {
   if (!mediaDialog.open) return;
@@ -1330,28 +1576,16 @@ function renderMediaManager(preferFolder) {
     "Ajout bloqué par le seuil de " + mediaDiskPercent + " % ou par les fichiers en attente de copie." : "";
   uploadHint.hidden = !uploadHint.textContent;
   if (!entries.has(mediaFileKey)) mediaFileKey = "";
-  const entrySignature = JSON.stringify([...entries].map(([key, entry]) => [key, entry.targets.length]).concat(mediaFileKey));
-  if (mediaList.dataset.entries !== entrySignature) {
-    mediaList.dataset.entries = entrySignature;
-    mediaList.replaceChildren(...[...entries.values()].map(entry => {
-      const line = document.createElement("li");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.setAttribute("aria-pressed", String(entry.key === mediaFileKey));
-      button.textContent = entry.item.name + " · " + mediaFormat(entry.item.size) +
-        (rows.length > 1 ? " · " + entry.targets.length + "/" + rows.length + " écrans" : "");
-      button.onclick = () => {
-        mediaFileKey = entry.key;
-        renderMediaManager();
-        [...mediaList.querySelectorAll("button")].find(b => b.getAttribute("aria-pressed") === "true")?.focus();
-      };
-      line.append(button);
-      return line;
-    }));
-  }
+  renderMediaLibrary(entries);
   const selected = entries.get(mediaFileKey);
   select(mediaDialog,"#media-file-actions").hidden = !selected;
   mediaPreview(selected);
+  if (selected) {
+    const metadata = select(mediaPlayer,".media-preview-meta");
+    const state = mediaCopyState(selected);
+    metadata.textContent = mediaFormat(selected.item.size) + " · " + state.text;
+    metadata.title = state.details;
+  }
   mediaSelect(mediaDestination, folders.filter(([key]) => key !== mediaFolders.value));
   select(mediaDialog,"#media-file-remove").disabled = mediaBusy;
   select(mediaDialog,"#media-move").disabled = mediaBusy || !mediaDestination.value;
@@ -1362,9 +1596,11 @@ function openMediaManager(ids) {
   if (mediaBusy) return;
   mediaIds = ids;
   mediaFileKey = "";
+  mediaSelected.clear();
   mediaName.value = "";
   mediaInput.value = "";
   mediaResult.textContent = "";
+  mediaUploadStatus.hidden = true;
   const rows = mediaRows();
   const current = rows[0]?.media_folder;
   const initial = rows[0]?.media_folders?.[current];
@@ -1376,7 +1612,7 @@ mediaDialog.addEventListener("close", () => {
   mediaPlayer.replaceChildren();
   mediaPlayer.dataset.source = "";
 });
-mediaFolders.onchange = () => { mediaFileKey = ""; renderMediaManager(); };
+mediaFolders.onchange = () => { mediaFileKey = ""; mediaSelected.clear(); renderMediaManager(); };
 mediaDestination.onchange = () => renderMediaManager();
 
 async function mediaBatch(targets, perform, done, preferFolder) {
@@ -1402,6 +1638,76 @@ async function mediaBatch(targets, perform, done, preferFolder) {
 const selectedMediaFolder = () => mediaGroups(mediaRows()).get(mediaFolders.value);
 const selectedMediaEntry = () => mediaEntries(selectedMediaFolder()).get(mediaFileKey);
 const mediaChange = (target, data) => call("/api/media-settings",{id:target.row.id,folder:target.id,...data});
+
+async function reorderMedia(sourceKey, destinationKey) {
+  const entries = mediaEntries(selectedMediaFolder());
+  const source = entries.get(sourceKey), destination = entries.get(destinationKey);
+  if (!source || !destination || mediaBusy) return;
+  const order = [...entries.keys()];
+  const after = order.indexOf(sourceKey) < order.indexOf(destinationKey);
+  const anchors = new Map(destination.targets.map(target => [target.row.id, target.item.id]));
+  const targets = source.targets.filter(target => anchors.has(target.row.id));
+  if (!targets.length) {
+    mediaResult.textContent = "Aucun lecteur ne contient les deux fichiers.";
+    return;
+  }
+  const focused = document.activeElement?.closest("#media-list li")?.dataset.key === sourceKey;
+  const message = targets.length < mediaRows().length ? "Ordre modifié sur les lecteurs contenant les deux fichiers" : "Ordre mis à jour";
+  await mediaBatch(targets, target => mediaChange(target, {action:"reorder", file:target.item.id,
+    anchor:anchors.get(target.row.id), after}), message);
+  if (focused) {
+    const line = [...mediaList.children].find(node => node.dataset.key === sourceKey);
+    select(line || mediaList, ".drag-handle")?.focus();
+  }
+}
+mediaSelectAll.onchange = () => {
+  mediaSelected.clear();
+  if (mediaSelectAll.checked) {
+    for (const key of mediaEntries(selectedMediaFolder()).keys()) mediaSelected.add(key);
+  }
+  renderMediaManager();
+};
+mediaDownloadSelected.onclick = action(async () => {
+  const entries = [...mediaEntries(selectedMediaFolder()).values()].filter(entry => mediaSelected.has(entry.key));
+  if (!entries.length) return;
+  const files = entries.map(entry => entry.targets[0]);
+  const link = document.createElement("a");
+  if (files.length === 1) {
+    link.href = mediaURL(files[0]);
+    link.download = files[0].item.name;
+  } else {
+    mediaExporting = true;
+    mediaDownloadSelected.disabled = true;
+    try {
+      const {url} = await call("/api/media-export", {files:files.map(({row,item}) => ({id:row.id,file:item.id}))});
+      link.href = url;
+      link.download = "SoundLive-medias.zip";
+    } finally {
+      mediaExporting = false;
+      updateMediaSelection(mediaEntries(selectedMediaFolder()).size);
+    }
+  }
+  link.click();
+});
+mediaRemoveSelected.onclick = action(() => {
+  const entries = [...mediaEntries(selectedMediaFolder()).values()].filter(entry => mediaSelected.has(entry.key));
+  if (!entries.length) return;
+  const byReader = new Map();
+  for (const entry of entries) {
+    for (const target of entry.targets) {
+      if (!byReader.has(target.row.id)) byReader.set(target.row.id, {...target, files:[]});
+      byReader.get(target.row.id).files.push(target.item.id);
+    }
+  }
+  const targets = [...byReader.values()];
+  showAction({title:"Supprimer les fichiers sélectionnés",
+    detail:targets.map(target => target.row.name + " · " + target.files.length + " fichier(s)").join("\n"),
+    label:"Supprimer", successTitle:"Résultat par écran",
+    async perform() {
+      await mediaBatch(targets, target => mediaChange(target,{action:"remove-files",files:target.files}),"Suppression enregistrée");
+      return mediaResult.textContent;
+    }});
+});
 
 mediaFolderForm.onsubmit = action(event => {
   const name = mediaName.value.trim();
@@ -1461,7 +1767,27 @@ select(mediaDialog,"#media-move").onclick = action(() => {
   return mediaBatch(targets,target=>mediaChange(target,{action:"move",file:target.item.id,
     folder:destinations.targets.find(entry=>entry.row.id===target.row.id).id}),"Fichier déplacé");
 });
-mediaUpload.onsubmit = action(() => {
+function uploadMedia(path, file, progress) {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST",path);
+    request.timeout = 300000;
+    request.setRequestHeader("Content-Type","application/octet-stream");
+    request.upload.onprogress = event => progress(event.loaded);
+    request.onload = () => {
+      try { resolve(apiResult(request.status, JSON.parse(request.responseText))); }
+      catch (error) { reject(error); }
+    };
+    request.onerror = request.ontimeout = () => reject(Error("Le transfert vers la régie a été interrompu."));
+    request.send(file);
+  });
+}
+function showMediaUpload(value, text) {
+  mediaUploadStatus.hidden = false;
+  select(mediaUploadStatus,"progress").value = value;
+  select(mediaUploadStatus,"#media-upload-text").textContent = text + " · " + value + " %";
+}
+mediaUpload.onsubmit = action(async () => {
   const files = [...mediaInput.files];
   const targets = selectedMediaFolder().targets;
   const bytes = files.reduce((sum,file)=>sum+file.size,0);
@@ -1478,18 +1804,27 @@ mediaUpload.onsubmit = action(() => {
     return;
   }
   mediaInput.value = "";
-  return mediaBatch(targets,async ({row,id}) => {
+  let committed = 0;
+  const total = bytes * targets.length;
+  showMediaUpload(0, "Envoi vers la régie");
+  await mediaBatch(targets,async ({row,id}) => {
     let sent = 0;
     try {
       for (const file of files) {
         mediaResult.textContent = "Envoi · " + row.name + " · " + file.name;
-        await call("/api/media-upload?" + new URLSearchParams({id:row.id, folder:id, name:file.name}),file,true);
+        await uploadMedia("/api/media-upload?" + new URLSearchParams({id:row.id, folder:id, name:file.name}),file, loaded => {
+          showMediaUpload(Math.min(99, Math.floor(100 * (committed + Math.min(loaded, file.size)) / total)),
+            row.name + " · " + file.name);
+        });
+        committed += file.size;
         sent++;
       }
     } catch (error) {
       throw Error((sent ? sent + "/" + files.length + " fichier(s) enregistré(s) · " : "") + error.message);
     }
   },"Fichiers enregistrés");
+  showMediaUpload(Math.floor(100 * committed / total),
+    committed === total ? "Envoi vers la régie terminé" : "Envoi incomplet");
 });
 
 function cardFor(id) {
@@ -1508,6 +1843,12 @@ function cardFor(id) {
   select(el, ".resolution-controls").hidden = !resolutionControlsEnabled;
   limit.replaceChildren(new Option("À valider après essai", ""), ...resolutions.map(value => new Option(value, value)));
   const card = {el, ui, form, list, resolution, limit, dirty:false};
+  el.dataset.screen = id;
+  const heading = select(el, ".card-heading");
+  const handle = sortHandle(el, () => el.parentElement, id, () => screenKeys(el.parentElement),
+    (source, destination) => moveScreenOrder("screens", screenKeys(el.parentElement), source, destination,
+      card.data.group || ""), "Déplacer l’écran");
+  heading.insertBefore(handle, ui.badge);
   const mediaButton = select(el, ".manage-media");
   mediaButton.onclick = () => openMediaManager([id]);
   card.preview = createPreview(select(el, ".screen-preview"), "Capture de l’écran", id, true);
@@ -1670,6 +2011,9 @@ function render(row) {
   const card = cardFor(row.id);
   const {el, ui, form} = card;
   card.data = row;
+  const handle = select(el, ".card-heading .drag-handle");
+  handle.title = "Déplacer " + row.name + " · Glisser ou utiliser les flèches";
+  handle.setAttribute("aria-label",handle.title);
   select(el, ".manage-media").hidden = !row.paired;
   select(el,"h2").textContent = row.name;
   ui.badge.textContent = row.online ? row.report.state : row.paired ? "Hors ligne" : "À associer";
@@ -1747,10 +2091,32 @@ function render(row) {
     card.editVersion = row.version;
   }
   syncSourceChoice(card);
-  ui.toggle.textContent = row.options.enabled ? "Stop" : "Reprendre";
+  ui.toggle.textContent = row.options.enabled ? "Stopper la diffusion" : "Reprendre la diffusion";
   ui.reboot.disabled = !row.online || row.report.can_reboot === false;
   ui.poweroff.disabled = !row.online || !row.report.can_poweroff;
   ui.poweroff.title = row.online && !row.report.can_poweroff ? "Extinction distante indisponible sur ce lecteur." : "";
+}
+const screenNames = new Intl.Collator("fr",{numeric:true,sensitivity:"base"});
+function screenKeys(grid) {
+  return [...grid.children].map(card => card.dataset.screen);
+}
+function sectionKeys() {
+  return [...holder.querySelectorAll(":scope > .screen-group")].map(section => section.dataset.group);
+}
+let screenOrderBusy = false;
+async function moveScreenOrder(scope, order, source, destination, group) {
+  if (screenOrderBusy) return;
+  const from = order.indexOf(source), to = order.indexOf(destination);
+  if (from < 0 || to < 0 || from === to) return;
+  order.splice(from, 1);
+  order.splice(to, 0, source);
+  screenOrderBusy = true;
+  try {
+    await call("/api/screen-order",{scope,order,group});
+  } finally {
+    await refresh(true);
+    screenOrderBusy = false;
+  }
 }
 function positionScreens(rows) {
   const sections = new Map();
@@ -1759,17 +2125,23 @@ function positionScreens(rows) {
     if (!sections.has(name)) sections.set(name, []);
     sections.get(name).push(row);
   }
-  const names = [...sections.keys()].sort((a, b) => Number(!a) - Number(!b) || a.localeCompare(b, "fr"));
+  const rank = (value) => value ?? Number.MAX_SAFE_INTEGER;
+  const names = [...sections.keys()].sort((a, b) =>
+    rank(sections.get(a)[0].group_order) - rank(sections.get(b)[0].group_order) ||
+    Number(!a) - Number(!b) || screenNames.compare(a, b));
   let nextSection = holder.firstElementChild;
   for (const name of names) {
     if (!screenSections.has(name)) {
       const el = document.createElement("details");
       el.className = "screen-group";
+      el.dataset.group = name;
       el.open = true;
       const title = document.createElement("summary");
       title.className = "screen-group-title";
       const count = document.createElement("small");
-      title.append(name || "Sans groupe", count);
+      const label = name || "Sans groupe";
+      title.append(label, count, sortHandle(title, () => holder, name, sectionKeys,
+        (source,destination) => moveScreenOrder("groups",sectionKeys(),source,destination), "Déplacer le groupe " + label));
       const grid = document.createElement("div");
       grid.className = "grid";
       el.append(title, grid);
@@ -1778,7 +2150,8 @@ function positionScreens(rows) {
     const {el, count, grid} = screenSections.get(name);
     if (el !== nextSection) holder.insertBefore(el, nextSection);
     nextSection = el.nextElementSibling;
-    const members = sections.get(name);
+    const members = sections.get(name).sort((a,b) => rank(a.screen_order) - rank(b.screen_order) ||
+      screenNames.compare(a.name,b.name) || screenNames.compare(a.id,b.id));
     count.textContent = members.length + (members.length === 1 ? " écran" : " écrans");
     let nextCard = grid.firstElementChild;
     for (const row of members) {

@@ -241,7 +241,7 @@ class Diagnostic:
         self.network_refresh_at = 0
         self.refresh_at = 0
 
-    def sample(self, server):
+    def sample_system(self, disk_path=None):
         data = {}
         try:
             total, idle = cpu_ticks()
@@ -268,15 +268,19 @@ class Diagnostic:
                 except (OSError, ValueError):
                     pass
             try:
-                disk = shutil.disk_usage(Path.home().anchor if sys.platform == "win32" else "/")
-                self.disk = dict(disk_total=disk.total, disk_free=disk.free)
+                disk = shutil.disk_usage(disk_path or (Path.home().anchor if sys.platform == "win32" else "/"))
+                self.disk = dict(disk_total=disk.total, disk_used=disk.used, disk_free=disk.free)
             except OSError:
                 self.disk = {}
             self.refresh_at = time.monotonic() + 10
+        return {**self.hardware, **self.disk, **data}
+
+    def sample(self, server):
+        data = self.sample_system()
         if time.monotonic() >= self.network_refresh_at:
             self.read_network(server)
             self.network_refresh_at = time.monotonic() + (0 if sys.platform == "win32" else 4)
-        return {**self.hardware, **self.disk, **data, "interfaces": self.rates.sample(self.network)}
+        return {**data, "interfaces": self.rates.sample(self.network)}
 
     def read_network(self, server):
         try:

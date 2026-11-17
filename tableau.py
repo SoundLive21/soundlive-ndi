@@ -24,6 +24,7 @@ import threading
 import time
 from tempfile import NamedTemporaryFile
 from urllib.parse import parse_qs, urlsplit
+from zipfile import ZipFile
 
 from acces_regie import (PORT as REMOTE_PORT, SESSION_COOKIE, SESSION_WARNING, USERNAME,
                          RemoteConnections, RemoteDashboard, prepare_access)
@@ -31,16 +32,17 @@ from commun import (APP_NAME, MEDIA_CHUNK, MEDIA_COUNT_LIMIT, MEDIA_DISK_PERCENT
                     MEDIA_LIBRARY_LIMIT, MEDIA_TOTAL_LIMIT,
                     ORIENTATIONS, PREVIEW_LIMIT, SOFTWARE_VERSION as CLIENT_VERSION,
                     media_available, media_config, media_disk, media_name, media_revision, options, release_number)
-from diagnostic import NetworkRates, network_info
+from diagnostic import Diagnostic, NetworkRates, network_info
 from mise_a_jour import ENGINE_ASSETS, SAFE_ID, contents, digest, engine_name, full_contents, package, prepare_key
 from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.35"
+SOFTWARE_VERSION = "1.4.36"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
+SCREEN_ORDER_FILE = ROOT / "disposition-ecrans.json"
 MEDIA_ROOT = ROOT / ".soundlive-medias"
 MEDIA_WRITE_LOCK = threading.Lock()
 MEDIA_DEFAULT_FOLDER = "general"
@@ -70,6 +72,8 @@ RESOLUTION_SUFFIX = re.compile(
 LATENCY_TEST_AGE = 15
 DEVICE_KINDS = ("pi", "ubuntu", "windows")
 SCREENS = {}
+SCREEN_ORDER = {"groups": [], "screens": {}}
+MEDIA_EXPORTS = {}
 LATENCY_TESTS = {}
 CLIENT_UPDATES = {}
 UPDATE_AGE = 120
@@ -415,6 +419,46 @@ def save():
     temporary.replace(DATA)
 
 
+def order_screens(data):
+    scope, order = data.get("scope"), data.get("order")
+    if not isinstance(order, list) or any(not isinstance(value, str) for value in order):
+        raise ValueError("Ordre d’affichage invalide.")
+    if scope == "groups":
+        expected = {row.get("group") or "" for row in SCREENS.values()}
+        layout = {**SCREEN_ORDER, "groups": order}
+    elif scope == "screens" and isinstance(data.get("group"), str):
+        group = data["group"]
+        expected = {key for key, row in SCREENS.items() if (row.get("group") or "") == group}
+        layout = {**SCREEN_ORDER, "screens": {**SCREEN_ORDER["screens"], group: order}}
+    else:
+        raise ValueError("Disposition invalide.")
+    if not order or len(order) != len(expected) or set(order) != expected:
+        return 409, {"error": "La liste des écrans a changé. Réessaie avec la liste à jour."}
+    temporary = SCREEN_ORDER_FILE.with_suffix(".tmp")
+    temporary.write_text(json.dumps(layout, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(SCREEN_ORDER_FILE)
+    SCREEN_ORDER.update(layout)
+    return 200, {"ok": True}
+
+
+def load_screen_order():
+    try:
+        layout = json.loads(SCREEN_ORDER_FILE.read_text(encoding="utf-8"))
+        groups = layout["groups"]
+        screens = layout["screens"]
+        if not isinstance(screens, dict):
+            raise ValueError("Disposition invalide.")
+        if not all(isinstance(order, list) and all(isinstance(key, str) for key in order)
+                   for order in (groups, *screens.values())):
+            raise ValueError("Disposition invalide.")
+        return {"groups": groups, "screens": screens}
+    except FileNotFoundError:
+        return {"groups": [], "screens": {}}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        print(f"Disposition des écrans : {error}", file=sys.stderr)
+        return {"groups": [], "screens": {}}
+
+
 def screen_media(row):
     state = row.get("media", {"enabled": False, "items": []})
     folder = row.get("media_folder", MEDIA_DEFAULT_FOLDER)
@@ -533,7 +577,8 @@ def diagnostic_report(payload):
         if isinstance(value, str):
             report[field] = value[:160]
     for field, maximum in (("cpu_pct", 100), ("cores", 4096), ("ram_total", 2**60),
-                           ("ram_used", 2**60), ("disk_total", 2**60), ("disk_free", 2**60)):
+                           ("ram_used", 2**60), ("disk_total", 2**60), ("disk_free", 2**60),
+                           ("disk_used", 2**60)):
         report[field] = bounded_number(payload.get(field), maximum)
     interfaces = payload.get("interfaces")
     if isinstance(interfaces, list):
@@ -605,6 +650,7 @@ class InterfaceTraffic:
     def __init__(self):
         self.lock = threading.Lock()
         self.rates = NetworkRates()
+        self.system = Diagnostic()
         self.refresh_at = 0
         self.result = {"interfaces": [], "available": False}
 
@@ -616,8 +662,9 @@ class InterfaceTraffic:
                 except (OSError, KeyError, ValueError, subprocess.SubprocessError):
                     counters = None
                 rows = self.rates.sample(counters)
+                stats = self.system.sample_system(MEDIA_ROOT if MEDIA_ROOT.is_dir() else ROOT)
                 self.result = {"interfaces": [row for row in rows or [] if row["connected"]],
-                               "available": rows is not None}
+                               "available": rows is not None, "diagnostic": diagnostic_report(stats)}
                 self.refresh_at = time.monotonic() + 2
             return self.result
 
@@ -791,6 +838,8 @@ class Request(BaseHTTPRequestHandler):
             return
         if path == "/api/media-preview":
             self.send_media(url.query, preview=True)
+        elif path == "/api/media-download":
+            self.send_media_archive(url.query)
         elif path == "/":
             self.reply(200, PAGE.replace(b"__REMOTE_ONLY__", b"" if remote else b"hidden"))
         elif remote and path == "/connexion":
@@ -830,14 +879,19 @@ class Request(BaseHTTPRequestHandler):
             key_exists = UPDATE_KEY.is_file()
             with LOCK:
                 rows = []
+                group_order = {name: index for index, name in enumerate(SCREEN_ORDER["groups"])}
+                screen_order = {name: {key: index for index, key in enumerate(order)}
+                                for name, order in SCREEN_ORDER["screens"].items()}
                 for key, row in SCREENS.items():
                     report = row.get("report", {})
+                    group = row.get("group") or ""
                     rows.append(dict(
                         id=key, name=row["name"], options=row.get("options"),
                         report=report, online=now - report.get("seen", 0) < ONLINE_AGE,
                         pairing=row.get("pairing") if now < row.get("pairing_until", 0) else None,
                         paired="token" in row, version=row.get("version", 0), kind=row.get("kind"),
                         group=row.get("group"), resolution_limit=row.get("resolution_limit"),
+                        group_order=group_order.get(group), screen_order=screen_order.get(group, {}).get(key),
                         resolution_sources=resolution_sources(row, now),
                         source_resolutions={source: resolution for source in report.get("sources", [])
                                             if (resolution := source_resolution(source))},
@@ -872,7 +926,11 @@ class Request(BaseHTTPRequestHandler):
                     print(error, flush=True)
                     self.reply(500, {"error": "Le fichier n’a pas pu être reçu ou enregistré par la régie."})
             return
-        limit = 4 * ((PREVIEW_LIMIT + 2) // 3) + 1024 if path == "/api/preview-result" else 16384
+        limit = 16384
+        if path == "/api/preview-result":
+            limit = 4 * ((PREVIEW_LIMIT + 2) // 3) + 1024
+        elif path == "/api/media-export":
+            limit = 512 * 1024
         if not 0 < length <= limit:
             self.reply(400, {"error": "Requête invalide."})
             return
@@ -1030,6 +1088,67 @@ class Request(BaseHTTPRequestHandler):
             except OSError:
                 pass
 
+    def prepare_media_export(self, data, now):
+        files = data.get("files")
+        if not isinstance(files, list) or not files:
+            raise ValueError("Sélectionne les fichiers à télécharger.")
+        catalogs = {}
+        selected = {}
+        for entry in files:
+            key, identifier = entry["id"], entry["file"]
+            if not isinstance(key, str) or not isinstance(identifier, str):
+                raise ValueError("Fichier média invalide.")
+            if key not in catalogs:
+                row = SCREENS.get(key)
+                catalogs[key] = {item["id"]: item for item in catalog_items(row)} if row and row.get("token") else {}
+            item = catalogs[key].get(identifier)
+            if item is None or not (MEDIA_ROOT / key / identifier).is_file():
+                return 404, {"error": "Un fichier sélectionné est indisponible."}
+            selected[key, identifier] = item["name"]
+        for token, (deadline, _) in tuple(MEDIA_EXPORTS.items()):
+            if deadline <= now:
+                del MEDIA_EXPORTS[token]
+        token = secrets.token_urlsafe(24)
+        MEDIA_EXPORTS[token] = now + 60, selected
+        return 200, {"url": "/api/media-download?token=" + token}
+
+    def send_media_archive(self, raw_query):
+        token = raw_query.removeprefix("token=")
+        with LOCK:
+            deadline, files = MEDIA_EXPORTS.pop(token, (0, {}))
+        if time.time() >= deadline:
+            self.reply(404, {"error": "Ce téléchargement a expiré. Relance-le depuis la médiathèque."})
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/zip")
+        self.send_header("Content-Disposition", 'attachment; filename="SoundLive-medias.zip"')
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        names = set()
+        missing = []
+        try:
+            with ZipFile(self.wfile, "w") as archive:
+                for (key, identifier), original in files.items():
+                    try:
+                        stream = (MEDIA_ROOT / key / identifier).open("rb")
+                    except OSError:
+                        missing.append(original)
+                        continue
+                    name = re.sub(r'[<>:"|?*]', "_", original)
+                    stem, suffix = Path(name).stem, Path(name).suffix
+                    serial = 2
+                    while name.casefold() in names:
+                        name = f"{stem} ({serial}){suffix}"
+                        serial += 1
+                    names.add(name.casefold())
+                    with media_stream(stream, key, identifier), archive.open(name, "w") as target:
+                        shutil.copyfileobj(stream, target, MEDIA_CHUNK)
+                if missing:
+                    archive.writestr("Fichiers indisponibles.txt", "\n".join(missing) + "\n")
+        except OSError:
+            pass
+
     def change_media(self, key, row, data):
         folders = media_folders(row).copy()
         active = row.get("media_folder", MEDIA_DEFAULT_FOLDER)
@@ -1072,6 +1191,24 @@ class Request(BaseHTTPRequestHandler):
                 raise ValueError("Ajoute d’abord une image ou une vidéo à ce dossier.")
             if enabled:
                 active = folder_id
+        elif action == "remove-files":
+            files = data.get("files")
+            if not isinstance(files, list) or not files or any(not isinstance(value, str) for value in files):
+                raise ValueError("Sélection de fichiers invalide.")
+            identifiers = set(files)
+            removed = [item for item in folder["items"] if item["id"] in identifiers]
+            if len(removed) != len(identifiers):
+                return 409, {"error": "Le contenu du dossier a changé. Réessaie avec la liste à jour."}
+            folders[folder_id] = {**folder, "items": [item for item in folder["items"] if item["id"] not in identifiers]}
+        elif action == "reorder":
+            source, _, item = media_location(folders, data["file"])
+            destination, _, anchor = media_location(folders, data["anchor"])
+            after = data.get("after")
+            if source != folder_id or destination != folder_id or item == anchor or type(after) is not bool:
+                raise ValueError("Déplacement invalide dans ce dossier.")
+            items = [current for current in folder["items"] if current["id"] != item["id"]]
+            items.insert(items.index(anchor) + after, item)
+            folders[folder_id] = {**folder, "items": items}
         elif action in ("remove-file", "move", "order"):
             source, index, item = media_location(folders, data["file"])
             original = folders[source]
@@ -1101,6 +1238,10 @@ class Request(BaseHTTPRequestHandler):
 
     def apply(self, path, data):
         now = time.time()
+        if path == "/api/screen-order":
+            return order_screens(data)
+        if path == "/api/media-export":
+            return self.prepare_media_export(data, now)
         if path == "/api/preview":
             return request_preview(data, now)
         if path in ("/api/group", "/api/client-updates", "/api/screen-groups"):
@@ -1216,11 +1357,18 @@ class Request(BaseHTTPRequestHandler):
                 cached = cached_media.get("cached")
                 cached = [i for i in cached[:MEDIA_LIBRARY_LIMIT] if isinstance(i, str)
                           and re.fullmatch(r"[a-f0-9]{32}", i)] if isinstance(cached, list) else []
+                transfer = cached_media.get("transfer")
+                if (not isinstance(transfer, dict) or not isinstance(transfer.get("id"), str)
+                        or not re.fullmatch(r"[a-f0-9]{32}", transfer["id"])
+                        or type(transfer.get("received")) is not int or not 0 <= transfer["received"] <= MEDIA_FILE_LIMIT):
+                    transfer = None
+                else:
+                    transfer = dict(id=transfer["id"], received=transfer["received"])
                 cached_media = dict(
                     revision=revision if isinstance(revision, str) and SAFE_ID.fullmatch(revision) else None,
                     error=str(cached_media.get("error") or "")[:240],
                     local=cached_media.get("local") is True,
-                    disk=disk, cached=cached,
+                    disk=disk, cached=cached, transfer=transfer,
                 )
             else:
                 cached_media = None
@@ -1345,6 +1493,8 @@ class Regie:
                         row["options"].setdefault("orientation", "landscape")
                 SCREENS.clear()
                 SCREENS.update(screens)
+                SCREEN_ORDER.update(load_screen_order())
+                MEDIA_EXPORTS.clear()
                 CLIENT_UPDATES.clear()
                 LATENCY_TESTS.clear()
                 PREVIEWS.clear()
