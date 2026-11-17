@@ -7,17 +7,21 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import re
+import shutil
 import sys
 
 DEFAULT_SOURCE = "OBS (Programme)"
 APP_NAME = "SoundLive-NDI"
 COPYRIGHT = "© 2026 Société SoundLive"
-SOFTWARE_VERSION = "1.4.22"
+SOFTWARE_VERSION = "1.4.23"
 PREVIEW_LIMIT = 160 * 1024
 ORIENTATIONS = ("landscape", "portrait-left", "portrait-right")
 MEDIA_FILE_LIMIT = 256 * 1024 * 1024
 MEDIA_TOTAL_LIMIT = 1024 * 1024 * 1024
 MEDIA_COUNT_LIMIT = 20
+MEDIA_FOLDER_LIMIT = 32
+MEDIA_LIBRARY_LIMIT = 128
+MEDIA_DISK_PERCENT = 80
 MEDIA_CHUNK = 128 * 1024
 MEDIA_EXTENSIONS = {
     ".jpg": "image2", ".jpeg": "image2", ".png": "image2",
@@ -33,11 +37,8 @@ def media_name(name):
     return name
 
 
-def media_config(value):
-    if not isinstance(value, dict) or type(value.get("enabled")) is not bool:
-        raise ValueError("Mode de lecture locale invalide.")
-    items = value.get("items")
-    if not isinstance(items, list) or len(items) > MEDIA_COUNT_LIMIT:
+def media_items(items, limit):
+    if not isinstance(items, list) or len(items) > limit:
         raise ValueError("Liste de médias invalide.")
     verified = []
     for item in items:
@@ -47,15 +48,31 @@ def media_config(value):
                 type(size) is not int or not 0 < size <= MEDIA_FILE_LIMIT):
             raise ValueError("Fichier média invalide.")
         verified.append(dict(id=identifier, sha256=checksum, size=size, name=media_name(item["name"])))
-    if sum(item["size"] for item in verified) > MEDIA_TOTAL_LIMIT:
-        raise ValueError("Liste de médias trop volumineuse.")
     if len({item["id"] for item in verified}) != len(verified):
         raise ValueError("Liste de médias en double.")
+    return verified
+
+
+def media_config(value):
+    if not isinstance(value, dict) or type(value.get("enabled")) is not bool:
+        raise ValueError("Mode de lecture locale invalide.")
+    verified = media_items(value.get("items"), MEDIA_COUNT_LIMIT)
+    if sum(item["size"] for item in verified) > MEDIA_TOTAL_LIMIT:
+        raise ValueError("Liste de médias trop volumineuse.")
     return dict(enabled=value["enabled"] and bool(verified), items=verified)
 
 
 def media_revision(config):
     return sha256(json.dumps(config, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def media_disk(path):
+    total, used, free = shutil.disk_usage(path)
+    return dict(total=total, used=used, free=free)
+
+
+def media_available(disk):
+    return max(0, min(disk["free"], disk["total"] * MEDIA_DISK_PERCENT // 100 - disk["used"]))
 
 
 @contextmanager

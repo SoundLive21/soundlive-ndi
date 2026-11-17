@@ -25,9 +25,9 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
-from commun import (APP_NAME, COPYRIGHT, DEFAULT_SOURCE, MEDIA_CHUNK, MEDIA_EXTENSIONS,
+from commun import (APP_NAME, COPYRIGHT, DEFAULT_SOURCE, MEDIA_CHUNK, MEDIA_EXTENSIONS, MEDIA_LIBRARY_LIMIT,
                     ORIENTATIONS, PREVIEW_LIMIT, SOFTWARE_VERSION, client_lock,
-                    media_config, media_revision, options, release_number)
+                    media_available, media_config, media_disk, media_items, media_revision, options, release_number)
 from diagnostic import Diagnostic
 from mise_a_jour import ClientUpdate, FULL_LIMIT, RESTART, digest, engine_name, update_target
 
@@ -947,6 +947,7 @@ class LocalMedia:
         except (OSError, ValueError, KeyError, TypeError):
             pass
         self.desired = None
+        self.catalog = None
         self.request = None
         self.retry_at = 0
         self.error = ""
@@ -968,12 +969,14 @@ class LocalMedia:
     def path(self, item):
         return self.folder / (item["id"] + Path(item["name"]).suffix.lower())
 
-    def receive(self, value):
+    def receive(self, value, catalog=None):
         if value is None:
             return
         desired = media_config(value)
-        if desired != self.desired:
+        library = media_items(catalog, MEDIA_LIBRARY_LIMIT) if catalog is not None else desired["items"]
+        if desired != self.desired or library != self.catalog:
             self.desired = desired
+            self.catalog = library
             self.retry_at = 0
 
     def report(self):
@@ -981,7 +984,14 @@ class LocalMedia:
         items = (self.desired or self.applied)["items"]
         if not error and self.needs_ffplay(items) and not self.ffplay:
             error = self.missing_ffplay()
-        return dict(revision=media_revision(self.applied), error=error, local=self.enabled)
+        try:
+            disk = media_disk(self.folder if self.folder.is_dir() else STATE)
+        except OSError:
+            disk = None
+        catalog = self.catalog if self.catalog is not None else self.applied["items"]
+        cached = [item["id"] for item in catalog if self.downloaded(item)]
+        return dict(revision=media_revision(self.applied), error=error, local=self.enabled,
+                    disk=disk, cached=cached)
 
     def needs_ffplay(self, items):
         return any(WINDOWS or MEDIA_EXTENSIONS[self.path(item).suffix] != "image2" for item in items)
@@ -991,13 +1001,24 @@ class LocalMedia:
         return ("FFplay est absent. Rends ffplay.exe accessible au lecteur."
                 if WINDOWS else "FFplay est absent. Installe FFmpeg pour lire les vidéos locales.")
 
-    def synchronize(self, config):
+    def downloaded(self, item):
+        path = self.path(item)
+        try:
+            return path.is_file() and path.stat().st_size == item["size"]
+        except OSError:
+            return False
+
+    def synchronize(self, items):
         self.folder.mkdir(parents=True, exist_ok=True)
         opener = build_opener(NoRedirect)
-        for item in config["items"]:
+        for item in items:
+            if self.closed.is_set():
+                return
             target = self.path(item)
-            if target.is_file() and target.stat().st_size == item["size"]:
+            if self.downloaded(item):
                 continue
+            if item["size"] > media_available(media_disk(self.folder)):
+                raise ValueError("Le fichier ferait dépasser le seuil de 80 % du disque du lecteur.")
             temporary = target.with_suffix(".part")
             query = urlencode({"id": self.identity["id"], "file": item["id"]})
             request = Request(self.identity["server"] + "/api/client-media?" + query,
@@ -1010,6 +1031,8 @@ class LocalMedia:
                         data = response.read(min(MEDIA_CHUNK, remaining))
                         if not data:
                             break
+                        if len(data) > media_available(media_disk(self.folder)):
+                            raise ValueError("Le disque du lecteur a atteint le seuil de 80 %.")
                         handle.write(data)
                         checksum.update(data)
                         remaining -= len(data)
@@ -1018,35 +1041,49 @@ class LocalMedia:
                 temporary.replace(target)
             finally:
                 temporary.unlink(missing_ok=True)
-        return config
-
     def tick(self):
         now = time.monotonic()
         changed = False
         if self.request and self.request.done():
             try:
-                config = self.request.result()
-                if config == self.desired:
-                    write_json(self.manifest, config)
+                self.request.result()
             except (OSError, HTTPException, ValueError) as error:
                 self.error = f"Transfert des médias : {error}"
                 self.retry_at = now + 8
             else:
-                if config == self.desired:
-                    changed = config != self.applied and (self.enabled or config["enabled"])
-                    self.applied, self.error = config, ""
-                    if changed:
-                        self.index = 0
-                        self.play_error = ""
+                self.error = ""
             self.request = None
-        if self.desired is not None and not self.request and now >= self.retry_at:
-            if self.desired != self.applied or any(not self.path(item).is_file() for item in self.desired["items"]):
-                self.request = self.executor.submit(self.synchronize, self.desired)
+        desired = self.desired
+        if desired is None:
+            return False
+        if desired != self.applied and (not desired["enabled"] or all(map(self.downloaded, desired["items"]))):
+            try:
+                self.folder.mkdir(parents=True, exist_ok=True)
+                write_json(self.manifest, desired)
+            except OSError as error:
+                self.error = f"Enregistrement de la lecture locale : {error}"
+            else:
+                changed = self.enabled or desired["enabled"]
+                self.applied = desired
+                if changed:
+                    self.index = 0
+                    self.play_error = ""
+        if not self.request and now >= self.retry_at:
+            self.prune()
+            selected = {item["id"] for item in desired["items"]}
+            pending = [item for item in self.catalog if not self.downloaded(item)]
+            if pending:
+                pending.sort(key=lambda item: item["id"] not in selected)
+                self.request = self.executor.submit(self.synchronize, pending)
+            elif self.error and self.error.startswith("Transfert des médias :"):
+                self.error = ""
+            if not pending:
+                self.retry_at = now + 4
         return changed
 
     def prune(self):
-        if self.folder.is_dir() and not self.request:
-            kept = {self.path(item) for item in self.applied["items"]}
+        if self.catalog is not None and self.folder.is_dir() and not self.request:
+            kept = {self.path(item) for item in (*self.applied["items"], *self.catalog)}
             for path in self.folder.iterdir():
                 if path.suffix in MEDIA_EXTENSIONS and path not in kept:
                     try:
@@ -1760,7 +1797,7 @@ def desktop():
 
         def apply(self, result):
             new = options(result["options"])
-            self.media.receive(result.get("media"))
+            self.media.receive(result.get("media"), result.get("media_catalog"))
             message = waiting_update_message(result.get("reader_update"))
             self.update_label.set_text(message)
             self.update_label.set_visible(bool(message))
@@ -1946,7 +1983,7 @@ def run_windows_screen(tk, log):
                 try:
                     answer = finished.result()
                     new = options(answer["options"])
-                    media.receive(answer.get("media"))
+                    media.receive(answer.get("media"), answer.get("media_catalog"))
                     if new != settings:
                         write_json(LAST_SETTINGS, new)
                         playback_changed = new != {**settings, "orientation": new["orientation"]}

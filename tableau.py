@@ -5,6 +5,7 @@
 # Société SoundLive
 import argparse
 from base64 import b64decode
+from contextlib import contextmanager
 from hashlib import sha256
 import hmac
 from html import escape
@@ -26,20 +27,27 @@ from urllib.parse import parse_qs, urlsplit
 
 from acces_regie import (PORT as REMOTE_PORT, SESSION_COOKIE, SESSION_WARNING, USERNAME,
                          RemoteConnections, RemoteDashboard, prepare_access)
-from commun import (APP_NAME, MEDIA_CHUNK, MEDIA_COUNT_LIMIT, MEDIA_FILE_LIMIT, MEDIA_TOTAL_LIMIT,
+from commun import (APP_NAME, MEDIA_CHUNK, MEDIA_COUNT_LIMIT, MEDIA_FILE_LIMIT, MEDIA_FOLDER_LIMIT,
+                    MEDIA_LIBRARY_LIMIT, MEDIA_TOTAL_LIMIT,
                     ORIENTATIONS, PREVIEW_LIMIT, SOFTWARE_VERSION as CLIENT_VERSION,
-                    media_config, media_name, media_revision, options, release_number)
+                    media_available, media_config, media_disk, media_name, media_revision, options, release_number)
 from diagnostic import NetworkRates, network_info
 from mise_a_jour import ENGINE_ASSETS, SAFE_ID, contents, digest, engine_name, full_contents, package, prepare_key
 from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.32"
+SOFTWARE_VERSION = "1.4.33"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
 MEDIA_ROOT = ROOT / ".soundlive-medias"
+MEDIA_WRITE_LOCK = threading.Lock()
+MEDIA_DEFAULT_FOLDER = "general"
+MEDIA_TYPES = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".mp4": "video/mp4",
+    ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".mkv": "video/x-matroska",
+}
 REMOTE_ACCESS = ROOT / ".soundlive-acces"
 PAGE = ((ROOT / "tableau.html").read_bytes()
         .replace(b"__SOFTWARE_VERSION__", SOFTWARE_VERSION.encode("ascii"))
@@ -407,30 +415,97 @@ def save():
 
 
 def screen_media(row):
-    return row.get("media", {"enabled": False, "items": []})
+    state = row.get("media", {"enabled": False, "items": []})
+    folder = row.get("media_folder", MEDIA_DEFAULT_FOLDER)
+    return dict(enabled=state["enabled"], items=media_folders(row)[folder]["items"])
 
 
-def save_media(row, config, *, resume=False):
-    previous = row.get("media")
+def media_folders(row):
+    return row.get("media_folders") or {MEDIA_DEFAULT_FOLDER: dict(
+        name="Général", items=row.get("media", {}).get("items", []))}
+
+
+def catalog_items(row):
+    return [item for folder in media_folders(row).values() for item in folder["items"]]
+
+
+def save_media(row, folders, active, enabled, *, resume=False):
+    fields = ("media", "media_folders", "media_folder")
+    previous = {field: row[field] for field in fields if field in row}
     settings, version = row["options"], row["version"]
-    row["media"] = media_config(config)
+    row.update(media_folders=folders, media_folder=active,
+               media=media_config(dict(enabled=enabled, items=folders[active]["items"])))
     if resume and not settings["enabled"]:
         row.update(options={**settings, "enabled": True}, version=version + 1)
     try:
         save()
     except OSError:
         row.update(options=settings, version=version)
-        if previous is None:
-            row.pop("media", None)
-        else:
-            row["media"] = previous
+        for field in fields:
+            row.pop(field, None)
+        row.update(previous)
         raise
 
 
-def media_quota(config, length):
-    if (len(config["items"]) >= MEDIA_COUNT_LIMIT or
-            sum(item["size"] for item in config["items"]) + length > MEDIA_TOTAL_LIMIT):
-        raise ValueError("Cet écran peut recevoir jusqu’à 20 fichiers et 1 Gio au total.")
+def media_capacity(row):
+    report = row.get("report", {}).get("media_status") or {}
+    disk = report.get("disk")
+    if not disk:
+        return None
+    cached = set(report.get("cached", []))
+    pending = sum(item["size"] for item in catalog_items(row) if item["id"] not in cached)
+    return {**disk, "available": max(0, media_available(disk) - pending), "pending": pending}
+
+
+def media_quota(row, folder, length):
+    items = folder["items"]
+    if len(items) >= MEDIA_COUNT_LIMIT or sum(item["size"] for item in items) + length > MEDIA_TOTAL_LIMIT:
+        raise ValueError("Un dossier peut contenir jusqu’à 20 fichiers et 1 Gio.")
+    if len(catalog_items(row)) >= MEDIA_LIBRARY_LIMIT:
+        raise ValueError("Ce lecteur a atteint la limite de 128 fichiers.")
+    disk = media_capacity(row)
+    if disk is None:
+        raise ValueError("Espace disque du lecteur inconnu. Connecte un lecteur à jour avant d’ajouter des fichiers.")
+    if length > disk["available"]:
+        raise ValueError("Ce fichier ferait dépasser le seuil de 80 % sur le lecteur.")
+
+
+def media_location(folders, identifier):
+    for folder, data in folders.items():
+        for index, item in enumerate(data["items"]):
+            if item["id"] == identifier:
+                return folder, index, item
+    raise ValueError("Ce média ne figure plus dans la médiathèque.")
+
+
+@contextmanager
+def media_stream(stream, key, identifier):
+    try:
+        with stream:
+            yield
+    finally:
+        # Windows peut refuser l’effacement tant qu’un aperçu tient le fichier ouvert.
+        with LOCK:
+            row = SCREENS.get(key)
+            if row is None or not any(item["id"] == identifier for item in catalog_items(row)):
+                try:
+                    (MEDIA_ROOT / key / identifier).unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+
+def media_bytes_range(value, size):
+    if value is None:
+        return 0, size - 1
+    match = re.fullmatch(r"bytes=(\d{0,15})-(\d{0,15})", value)
+    if not match or not any(match.groups()):
+        raise ValueError("Plage invalide.")
+    lo, hi = match.groups()
+    if not lo and int(hi) > 0:
+        return max(0, size - int(hi)), size - 1
+    if lo and int(lo) < size and (not hi or int(hi) >= int(lo)):
+        return int(lo), min(int(hi), size - 1) if hi else size - 1
+    raise ValueError("Plage invalide.")
 
 def token_matches(candidate, expected):
     return isinstance(candidate, str) and hmac.compare_digest(candidate.encode(), expected.encode())
@@ -707,11 +782,13 @@ class Request(BaseHTTPRequestHandler):
         path = url.path
         remote = getattr(self.server, "remote_dashboard", False)
         if path == "/api/client-media":
-            self.send_media(url.query)
+            self.send_media(url.query, preview=False)
             return
         if not self.dashboard(path):
             return
-        if path == "/":
+        if path == "/api/media-preview":
+            self.send_media(url.query, preview=True)
+        elif path == "/":
             self.reply(200, PAGE.replace(b"__REMOTE_ONLY__", b"" if remote else b"hidden"))
         elif remote and path == "/connexion":
             notice = LOGIN_NOTICES.get(url.query.removeprefix("etat="), "")
@@ -764,8 +841,13 @@ class Request(BaseHTTPRequestHandler):
                         client_update=update_view(key, report, now),
                         update_availability=update_availability(report, now, key_exists),
                         media=screen_media(row), media_revision=media_revision(screen_media(row)),
+                        media_folders=media_folders(row), media_folder=row.get("media_folder", MEDIA_DEFAULT_FOLDER),
+                        media_disk=media_capacity(row),
                     ))
             self.reply(200, rows)
+        elif path == "/api/media-storage":
+            disk = media_disk(MEDIA_ROOT if MEDIA_ROOT.is_dir() else ROOT)
+            self.reply(200, {**disk, "available": media_available(disk)})
         else:
             self.reply(404, {"error": "Page introuvable."})
 
@@ -835,13 +917,19 @@ class Request(BaseHTTPRequestHandler):
             raise ValueError("Envoie un fichier non vide de 256 Mio maximum.")
         query = parse_qs(raw_query, max_num_fields=3)
         key, name = query["id"][0], media_name(query["name"][0])
+        folder_id = query.get("folder", [MEDIA_DEFAULT_FOLDER])[0]
         with LOCK:
             row = SCREENS.get(key)
             if not row or not row.get("token"):
                 raise ValueError("Cet écran doit être associé.")
-            media_quota(screen_media(row), length)
+            folder = media_folders(row).get(folder_id)
+            if folder is None:
+                raise ValueError("Ce dossier n’existe plus.")
+            media_quota(row, folder, length)
         MEDIA_ROOT.mkdir(mode=0o700, exist_ok=True)
-        with NamedTemporaryFile(dir=MEDIA_ROOT, delete=False) as handle:
+        if length > media_available(media_disk(MEDIA_ROOT)):
+            raise ValueError("Ce fichier ferait dépasser le seuil de 80 % sur la régie.")
+        with NamedTemporaryFile(dir=MEDIA_ROOT, delete=False, buffering=0) as handle:
             staged = Path(handle.name)
             checksum = sha256()
             try:
@@ -850,23 +938,30 @@ class Request(BaseHTTPRequestHandler):
                     data = self.rfile.read(min(remaining, MEDIA_CHUNK))
                     if not data:
                         raise ValueError("Le transfert du fichier a été interrompu.")
-                    handle.write(data)
+                    with MEDIA_WRITE_LOCK:
+                        if len(data) > media_available(media_disk(MEDIA_ROOT)):
+                            raise ValueError("Le disque de la régie a atteint le seuil de 80 %.")
+                        handle.write(data)
                     checksum.update(data)
                     remaining -= len(data)
                 handle.close()
                 with LOCK:
                     if SCREENS.get(key) is not row:
                         raise ValueError("Cet écran a été retiré pendant le transfert.")
-                    config = screen_media(row)
-                    media_quota(config, length)
+                    folders = media_folders(row)
+                    folder = folders.get(folder_id)
+                    if folder is None:
+                        raise ValueError("Ce dossier a été supprimé pendant le transfert.")
+                    media_quota(row, folder, length)
                     identifier = secrets.token_hex(16)
-                    folder = MEDIA_ROOT / key
-                    folder.mkdir(mode=0o700, exist_ok=True)
-                    destination = folder / identifier
+                    directory = MEDIA_ROOT / key
+                    directory.mkdir(mode=0o700, exist_ok=True)
+                    destination = directory / identifier
                     staged.replace(destination)
                     item = dict(id=identifier, name=name, size=length, sha256=checksum.hexdigest())
                     try:
-                        save_media(row, {**config, "items": [*config["items"], item]})
+                        folders = {**folders, folder_id: {**folder, "items": [*folder["items"], item]}}
+                        save_media(row, folders, row.get("media_folder", MEDIA_DEFAULT_FOLDER), screen_media(row)["enabled"])
                     except (OSError, ValueError):
                         destination.unlink(missing_ok=True)
                         raise
@@ -875,8 +970,8 @@ class Request(BaseHTTPRequestHandler):
                 staged.unlink(missing_ok=True)
         self.reply(201, item)
 
-    def send_media(self, raw_query):
-        if getattr(self.server, "remote_dashboard", False):
+    def send_media(self, raw_query, *, preview):
+        if not preview and getattr(self.server, "remote_dashboard", False):
             self.reply(404, {"error": "Utilise le port d’association du récepteur."})
             return
         try:
@@ -888,8 +983,8 @@ class Request(BaseHTTPRequestHandler):
         with LOCK:
             row = SCREENS.get(key)
             token = row and row.get("token")
-            allowed = token and token_matches(self.headers.get("Authorization"), "Bearer " + token)
-            item = next((item for item in screen_media(row)["items"] if item["id"] == identifier), None) if allowed else None
+            allowed = token and (preview or token_matches(self.headers.get("Authorization"), "Bearer " + token))
+            item = next((item for item in catalog_items(row) if item["id"] == identifier), None) if allowed else None
             try:
                 stream = (MEDIA_ROOT / key / identifier).open("rb") if item else None
             except OSError:
@@ -897,15 +992,101 @@ class Request(BaseHTTPRequestHandler):
         if not stream:
             self.reply(404 if allowed else 403, {"error": "Fichier média indisponible."})
             return
-        with stream:
-            self.send_response(200)
-            self.send_header("Content-Type", "application/octet-stream")
-            self.send_header("Content-Length", str(item["size"]))
+        with media_stream(stream, key, identifier):
+            byte_range = self.headers.get("Range") if preview else None
+            try:
+                start, end = media_bytes_range(byte_range, item["size"])
+            except ValueError:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{item['size']}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            self.send_response(206 if byte_range else 200)
+            self.send_header("Content-Type", MEDIA_TYPES[Path(item["name"]).suffix.lower()] if preview else "application/octet-stream")
+            self.send_header("Content-Length", str(end - start + 1))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            if preview:
+                self.send_header("Accept-Ranges", "bytes")
+            if byte_range:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{item['size']}")
             self.end_headers()
             try:
-                shutil.copyfileobj(stream, self.wfile, MEDIA_CHUNK)
+                stream.seek(start)
+                remaining = end - start + 1
+                while remaining:
+                    chunk = stream.read(min(MEDIA_CHUNK, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
             except OSError:
                 pass
+
+    def change_media(self, key, row, data):
+        folders = media_folders(row).copy()
+        active = row.get("media_folder", MEDIA_DEFAULT_FOLDER)
+        enabled = screen_media(row)["enabled"]
+        action = data.get("action", "play" if "enabled" in data else "remove-file")
+        folder_id = data.get("folder", active)
+        if not isinstance(folder_id, str) or folder_id not in folders:
+            raise ValueError("Ce dossier n’existe plus.")
+        folder = folders[folder_id]
+        removed = []
+        if action in ("create", "rename"):
+            name = safe_text(data["name"], 64)
+            if not name.isprintable():
+                raise ValueError("Nom de dossier invalide.")
+            if any(entry["name"].casefold() == name.casefold() for identifier, entry in folders.items()
+                   if action == "create" or identifier != folder_id):
+                raise ValueError("Un dossier porte déjà ce nom.")
+            if action == "create":
+                if len(folders) >= MEDIA_FOLDER_LIMIT:
+                    raise ValueError("Ce lecteur a atteint la limite de 32 dossiers.")
+                folder_id = secrets.token_hex(8)
+                folder = dict(items=[])
+            folders[folder_id] = {**folder, "name": name}
+        elif action == "remove-folder":
+            if folder_id == MEDIA_DEFAULT_FOLDER:
+                raise ValueError("Le dossier par défaut peut être renommé.")
+            removed = folder["items"]
+            del folders[folder_id]
+            if folder_id == active:
+                active, enabled = MEDIA_DEFAULT_FOLDER, False
+        elif action == "play":
+            enabled = data["enabled"]
+            if type(enabled) is not bool:
+                raise ValueError("Mode de lecture locale invalide.")
+            if enabled and not folder["items"]:
+                raise ValueError("Ajoute d’abord une image ou une vidéo à ce dossier.")
+            if enabled:
+                active = folder_id
+        elif action in ("remove-file", "move", "order"):
+            source, index, item = media_location(folders, data["file"])
+            original = folders[source]
+            items = list(original["items"])
+            if action == "order":
+                delta = data["delta"]
+                if type(delta) is not int or delta not in (-1, 1) or not 0 <= index + delta < len(items):
+                    raise ValueError("Ce fichier est déjà au bord de la liste.")
+                items[index], items[index + delta] = items[index + delta], items[index]
+            elif action == "remove-file":
+                removed = [items.pop(index)]
+            elif source != folder_id:
+                candidate = [*folder["items"], items.pop(index)]
+                media_config(dict(enabled=False, items=candidate))
+                folders[folder_id] = {**folder, "items": candidate}
+            folders[source] = {**original, "items": items}
+        else:
+            raise ValueError("Action média inconnue.")
+        save_media(row, folders, active, enabled, resume=action == "play" and enabled)
+        for item in removed:
+            try:
+                (MEDIA_ROOT / key / item["id"]).unlink(missing_ok=True)
+            except OSError as error:
+                print(error, flush=True)
+        return 200, {"media": screen_media(row), "folder": folder_id}
 
     def apply(self, path, data):
         now = time.time()
@@ -1017,10 +1198,18 @@ class Request(BaseHTTPRequestHandler):
             cached_media = data.get("media_status")
             if isinstance(cached_media, dict):
                 revision = cached_media.get("revision")
+                disk = cached_media.get("disk")
+                if (not isinstance(disk, dict) or any(type(disk.get(k)) is not int or disk[k] < 0
+                        for k in ("total", "used", "free")) or disk["total"] <= 0 or disk["used"] + disk["free"] > disk["total"]):
+                    disk = None
+                cached = cached_media.get("cached")
+                cached = [i for i in cached[:MEDIA_LIBRARY_LIMIT] if isinstance(i, str)
+                          and re.fullmatch(r"[a-f0-9]{32}", i)] if isinstance(cached, list) else []
                 cached_media = dict(
                     revision=revision if isinstance(revision, str) and SAFE_ID.fullmatch(revision) else None,
                     error=str(cached_media.get("error") or "")[:240],
                     local=cached_media.get("local") is True,
+                    disk=disk, cached=cached,
                 )
             else:
                 cached_media = None
@@ -1055,6 +1244,7 @@ class Request(BaseHTTPRequestHandler):
                             if item["reader"] == key and item["state"] == "pending"), None)
             return 200, dict(options=row["options"],
                              media=screen_media(row),
+                             media_catalog=catalog_items(row),
                              preview_request=preview,
                              waiting=dict(name=row["name"], group=row.get("group"),
                                           qr=getattr(self.server, "waiting_qr", None)),
@@ -1068,24 +1258,7 @@ class Request(BaseHTTPRequestHandler):
             remove_screens({key: row})
             return 200, {"ok": True}
         elif path == "/api/media-settings" and row.get("token"):
-            config = screen_media(row)
-            if "enabled" in data:
-                if type(data["enabled"]) is not bool:
-                    raise ValueError("Mode de lecture locale invalide.")
-                if data["enabled"] and not config["items"]:
-                    raise ValueError("Ajoute d’abord une image ou une vidéo.")
-                save_media(row, {**config, "enabled": data["enabled"]}, resume=data["enabled"])
-            else:
-                identifier = data["file"]
-                remaining = [item for item in config["items"] if item["id"] != identifier]
-                if len(remaining) == len(config["items"]):
-                    return 404, {"error": "Ce fichier n’est plus dans la liste."}
-                save_media(row, {**config, "items": remaining})
-                try:
-                    (MEDIA_ROOT / key / identifier).unlink(missing_ok=True)
-                except OSError as error:
-                    print(error, flush=True)
-            return 200, {"media": screen_media(row)}
+            return self.change_media(key, row, data)
         elif path == "/api/latency":
             report = row.get("report", {})
             if now - report.get("seen", 0) >= ONLINE_AGE:

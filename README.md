@@ -252,25 +252,40 @@ bascule.
 
 ## Utiliser le tableau de régie
 
-### Envoyer des médias à un écran
+### Organiser et lire des images et des vidéos
 
-Avec la régie **1.4.30** et les lecteurs **1.4.20**, ouvre la fiche de
-l’écran, puis **Commandes et réglages → Médias locaux**. Sélectionne
-les fichiers, clique sur **Envoyer les fichiers**, puis sur **Lancer la
-lecture locale**. Le portable ou le Pi reçoit les fichiers en arrière-plan.
-Le lecteur reste connecté à la régie pendant la lecture locale. À partir de
-la régie **1.4.32**, **Lancer la lecture locale** reprend aussi la lecture
-si l’écran avait été arrêté. Attends de voir **Lecture locale en cours**
-avant de couper le réseau.
+Avec la régie **1.4.33** et le client **1.4.23**, ouvre **Images et vidéos**
+dans les commandes d’un écran. Pour la même opération sur plusieurs
+lecteurs, sélectionne-les dans **Actions de groupe → Gérer les images et
+vidéos autonomes**. La fenêtre propose les dossiers communs au groupe.
+Créer un dossier depuis cette fenêtre le rend disponible sur chaque écran
+sélectionné. Les médias des versions précédentes se retrouvent dans
+**Général**.
 
-Le lecteur lit sa liste en boucle, dans l’ordre d’ajout. Avec plusieurs
+Utilise la fenêtre pour créer ou renommer un dossier, envoyer, déplacer ou
+supprimer des fichiers, modifier leur ordre et ouvrir l’aperçu d’une image
+ou d’une vidéo. Pour une vidéo, l’aperçu dépend des formats décodés par ton
+navigateur. Tu peux télécharger le fichier original à partir de la fenêtre.
+**Lancer ce dossier** lance la liste choisie en boucle, y compris sur un
+lecteur en ligne ou précédemment arrêté. Les lecteurs téléchargent leurs
+fichiers en arrière-plan. Attends **Lecture locale en cours** avant de
+couper le réseau.
+
+Le lecteur lit le dossier dans l’ordre affiché. Avec plusieurs
 médias, chaque image reste dix secondes et chaque vidéo est lue jusqu’à sa
 fin. Une image seule reste affichée. Après un redémarrage, le lecteur reprend
 la liste depuis le début avec les fichiers déjà présents. Le bouton
 **Revenir à la diffusion NDI** rétablit la source NDI enregistrée.
 
-Formats acceptés : JPG, PNG, MP4, M4V, MOV, MKV et WebM. Limites par écran :
-20 fichiers, 256 Mio par fichier et 1 Gio au total. Pour un Raspberry Pi
+La fenêtre indique l’espace libre sur la régie et sur chaque lecteur.
+L’ajout est bloqué si les fichiers feraient dépasser **80 % d’occupation**
+sur la régie ou le lecteur. Le lecteur vérifie aussi son espace réel lors
+de la copie. Après un redémarrage de la régie, connecte les lecteurs pour
+qu’ils lui remontent leur espace disque.
+
+Formats acceptés : JPG, PNG, MP4, M4V, MOV, MKV et WebM. Limites : 32
+dossiers et 128 fichiers par écran, 20 fichiers et 1 Gio par dossier,
+256 Mio par fichier. Pour un Raspberry Pi
 3 B+, un MP4 H.264 en 720p à 25 i/s permet de commencer avec un fichier
 adapté à ses capacités. À partir du lecteur **1.4.21**, Raspberry Pi OS et
 Ubuntu affichent les JPG et PNG avec GTK, en respectant l’orientation EXIF
