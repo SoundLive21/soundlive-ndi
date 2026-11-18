@@ -532,6 +532,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       </label>
       <label><span>Volume <output></output></span><input class="volume" type="range" min="0" max="100"></label>
       <label class="check"><input type="checkbox" class="muted"> Couper le son</label>
+      <button class="return-ndi primary full-action" type="button" hidden>Revenir à la diffusion NDI</button>
       <button class="manage-media full-action" type="button" hidden aria-haspopup="dialog">Images et vidéos</button>
       <div class="action-row"><button class="primary" type="submit">Appliquer</button><button class="toggle" type="button"></button></div>
       <div class="action-row"><button class="reboot" type="button">Redémarrer</button><button class="poweroff" type="button">Éteindre</button></div>
@@ -1722,6 +1723,7 @@ async function mediaBatch(targets, perform, done, preferFolder) {
 const selectedMediaFolder = () => mediaGroups(mediaRows()).get(mediaFolders.value);
 const selectedMediaEntry = () => mediaEntries(selectedMediaFolder()).get(mediaFileKey);
 const mediaChange = (target, data) => call("/api/media-settings",{id:target.row.id,folder:target.id,...data});
+const returnToNdi = row => call("/api/media-settings",{id:row.id,action:"play",enabled:false});
 
 async function reorderMedia(sourceKey, destinationKey) {
   const entries = mediaEntries(selectedMediaFolder());
@@ -1856,7 +1858,7 @@ mediaNameForm.onsubmit = action(async () => {
 select(mediaDialog,"#media-launch").onclick = action(() =>
   mediaBatch(selectedMediaFolder().targets,target=>mediaChange(target,{action:"play",enabled:true}),"Lecture demandée"));
 select(mediaDialog,"#media-ndi").onclick = action(() =>
-  mediaBatch(selectedMediaFolder().targets,target=>mediaChange(target,{action:"play",enabled:false}),"Retour au NDI demandé"));
+  mediaBatch(selectedMediaFolder().targets,({row})=>returnToNdi(row),"Retour au NDI demandé"));
 select(mediaDialog,"#media-empty-all").onclick = action(() => {
   const targets = mediaRows().map(row => ({row, count:mediaFileCount(row)})).filter(({count}) => count > 0);
   if (mediaBusy || !targets.length) return;
@@ -1991,7 +1993,7 @@ function cardFor(id) {
   const el = document.querySelector("#card").content.firstElementChild.cloneNode(true);
   const form = select(el, ".config");
   const fields = ["ndi-sources","source","bandwidth","volume","orientation","orientation-status","muted","toggle","reboot","poweroff",
-                  "pending","badge","address","error","remove","info","metrics","connection","cpu","ram","disk",
+                  "return-ndi","pending","badge","address","error","remove","info","metrics","connection","cpu","ram","disk",
                   "screen-traffic","rate-rx","rate-tx","traffic-interface-label"];
   const ui = Object.fromEntries(fields.map(key => [key, select(el, "."+key)]));
   ui["orientation-status"].id = "orientation-status-" + id;
@@ -2010,6 +2012,17 @@ function cardFor(id) {
   heading.insertBefore(handle, ui.badge);
   const mediaButton = select(el, ".manage-media");
   mediaButton.onclick = () => openMediaManager([id]);
+  const ndiButton = ui["return-ndi"];
+  ndiButton.onclick = action(async () => {
+    if (ndiButton.disabled || !card.data.media?.enabled) return;
+    ndiButton.disabled = true;
+    try {
+      await returnToNdi(card.data);
+      await refresh(true);
+    } finally {
+      ndiButton.disabled = false;
+    }
+  });
   card.preview = createPreview(select(el, ".screen-preview"), "Capture de l’écran", id, true);
   const controls = select(el, "details");
   try { controls.open = localStorage.getItem("soundlive-controls-" + id) === "open"; }
@@ -2181,6 +2194,7 @@ function render(row) {
   const handle = select(el, ".card-heading .drag-handle");
   handle.title = "Déplacer " + row.name + " · Glisser ou utiliser les flèches";
   handle.setAttribute("aria-label",handle.title);
+  ui["return-ndi"].hidden = !row.paired || !row.media?.enabled;
   select(el, ".manage-media").hidden = !row.paired;
   select(el,"h2").textContent = row.name;
   ui.badge.textContent = row.online ? row.report.state : row.paired ? "Hors ligne" : "À associer";
