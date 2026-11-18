@@ -19,8 +19,16 @@ header{border-bottom:1px solid var(--edge);background:#130f15;padding:17px 6vw;d
 main{width:min(1120px,90vw);margin:55px auto 80px}h1{margin:0;font-size:clamp(1.28rem,4.8vw,2.45rem);letter-spacing:-.035em;line-height:1.15;white-space:nowrap}
 .heading{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:22px}
 #message{min-height:1.5em;margin:0 0 14px;color:var(--sub)}#message[data-error="true"]{color:#ff8fa0}
-#connection-toast{position:fixed;inset:16px 16px auto auto;z-index:10;margin:0;max-width:min(380px,calc(100% - 32px));padding:13px 16px;border:1px solid #8d4658;border-radius:10px;background:#38212d;color:#ffd4dd;box-shadow:0 10px 30px #0008;font-weight:600}
-#connection-toast[hidden]{display:none}
+#toasts{position:fixed;inset:16px 16px auto auto;z-index:10;margin:0;width:min(380px,calc(100% - 32px));padding:0;border:0;background:transparent;overflow:visible;pointer-events:none}
+#toasts[hidden]{display:none}
+.toast{display:grid;grid-template-columns:20px minmax(0,1fr);gap:10px;padding:12px 14px;border:1px solid #8d4658;border-radius:10px;background:#38212d;color:#ffd4dd;box-shadow:0 10px 25px #0007;overflow-wrap:anywhere}
+.toast+.toast{margin-top:8px}
+.toast[data-tone="success"]{border-color:#438260;background:#20352a;color:#baf0cb}
+.toast svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.toast[data-tone="success"] .toast-warning,.toast[data-tone="error"] .toast-check{display:none}
+.toast-title{font-weight:650}
+.toast-detail{font-size:.84rem;margin:3px 0 0;white-space:pre-line;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.toast-detail:empty{display:none}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,330px),1fr));gap:16px;align-items:start}
 .screen-group+.screen-group{margin-top:30px}.screen-group-title{font-size:1.16rem;overflow-wrap:anywhere}
 .screen-group-title small{font-size:.8rem;color:var(--sub);font-weight:400;margin-left:8px}
@@ -202,7 +210,16 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 </head>
 <body>
 <header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release" id="regie-version" aria-live="polite">v<span id="regie-release">__SOFTWARE_VERSION__</span><span id="regie-version-status"></span></span><span id="count">Écrans connectés</span><button id="logout" type="button" __REMOTE_ONLY__>Me déconnecter</button></header>
-<div id="connection-toast" role="alert" popover="manual" hidden>La gestion des écrans ne répond pas.</div>
+<div id="toasts" popover="manual" hidden></div>
+<template id="toast-template">
+  <div class="toast">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path class="toast-warning" d="M12 3 2.8 20h18.4L12 3Zm0 6v4m0 3h.01"/>
+      <path class="toast-check" d="m5 12 4 4L19 6"/>
+    </svg>
+    <div><strong class="toast-title"></strong><p class="toast-detail"></p></div>
+  </div>
+</template>
 <main>
   <div class="heading"><h1>Gestion des écrans NDI</h1><div class="heading-actions"><button id="open-connections" hidden>Accès distant</button><button id="manage-screens" disabled>Organiser les écrans</button><button id="open-group" disabled>Actions de groupe</button><button id="add" class="primary">Ajouter un écran</button></div></div>
   <section class="traffic-panel" aria-labelledby="regie-title">
@@ -690,21 +707,44 @@ function notice(text, error=false) {
   message.textContent = text;
   message.dataset.error = String(error);
 }
-const connectionToast = document.querySelector("#connection-toast");
-let connectionToastTimer;
-function showConnectionToast() {
-  if (connectionToast.hidden) {
-    connectionToast.hidden = false;
-    connectionToast.showPopover?.();
+const toastStack = document.querySelector("#toasts");
+const toastTemplate = document.querySelector("#toast-template");
+const visibleToasts = new Map();
+function dismissToast(key) {
+  const toast = visibleToasts.get(key);
+  if (!toast) return;
+  clearTimeout(toast.timer);
+  toast.element.remove();
+  visibleToasts.delete(key);
+  if (!visibleToasts.size) {
+    if (toastStack.hidePopover && toastStack.matches(":popover-open")) toastStack.hidePopover();
+    toastStack.hidden = true;
   }
-  clearTimeout(connectionToastTimer);
-  connectionToastTimer = setTimeout(() => {
-    connectionToast.hidePopover?.();
-    connectionToast.hidden = true;
-  }, 7000);
+}
+function showToast(title, tone, detail = "") {
+  const key = JSON.stringify([title, tone, detail]);
+  let toast = visibleToasts.get(key);
+  if (!toast) {
+    if (visibleToasts.size >= 4) dismissToast(visibleToasts.keys().next().value);
+    const element = toastTemplate.content.firstElementChild.cloneNode(true);
+    element.dataset.tone = tone;
+    element.setAttribute("role", tone === "success" ? "status" : "alert");
+    select(element,".toast-title").textContent = title;
+    select(element,".toast-detail").textContent = detail;
+    toast = {element};
+    visibleToasts.set(key, toast);
+    toastStack.append(element);
+    toastStack.hidden = false;
+    if (toastStack.showPopover && toastStack.matches(":popover-open")) toastStack.hidePopover();
+    toastStack.showPopover?.();
+  }
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => dismissToast(key), 7000);
 }
 function noticeError(error) {
-  if (error.code !== "regie_unavailable") notice(error.message, true);
+  if (error.code === "regie_unavailable") return;
+  notice(error.message, true);
+  showToast("Action impossible", "error", error.message);
 }
 let remoteSessionEnded = false;
 function endRemoteSession(destination) {
@@ -739,7 +779,7 @@ async function call(path, data) {
     return apiResult(response.status, await response.json());
   } catch (error) {
     if (error.name === "AbortError" || (!response && error.name === "TypeError")) {
-      showConnectionToast();
+      showToast("La gestion des écrans ne répond pas.", "error");
       throw Object.assign(Error("Réponse de la régie indisponible."), {code:"regie_unavailable"});
     }
     throw error;
@@ -936,9 +976,12 @@ async function prolongSession() {
   showSessionError();
   try {
     setSessionTiming(await call("/api/session/prolonger", {}));
-    notice("Session prolongée.");
+    showToast("Session prolongée", "success");
   } catch (error) {
-    if (!remoteSessionEnded) showSessionError(error.message);
+    if (!remoteSessionEnded) {
+      showSessionError(error.message);
+      if (error.code !== "regie_unavailable") showToast("Prolongation impossible", "error", error.message);
+    }
   } finally {
     sessionRenew.disabled = sessionLogout.disabled = logoutButton.disabled = false;
   }
@@ -1111,6 +1154,13 @@ function showAction({title, detail, label, successTitle, perform}) {
   confirmation.showModal();
   confirmCancel.focus();
 }
+function batchOutcome(detail, title, failures, total) {
+  return {
+    detail,
+    title:failures === 0 ? title : failures < total ? "Action partiellement appliquée" : "Action impossible",
+    failed:failures > 0
+  };
+}
 confirmation.addEventListener("cancel", event => {
   if (confirmation.dataset.state === "busy") event.preventDefault();
 });
@@ -1128,13 +1178,17 @@ confirmationForm.onsubmit = async event => {
   confirmDetail.textContent = "Action en cours…";
   confirmCancel.disabled = confirmAccept.disabled = true;
   try {
-    confirmDetail.textContent = await perform();
-    confirmTitle.textContent = successTitle;
-    confirmation.dataset.state = "success";
+    const result = await perform();
+    const outcome = typeof result === "string" ? {title:successTitle, detail:result} : result;
+    confirmDetail.textContent = outcome.detail;
+    confirmTitle.textContent = outcome.title;
+    confirmation.dataset.state = outcome.failed ? "error" : "success";
+    showToast(outcome.title, outcome.failed ? "error" : "success", outcome.detail);
   } catch (error) {
     confirmTitle.textContent = "Action impossible";
     confirmDetail.textContent = error.message;
     confirmation.dataset.state = "error";
+    if (error.code !== "regie_unavailable") showToast("Action impossible", "error", error.message);
   }
   confirmCancel.hidden = true;
   confirmAccept.textContent = "Fermer";
@@ -1700,7 +1754,7 @@ mediaDialog.addEventListener("close", () => {
 mediaFolders.onchange = () => { mediaFileKey = ""; mediaSelected.clear(); renderMediaManager(); };
 
 async function mediaBatch(targets, perform, done, preferFolder) {
-  if (mediaBusy) return;
+  if (mediaBusy) throw Error("Une opération sur les médias est déjà en cours.");
   mediaBusy = true;
   renderMediaManager();
   const failures = [];
@@ -1713,7 +1767,7 @@ async function mediaBatch(targets, perform, done, preferFolder) {
     }
     await refresh(true);
     mediaResult.textContent = [success ? done + " · " + success + " écran(s)" : "", ...failures].filter(Boolean).join("\n");
-    return failures;
+    return batchOutcome(mediaResult.textContent, done, failures.length, targets.length);
   } finally {
     mediaBusy = false;
     renderMediaManager(preferFolder);
@@ -1731,11 +1785,8 @@ function confirmReturnToNdi(targets) {
   showAction({
     title:"Revenir à la diffusion NDI",
     detail:active.map(({row})=>row.name).join(", ") + "\nLa source NDI configurée remplacera le média local.",
-    label:"Revenir au NDI", successTitle:"Résultat par écran",
-    async perform() {
-      await mediaBatch(active,({row})=>returnToNdi(row),"Retour au NDI demandé");
-      return mediaResult.textContent;
-    }
+    label:"Revenir au NDI",
+    perform:() => mediaBatch(active,({row})=>returnToNdi(row),"Retour au NDI demandé")
   });
 }
 
@@ -1757,15 +1808,15 @@ function reorderMedia(sourceKey, destinationKey) {
     title:"Réorganiser les fichiers",
     detail:"« " + source.item.name + " » " + (after ? "après" : "avant") + " « " + destination.item.name + " »\n" +
       targets.map(({row})=>row.name).join(", "),
-    label:"Déplacer", successTitle:"Résultat par écran",
+    label:"Déplacer",
     async perform() {
-      await mediaBatch(targets, target => mediaChange(target, {action:"reorder", file:target.item.id,
+      const outcome = await mediaBatch(targets, target => mediaChange(target, {action:"reorder", file:target.item.id,
         anchor:anchors.get(target.row.id), after}), message);
       if (focused) confirmation.addEventListener("close", () => {
         const line = [...mediaList.children].find(node => node.dataset.key === sourceKey);
         select(line || mediaList, ".drag-handle")?.focus();
       }, {once:true});
-      return mediaResult.textContent;
+      return outcome;
     }
   });
 }
@@ -1811,11 +1862,9 @@ mediaRemoveSelected.onclick = action(() => {
   const targets = [...byReader.values()];
   showAction({title:"Supprimer les fichiers sélectionnés",
     detail:targets.map(target => target.row.name + " · " + target.files.length + " fichier(s)").join("\n"),
-    label:"Supprimer", successTitle:"Résultat par écran",
-    async perform() {
-      await mediaBatch(targets, target => mediaChange(target,{action:"remove-files",files:target.files}),"Suppression enregistrée");
-      return mediaResult.textContent;
-    }});
+    label:"Supprimer",
+    perform:() => mediaBatch(targets, target => mediaChange(target,{action:"remove-files",files:target.files}),"Suppression enregistrée")
+  });
 });
 
 function openMediaNameDialog(operation) {
@@ -1863,9 +1912,10 @@ mediaNameForm.onsubmit = action(async () => {
   mediaNameError.hidden = true;
   mediaName.disabled = mediaNameCancel.disabled = mediaNameSubmit.disabled = true;
   try {
-    const failures = await mediaBatch(targets, saveName, rename ? "Dossier renommé" : "Dossier disponible", key);
-    if (failures.length) {
-      mediaNameError.textContent = failures.join(" · ");
+    const outcome = await mediaBatch(targets, saveName, rename ? "Dossier renommé" : "Dossier disponible", key);
+    showToast(outcome.title, outcome.failed ? "error" : "success", outcome.detail);
+    if (outcome.failed) {
+      mediaNameError.textContent = outcome.detail;
       mediaNameError.hidden = false;
     } else {
       mediaNameDialog.close();
@@ -1873,6 +1923,7 @@ mediaNameForm.onsubmit = action(async () => {
   } catch (error) {
     mediaNameError.textContent = error.message;
     mediaNameError.hidden = false;
+    if (error.code !== "regie_unavailable") showToast("Action impossible", "error", error.message);
   } finally {
     mediaName.disabled = mediaNameCancel.disabled = mediaNameSubmit.disabled = false;
     if (mediaNameDialog.open) mediaName.focus();
@@ -1884,11 +1935,8 @@ select(mediaDialog,"#media-launch").onclick = action(() => {
   showAction({
     title:"Lancer ce dossier",
     detail:"« " + folder.name + " » sera diffusé sur " + folder.targets.map(({row})=>row.name).join(", ") + ".",
-    label:"Lancer la lecture", successTitle:"Résultat par écran",
-    async perform() {
-      await mediaBatch(folder.targets,target=>mediaChange(target,{action:"play",enabled:true}),"Lecture demandée");
-      return mediaResult.textContent;
-    }
+    label:"Lancer la lecture",
+    perform:() => mediaBatch(folder.targets,target=>mediaChange(target,{action:"play",enabled:true}),"Lecture demandée")
   });
 });
 select(mediaDialog,"#media-ndi").onclick = action(() => confirmReturnToNdi(selectedMediaFolder()?.targets || []));
@@ -1898,11 +1946,9 @@ select(mediaDialog,"#media-empty-all").onclick = action(() => {
   const detail = targets.map(({row,count}) => row.name + " · " + count + " fichier" + (count > 1 ? "s" : "")).join("\n");
   showAction({title:"Vider tous les dossiers",detail:detail +
     "\n\nLes fichiers seront supprimés et les dossiers conservés. Les lecteurs hors ligne seront vidés à leur reconnexion.",
-    label:"Vider les dossiers",successTitle:"Résultat par écran",
-    async perform() {
-      await mediaBatch(targets,({row})=>call("/api/media-settings",{id:row.id,action:"empty-all"}),"Suppression enregistrée");
-      return mediaResult.textContent;
-    }});
+    label:"Vider les dossiers",
+    perform:() => mediaBatch(targets,({row})=>call("/api/media-settings",{id:row.id,action:"empty-all"}),"Suppression enregistrée")
+  });
 });
 select(mediaDialog,"#media-empty-folder").onclick = action(() => {
   const folder = selectedMediaFolder();
@@ -1911,22 +1957,18 @@ select(mediaDialog,"#media-empty-folder").onclick = action(() => {
   const detail = targets.map(({row,folder:entry}) => row.name + " · " + entry.items.length + " fichier(s)").join("\n");
   showAction({title:"Vider le dossier « " + folder.name + " »",
     detail:detail + "\n\nLes fichiers seront supprimés. Le dossier sera conservé. Les lecteurs hors ligne appliqueront la suppression à leur reconnexion.",
-    label:"Vider le dossier", successTitle:"Résultat par écran",
-    async perform() {
-      await mediaBatch(targets,target=>mediaChange(target,{action:"empty-folder"}),"Dossier vidé");
-      return mediaResult.textContent;
-    }});
+    label:"Vider le dossier",
+    perform:() => mediaBatch(targets,target=>mediaChange(target,{action:"empty-folder"}),"Dossier vidé")
+  });
 });
 select(mediaDialog,"#media-folder-remove").onclick = action(() => {
   const folder = selectedMediaFolder();
   if (!folder || mediaBusy) return;
   const screens = folder.targets.map(target => target.row.name).join(", ");
   showAction({title:"Supprimer ce dossier",detail:"Le dossier « " + folder.name + " » et tous ses fichiers seront supprimés sur " + screens + ".",
-    label:"Supprimer",successTitle:"Résultat par écran",
-    async perform() {
-      await mediaBatch(folder.targets,target=>mediaChange(target,{action:"remove-folder"}),"Dossier supprimé","general");
-      return mediaResult.textContent;
-    }});
+    label:"Supprimer",
+    perform:() => mediaBatch(folder.targets,target=>mediaChange(target,{action:"remove-folder"}),"Dossier supprimé","general")
+  });
 });
 select(mediaDialog,"#media-file-remove").onclick = action(() => {
   const entry = selectedMediaEntry();
@@ -1935,11 +1977,9 @@ select(mediaDialog,"#media-file-remove").onclick = action(() => {
   const screens = entry.targets.map(target => target.row.name).join(", ");
   showAction({title:"Supprimer ce fichier",
     detail:"« " + entry.item.name + " » sera supprimé du dossier « " + folder.name + " » sur " + screens + ".",
-    label:"Supprimer",successTitle:"Résultat par écran",
-    async perform() {
-      await mediaBatch(entry.targets,target=>mediaChange(target,{action:"remove-files",files:[target.item.id]}),"Fichier supprimé");
-      return mediaResult.textContent;
-    }});
+    label:"Supprimer",
+    perform:() => mediaBatch(entry.targets,target=>mediaChange(target,{action:"remove-files",files:[target.item.id]}),"Fichier supprimé")
+  });
 });
 mediaDestination.onchange = action(() => {
   const destinationKey = mediaDestination.value;
@@ -1954,12 +1994,10 @@ mediaDestination.onchange = action(() => {
   const screens = entry.targets.map(target => target.row.name).join(", ");
   showAction({title:"Déplacer ce fichier",
     detail:"« " + entry.item.name + " »\n" + source.name + " → " + destination.name + "\n" + screens,
-    label:"Déplacer",successTitle:"Résultat par écran",
-    async perform() {
-      await mediaBatch(entry.targets,target=>mediaChange(target,{action:"move",file:target.item.id,
-        source_folder:target.id,folder:destinationIds.get(target.row.id)}),"Fichier déplacé");
-      return mediaResult.textContent;
-    }});
+    label:"Déplacer",
+    perform:() => mediaBatch(entry.targets,target=>mediaChange(target,{action:"move",file:target.item.id,
+      source_folder:target.id,folder:destinationIds.get(target.row.id)}),"Fichier déplacé")
+  });
 });
 function uploadMedia(path, file, progress) {
   return new Promise((resolve, reject) => {
@@ -2005,11 +2043,8 @@ mediaUpload.onsubmit = action(() => {
     title:"Envoyer les fichiers",
     detail:files.length + " fichier(s) · " + mediaFormat(bytes) + " par écran\n« " + folder.name + " » · " +
       targets.map(({row})=>row.name).join(", "),
-    label:"Envoyer", successTitle:"Résultat par écran",
-    async perform() {
-      const status = await sendMediaFiles(targets, files, bytes);
-      return status + "\n" + mediaResult.textContent;
-    }
+    label:"Envoyer",
+    perform:() => sendMediaFiles(targets, files, bytes)
   });
 });
 async function sendMediaFiles(targets, files, bytes) {
@@ -2017,7 +2052,7 @@ async function sendMediaFiles(targets, files, bytes) {
   let committed = 0;
   const total = bytes * targets.length;
   showMediaUpload(0, "Envoi vers la régie");
-  await mediaBatch(targets,async ({row,id}) => {
+  const outcome = await mediaBatch(targets,async ({row,id}) => {
     let sent = 0;
     try {
       for (const file of files) {
@@ -2033,8 +2068,10 @@ async function sendMediaFiles(targets, files, bytes) {
       throw Error((sent ? sent + "/" + files.length + " fichier(s) enregistré(s) · " : "") + error.message);
     }
   },"Fichiers enregistrés");
-  return showMediaUpload(Math.floor(100 * committed / total),
+  const status = showMediaUpload(Math.floor(100 * committed / total),
     committed === total ? "Envoi vers la régie terminé" : "Envoi incomplet");
+  return {...outcome, title:committed === total ? outcome.title : "Envoi incomplet",
+    detail:status + "\n" + outcome.detail};
 }
 
 function cardFor(id) {
@@ -2176,14 +2213,17 @@ function cardFor(id) {
   select(el, ".client-upgrade").onclick = action(() => showAction({
     title:"Mettre à jour " + card.data.name,
     detail:"Le lecteur va redémarrer avec la version " + clientRelease + ". La diffusion sera brièvement interrompue.",
-    label:"Lancer la mise à jour", successTitle:"Demande traitée",
+    label:"Lancer la mise à jour",
     async perform() {
       const {results} = await call("/api/client-updates", {ids:[id]});
       await refresh(true);
       if (results[0].state !== "queued" && results[0].state !== "current") {
         throw Error(updateStates[results[0].state]);
       }
-      return updateStates[results[0].state] + " · Suis le résultat sur la fiche de l’écran.";
+      return {
+        title:results[0].state === "queued" ? "Mise à jour demandée" : "Lecteur déjà à jour",
+        detail:card.data.name
+      };
     }
   }));
   ui.info.onclick = () => showDiagnostics(id);
@@ -2403,9 +2443,29 @@ function refresh(afterAction = false) {
   refreshing = refreshScreens().finally(() => { refreshing = null; });
   return refreshing;
 }
+function reportScreenChanges(rows) {
+  const unreachable = [];
+  for (const row of rows) {
+    const previous = cards.get(row.id)?.data;
+    if (row.paired && previous?.online && !row.online) unreachable.push(row.name);
+    const update = row.client_update;
+    const oldUpdate = previous?.client_update;
+    if (!update || update.id !== oldUpdate?.id || !["queued","installing"].includes(oldUpdate?.state)) continue;
+    if (update.state === "updated") {
+      showToast("Mise à jour confirmée", "success", row.name);
+    } else if (update.state === "failed" || update.state === "expired") {
+      showToast(updateStates[update.state], "error", [row.name, update.message].filter(Boolean).join(" · "));
+    }
+  }
+  if (unreachable.length) {
+    showToast(unreachable.length === 1 ? "Un lecteur ne répond plus" : unreachable.length + " lecteurs ne répondent plus",
+      "error", unreachable.join(", "));
+  }
+}
 async function refreshScreens() {
   try {
     const rows = await call("/api/screens");
+    reportScreenChanges(rows);
     notice("");
     document.querySelector("#count").textContent = rows.filter(x => x.online).length + " en ligne";
     const ids = new Set(rows.map(row => row.id));
@@ -2685,16 +2745,17 @@ groupForm.onsubmit = action(() => {
   if (deviceAction) {
     showAction({
       title:deviceAction.title, detail:summary + "\n" + deviceAction.detail, label:deviceAction.label,
-      successTitle:"Résultat par écran",
       async perform() {
         const {results} = await call("/api/group", {ids, operation});
         group.close();
         await refresh(true);
-        return results.map(item => {
+        const details = results.map(item => {
           const status = {requested:deviceAction.result, removed:deviceAction.result,
                           offline:"Ignoré · hors ligne", unsupported:"Ignoré · client à mettre à jour"};
           return item.name + " · " + status[item.state];
         }).join("\n");
+        const failures = results.filter(item=>!["requested","removed"].includes(item.state)).length;
+        return batchOutcome(details, deviceAction.result, failures, results.length);
       }
     });
     return;
@@ -2708,7 +2769,7 @@ groupForm.onsubmit = action(() => {
     field === "volume" ? value + " %" : value);
   showAction({
     title:label, detail, label:"Confirmer",
-    successTitle:operation === "update" ? "État des demandes de mise à jour" : "Réglages de groupe enregistrés",
+    successTitle:"Réglages de groupe enregistrés",
     async perform() {
       const result = operation === "update" ?
         await call("/api/client-updates", {ids}) :
@@ -2717,7 +2778,10 @@ groupForm.onsubmit = action(() => {
       group.close();
       await refresh(true);
       if (operation === "update") {
-        return result.results.map(item => item.name + " · " + updateStates[item.state]).join("\n");
+        const details = result.results.map(item=>item.name + " · " + updateStates[item.state]).join("\n");
+        const failures = result.results.filter(item=>!["queued","current"].includes(item.state)).length;
+        const title = result.results.some(item=>item.state === "queued") ? "Mise à jour demandée" : "Lecteurs déjà à jour";
+        return batchOutcome(details, title, failures, result.results.length);
       }
       return result.results.map(item => item.name + (item.online ? " · Enregistré" : " · À la reconnexion")).join("\n");
     }
