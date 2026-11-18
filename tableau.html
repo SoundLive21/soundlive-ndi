@@ -154,12 +154,18 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .traffic-panel h2{grid-column:1/-1;font-size:1rem}
 .traffic-panel label{margin:0}
 .regie-system{grid-column:1/-1;border-bottom:1px solid var(--edge);padding-bottom:12px}
-.regie-system .metrics{margin:0 0 8px}
+.regie-system .metrics{margin:0;grid-template-columns:repeat(4,minmax(0,1fr))}
 .regie-system .metric.disk{grid-column:auto;display:grid}
 .regie-system .metric.disk strong{margin-inline-start:0}
 .regie-system .disk-free{grid-column:1/-1}
-.regie-system summary{color:#ffd0dc;cursor:pointer;font-size:.88rem}
-.regie-system .facts{margin:5px 0 0}
+.regie-details{grid-column:1/-1}
+.regie-details summary{color:#ffd0dc;cursor:pointer;font-size:.88rem}
+.regie-details .facts{margin:5px 0 0}
+@media(max-width:460px){
+  .regie-system .metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
+  #regie-latency{grid-column:1/-1;display:flex}
+  #regie-latency strong{margin-inline-start:auto}
+}
 .traffic-readings{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .traffic-readings .metric strong{white-space:normal}
 .metric[data-level="rx"]{--tone:#9adcf7}
@@ -199,7 +205,8 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 <div id="connection-toast" role="alert" popover="manual" hidden>La gestion des écrans ne répond pas.</div>
 <main>
   <div class="heading"><h1>Gestion des écrans NDI</h1><div class="heading-actions"><button id="open-connections" hidden>Accès distant</button><button id="manage-screens" disabled>Organiser les écrans</button><button id="open-group" disabled>Actions de groupe</button><button id="add" class="primary">Ajouter un écran</button></div></div>
-  <section class="traffic-panel" aria-labelledby="traffic-title">
+  <section class="traffic-panel" aria-labelledby="regie-title">
+    <h2 id="regie-title">État de la régie</h2>
     <div class="regie-system">
       <div class="metrics" aria-label="Utilisation de la régie">
         <div class="metric cpu">
@@ -214,10 +221,12 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 13h18m-14 3.5h.01m4 0h.01"/></svg>
           <span>Disque</span><strong>—</strong><span class="disk-free"></span>
         </div>
+        <div class="metric" id="regie-latency" title="Temps aller-retour HTTP entre ce navigateur et la régie">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 8a15 15 0 0 1 20 0M5 12a10 10 0 0 1 14 0M8 16a6 6 0 0 1 8 0m-4 4h.01"/></svg>
+          <span>Réseau</span><strong>—</strong>
+        </div>
       </div>
-      <details><summary>Informations système de la régie</summary><dl class="facts"></dl></details>
     </div>
-    <h2 id="traffic-title">Débit réseau de la régie</h2>
     <label>Interface à mesurer
       <select id="traffic-interface" aria-describedby="traffic-help" disabled>
         <option value="">Recherche des interfaces…</option>
@@ -234,6 +243,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       </div>
     </div>
     <p class="small" id="traffic-help">Trafic total de l’interface sélectionnée, NDI compris lorsque ce PC diffuse.</p>
+    <details class="regie-details"><summary>Informations système de la régie</summary><dl class="facts"></dl></details>
   </section>
   <details class="preview-section" id="source-previews">
     <summary>Aperçu des sources NDI disponibles</summary>
@@ -960,6 +970,8 @@ const trafficTx = document.querySelector("#traffic-tx");
 const trafficRx = document.querySelector("#traffic-rx");
 const regieSystem = document.querySelector(".regie-system");
 const regieTiles = Object.fromEntries(["cpu","ram","disk"].map(key => [key, select(regieSystem,"." + key)]));
+const regieLatency = document.querySelector("#regie-latency");
+const regieFacts = document.querySelector(".regie-details .facts");
 const trafficFormat = new Intl.NumberFormat("fr-FR", {maximumFractionDigits:2});
 function rateText(rate) {
   return Number.isFinite(rate) ? trafficFormat.format(rate) + " Mbit/s" : "—";
@@ -967,6 +979,7 @@ function rateText(rate) {
 let interfaceSelection = "";
 let trafficRows = [];
 let trafficBusy = false;
+let latencyBusy = false;
 try { interfaceSelection = localStorage.getItem("soundlive-traffic-interface") || ""; } catch {}
 function displayTraffic() {
   const row = trafficRows.find(item => item.id === trafficInterface.value);
@@ -999,6 +1012,20 @@ async function refreshTraffic() {
     renderRegieSystem();
   } finally {
     trafficBusy = false;
+  }
+}
+async function refreshRegieLatency() {
+  if (latencyBusy || remoteSessionEnded || document.hidden) return;
+  latencyBusy = true;
+  const start = performance.now();
+  try {
+    await call("/api/regie-latency");
+    const ms = performance.now() - start;
+    metric(regieLatency, ms < 1 ? "< 1 ms" : latencyText(ms), severity(ms, latencyLimits));
+  } catch {
+    metric(regieLatency, "—", "unknown");
+  } finally {
+    latencyBusy = false;
   }
 }
 trafficInterface.onchange = () => {
@@ -1219,7 +1246,7 @@ function renderFacts(list, facts) {
 }
 function renderRegieSystem(stats = {}) {
   renderSystemMetrics(regieTiles, stats, diagnosticDisk(stats));
-  renderFacts(select(regieSystem,".facts"), systemFacts(stats || {}, "Disque des médias"));
+  renderFacts(regieFacts, systemFacts(stats || {}, "Disque des médias"));
 }
 function renderDiagnostics(card) {
   const row = card.data;
@@ -2682,8 +2709,10 @@ loadNetwork();
 refreshConnections();
 refreshRegieVersion();
 refreshTraffic();
+refreshRegieLatency();
 setInterval(refresh,2000);
 setInterval(refreshTraffic,2000);
+setInterval(refreshRegieLatency,5000);
 setInterval(refreshVisiblePreviews,2000);
 setInterval(refreshConnections,5000);
 setInterval(refreshRegieVersion,10000);

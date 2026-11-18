@@ -38,7 +38,7 @@ from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.42"
+SOFTWARE_VERSION = "1.4.43"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -852,6 +852,8 @@ class Request(BaseHTTPRequestHandler):
                              "port": getattr(self.server, "receiver_port", self.server.server_port)})
         elif path == "/api/interface-traffic":
             self.reply(200, self.server.interface_traffic.read())
+        elif path == "/api/regie-latency":
+            self.reply(200, {"ok": True})
         elif path == "/api/regie-version":
             self.reply(200, self.server.publication_status.read())
         elif path == "/api/preview":
