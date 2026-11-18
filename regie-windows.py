@@ -68,10 +68,16 @@ class Launcher:
         window.minsize(620, 510)
         window.columnconfigure(0, weight=1)
         window.rowconfigure(0, weight=1)
-        panel = ttk.Frame(window, padding=(22, 16))
-        panel.grid(sticky="nsew")
+        viewport = tk.Canvas(window, highlightthickness=0, background=ttk.Style(window).lookup("TFrame", "background"))
+        viewport.grid(row=0, column=0, sticky="nsew")
+        page_scrollbar = ttk.Scrollbar(window, orient="vertical", command=viewport.yview)
+        page_scrollbar.grid(row=0, column=1, sticky="ns")
+        viewport.configure(yscrollcommand=page_scrollbar.set)
+        panel = ttk.Frame(viewport, padding=(22, 16))
+        panel_id = viewport.create_window(0, 0, anchor="nw", window=panel)
+        panel.bind("<Configure>", lambda _event: viewport.configure(scrollregion=viewport.bbox(panel_id)))
+        viewport.bind("<Configure>", lambda event: viewport.itemconfigure(panel_id, width=event.width))
         panel.columnconfigure(0, weight=1)
-        panel.rowconfigure(6, weight=1)
         ttk.Label(panel, text=f"{APP_NAME} · Régie", font=("Segoe UI", 19, "bold")).grid(row=0, sticky="w")
         ttk.Label(panel, textvariable=self.status).grid(row=1, sticky="w", pady=(2, 14))
 
@@ -112,16 +118,8 @@ class Launcher:
         self.copy_button.pack(side="right")
         self.certificate_button = ttk.Button(address, text="Dossier du certificat", command=self.open_certificate_folder)
         self.certificate_button.pack(side="right", padx=(0, 8))
-        self.qr_panel = ttk.LabelFrame(panel, text="QR code · Gestion des écrans", padding=8)
-        self.qr_panel.grid(row=5, column=0, sticky="ew", pady=(0, 10))
-        self.qr_panel.grid_remove()
-        self.qr = ttk.Label(self.qr_panel)
-        self.qr.pack(side="left", padx=(0, 12))
-        ttk.Label(self.qr_panel, text="Scanne ce code depuis un appareil connecté au réseau de la régie.",
-                  wraplength=290).pack(side="left", fill="x", expand=True)
-
         connections = ttk.LabelFrame(panel, text="Connexions à distance", padding=10)
-        connections.grid(row=6, sticky="nsew")
+        connections.grid(row=5, sticky="ew")
         connections.columnconfigure(0, weight=1)
         connections.rowconfigure(1, weight=1)
         ttk.Label(connections, textvariable=self.connection_status).grid(sticky="w", pady=(0, 6))
@@ -141,7 +139,19 @@ class Launcher:
         self.blocked_button = ttk.Button(moderation, text="Adresses bloquées", command=self.show_blocked)
         for button in (self.disconnect_button, self.block_button, self.blocked_button):
             button.pack(side="left", padx=(0, 8))
+
+        self.qr_panel = ttk.LabelFrame(panel, text="QR code · Gestion des écrans", padding=8)
+        self.qr_panel.grid(row=6, sticky="ew", pady=(10, 0))
+        self.qr_panel.grid_remove()
+        self.qr = ttk.Label(self.qr_panel)
+        self.qr.pack(side="left", padx=(0, 12))
+        ttk.Label(self.qr_panel, text="Scanne ce code depuis un appareil connecté au réseau de la régie.",
+                  wraplength=290).pack(side="left", fill="x", expand=True)
+
         ttk.Label(panel, text=COPYRIGHT).grid(row=7, sticky="w", pady=(8, 0))
+        window.update_idletasks()
+        viewport.configure(width=min(panel.winfo_reqwidth(), window.winfo_screenwidth() * 9 // 10),
+                           height=min(panel.winfo_reqheight(), window.winfo_screenheight() * 4 // 5))
         self.list.bind("<<TreeviewSelect>>", lambda _event: self.moderation_controls())
         window.protocol("WM_DELETE_WINDOW", self.close)
         if not tableau.DATA.exists():

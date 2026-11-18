@@ -28,7 +28,7 @@ sudo apt install python3-tk python3-cryptography openssh-client
 bash demarrer-regie-ubuntu.sh
 ```
 
-Dans le lanceur, clique sur **Démarrer la régie**, puis **Ouvrir le tableau**.
+Dans le lanceur, clique sur **Démarrer la régie**, puis **Ouvrir la console**.
 Sur ce PC, le tableau est aussi disponible à `http://127.0.0.1:8765`.
 Les lecteurs utilisent l’IPv4 locale de la régie sur le port TCP 8765. Si le
 pare-feu filtre ce port, autorise-le sur le réseau des écrans.
