@@ -38,7 +38,7 @@ from qrencoder import QRCode, QRErrorCorrectLevel
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.40"
+SOFTWARE_VERSION = "1.4.42"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -572,7 +572,7 @@ def diagnostic_report(payload):
     if not isinstance(payload, dict):
         return None
     report = {}
-    for field in ("os", "architecture", "model", "cpu"):
+    for field in ("hostname", "os", "architecture", "model", "cpu"):
         value = payload.get(field)
         if isinstance(value, str):
             report[field] = value[:160]

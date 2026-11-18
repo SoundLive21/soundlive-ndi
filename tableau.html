@@ -19,6 +19,8 @@ header{border-bottom:1px solid var(--edge);background:#130f15;padding:17px 6vw;d
 main{width:min(1120px,90vw);margin:55px auto 80px}h1{margin:0;font-size:clamp(1.28rem,4.8vw,2.45rem);letter-spacing:-.035em;line-height:1.15;white-space:nowrap}
 .heading{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:22px}
 #message{min-height:1.5em;margin:0 0 14px;color:var(--sub)}#message[data-error="true"]{color:#ff8fa0}
+#connection-toast{position:fixed;inset:16px 16px auto auto;z-index:10;margin:0;max-width:min(380px,calc(100% - 32px));padding:13px 16px;border:1px solid #8d4658;border-radius:10px;background:#38212d;color:#ffd4dd;box-shadow:0 10px 30px #0008;font-weight:600}
+#connection-toast[hidden]{display:none}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,330px),1fr));gap:16px;align-items:start}
 .screen-group+.screen-group{margin-top:30px}.screen-group-title{font-size:1.16rem;overflow-wrap:anywhere}
 .screen-group-title small{font-size:.8rem;color:var(--sub);font-weight:400;margin-left:8px}
@@ -151,7 +153,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .traffic-panel{display:grid;grid-template-columns:minmax(190px,1fr) minmax(230px,1fr);gap:12px 24px;padding:18px 20px;margin:0 0 16px;background:var(--panel);border:1px solid var(--edge);border-radius:14px}
 .traffic-panel h2{grid-column:1/-1;font-size:1rem}
 .traffic-panel label{margin:0}
-.regie-system{grid-column:1/-1;border-top:1px solid var(--edge);padding-top:12px}
+.regie-system{grid-column:1/-1;border-bottom:1px solid var(--edge);padding-bottom:12px}
 .regie-system .metrics{margin:0 0 8px}
 .regie-system .metric.disk{grid-column:auto;display:grid}
 .regie-system .metric.disk strong{margin-inline-start:0}
@@ -194,26 +196,10 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 </head>
 <body>
 <header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release" id="regie-version" aria-live="polite">v<span id="regie-release">__SOFTWARE_VERSION__</span><span id="regie-version-status"></span></span><span id="count">Écrans connectés</span><button id="logout" type="button" __REMOTE_ONLY__>Me déconnecter</button></header>
+<div id="connection-toast" role="alert" popover="manual" hidden>La gestion des écrans ne répond pas.</div>
 <main>
   <div class="heading"><h1>Gestion des écrans NDI</h1><div class="heading-actions"><button id="open-connections" hidden>Accès distant</button><button id="manage-screens" disabled>Organiser les écrans</button><button id="open-group" disabled>Actions de groupe</button><button id="add" class="primary">Ajouter un écran</button></div></div>
   <section class="traffic-panel" aria-labelledby="traffic-title">
-    <h2 id="traffic-title">Débit réseau de la régie</h2>
-    <label>Interface à mesurer
-      <select id="traffic-interface" aria-describedby="traffic-help" disabled>
-        <option value="">Recherche des interfaces…</option>
-      </select>
-    </label>
-    <div class="traffic-readings">
-      <div class="metric" id="traffic-tx" data-level="tx">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V3m-5 5 5-5 5 5M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
-        <span>Émission</span><strong>—</strong>
-      </div>
-      <div class="metric" id="traffic-rx" data-level="rx">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v13m-5-5 5 5 5-5M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
-        <span>Réception</span><strong>—</strong>
-      </div>
-    </div>
-    <p class="small" id="traffic-help">Trafic total de l’interface sélectionnée, NDI compris lorsque ce PC diffuse.</p>
     <div class="regie-system">
       <div class="metrics" aria-label="Utilisation de la régie">
         <div class="metric cpu">
@@ -231,6 +217,23 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       </div>
       <details><summary>Informations système de la régie</summary><dl class="facts"></dl></details>
     </div>
+    <h2 id="traffic-title">Débit réseau de la régie</h2>
+    <label>Interface à mesurer
+      <select id="traffic-interface" aria-describedby="traffic-help" disabled>
+        <option value="">Recherche des interfaces…</option>
+      </select>
+    </label>
+    <div class="traffic-readings">
+      <div class="metric" id="traffic-tx" data-level="tx">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V3m-5 5 5-5 5 5M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
+        <span>Émission</span><strong>—</strong>
+      </div>
+      <div class="metric" id="traffic-rx" data-level="rx">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v13m-5-5 5 5 5-5M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
+        <span>Réception</span><strong>—</strong>
+      </div>
+    </div>
+    <p class="small" id="traffic-help">Trafic total de l’interface sélectionnée, NDI compris lorsque ce PC diffuse.</p>
   </section>
   <details class="preview-section" id="source-previews">
     <summary>Aperçu des sources NDI disponibles</summary>
@@ -328,7 +331,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       <span>Volume <output id="group-volume-value" for="group-volume-input">50 %</output></span>
       <input id="group-volume-input" name="volume" type="range" min="0" max="100" value="50" disabled>
     </label>
-    <label id="group-bandwidth" hidden>Qualité<select name="bandwidth" disabled><option value="0">High · Résolution de la source</option><option value="1">Low · Aperçu NDI</option></select></label>
+    <label id="group-bandwidth" hidden>Qualité<select name="bandwidth" disabled><option value="0">High - 720p/1080p/4K (flux prod)</option><option value="1">Low 360p (flux preview)</option></select></label>
     <label id="group-orientation" hidden>Orientation de l’écran<select name="orientation" disabled><option value="landscape">Paysage</option><option value="portrait-left">Portrait gauche</option><option value="portrait-right">Portrait droite</option></select></label>
     <p class="small" id="group-help"></p>
     <div class="actions"><button type="button" id="group-close">Fermer</button><button type="submit" class="primary" id="group-submit">Continuer</button></div>
@@ -342,16 +345,15 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
     <p class="small" id="media-targets"></p>
     <div class="media-disks" id="media-disks" aria-label="Espace disque"></div>
     <label>Dossier<select id="media-folders"></select></label>
-    <form id="media-folder-edit">
-      <label>Nom du nouveau dossier<input name="name" maxlength="64" autocomplete="off"></label>
+    <div id="media-folder-edit">
       <div class="actions">
-        <button type="submit">Nouveau dossier</button>
+        <button type="button" id="media-create-open">Créer un nouveau dossier</button>
         <button type="button" id="media-rename-open">Renommer le dossier</button>
         <button type="button" id="media-empty-folder">Vider le dossier en cours</button>
         <button type="button" id="media-folder-remove">Supprimer le dossier</button>
         <button type="button" class="remove" id="media-empty-all">Vider tous les dossiers</button>
       </div>
-    </form>
+    </div>
     <div class="actions">
       <button class="primary" type="button" id="media-launch">Lancer ce dossier</button>
       <button type="button" id="media-ndi">Revenir à la diffusion NDI</button>
@@ -395,14 +397,14 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
     <p class="small" id="media-result" role="status"></p>
   </div>
 </dialog>
-<dialog id="media-rename" aria-labelledby="media-rename-title">
+<dialog id="media-folder-name" aria-labelledby="media-folder-name-title">
   <form class="dialog-body">
-    <h2 id="media-rename-title">Renommer le dossier</h2>
-    <label>Nouveau nom<input name="name" maxlength="64" required autocomplete="off" autofocus></label>
-    <p class="small" id="media-rename-error" role="alert" hidden></p>
+    <h2 id="media-folder-name-title"></h2>
+    <label>Nom du dossier<input name="name" maxlength="64" required autocomplete="off" autofocus></label>
+    <p class="small" id="media-folder-name-error" role="alert" hidden></p>
     <div class="actions">
       <button type="button">Annuler</button>
-      <button type="submit" class="primary">Renommer</button>
+      <button type="submit" class="primary"></button>
     </div>
   </form>
 </dialog>
@@ -514,7 +516,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
         <label>Sources NDI détectées<select class="detected-sources"></select></label>
         <label>Source NDI<input class="source" maxlength="256" required></label>
       </div>
-      <label>Qualité<select class="bandwidth"><option value="0">High · Résolution de la source</option><option value="1">Low · Aperçu NDI</option></select></label>
+      <label>Qualité<select class="bandwidth"><option value="0">High - 720p/1080p/4K (flux prod)</option><option value="1">Low 360p (flux preview)</option></select></label>
       <label>Orientation de l’écran<select class="orientation"><option value="landscape">Paysage</option><option value="portrait-left">Portrait gauche</option><option value="portrait-right">Portrait droite</option></select>
         <span class="small orientation-status"></span>
       </label>
@@ -677,6 +679,22 @@ function notice(text, error=false) {
   message.textContent = text;
   message.dataset.error = String(error);
 }
+const connectionToast = document.querySelector("#connection-toast");
+let connectionToastTimer;
+function showConnectionToast() {
+  if (connectionToast.hidden) {
+    connectionToast.hidden = false;
+    connectionToast.showPopover?.();
+  }
+  clearTimeout(connectionToastTimer);
+  connectionToastTimer = setTimeout(() => {
+    connectionToast.hidePopover?.();
+    connectionToast.hidden = true;
+  }, 7000);
+}
+function noticeError(error) {
+  if (error.code !== "regie_unavailable") notice(error.message, true);
+}
 let remoteSessionEnded = false;
 function endRemoteSession(destination) {
   if (remoteSessionEnded) return;
@@ -700,15 +718,19 @@ async function call(path, data) {
   if (remoteSessionEnded) throw Error("Session distante fermée.");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 6000);
+  let response;
   try {
-    const res = await fetch(path, data === undefined ? {signal:controller.signal} : {
+    response = await fetch(path, data === undefined ? {signal:controller.signal} : {
       method:"POST", headers:{"Content-Type":"application/json"},
       body:JSON.stringify(data),
       signal:controller.signal
     });
-    return apiResult(res.status, await res.json());
+    return apiResult(response.status, await response.json());
   } catch (error) {
-    if (error.name === "AbortError") throw Error("La gestion des écrans ne répond pas.");
+    if (error.name === "AbortError" || (!response && error.name === "TypeError")) {
+      showConnectionToast();
+      throw Object.assign(Error("Réponse de la régie indisponible."), {code:"regie_unavailable"});
+    }
     throw error;
   } finally {
     clearTimeout(timer);
@@ -988,7 +1010,7 @@ function action(run) {
   return async event => {
     event.preventDefault();
     try { await run(event); }
-    catch (error) { notice(error.message, true); }
+    catch (error) { noticeError(error); }
   };
 }
 let sortableDrag = null;
@@ -1008,7 +1030,7 @@ function sortHandle(target, scope, key, keys, move, label) {
     event.stopPropagation();
     const order = keys();
     const destination = order[order.indexOf(key) + delta];
-    if (destination !== undefined) Promise.resolve(move(key, destination)).catch(error => notice(error.message, true));
+    if (destination !== undefined) Promise.resolve(move(key, destination)).catch(noticeError);
   };
   const clear = () => {
     sortableDrag?.highlight?.classList.remove("drop-target");
@@ -1174,6 +1196,7 @@ function displayResolution(display) {
 }
 function systemFacts(data, diskLabel) {
   return [
+    ["Nom d’hôte", data.hostname || "—"],
     ["Système", data.os || "—"],
     ["Architecture", data.architecture || "—"],
     ["Modèle", data.model || "—"],
@@ -1342,14 +1365,14 @@ const mediaPlayer = select(mediaDialog, "#media-player");
 const mediaHint = select(mediaDialog, "#media-preview-hint");
 const mediaFileDownload = select(mediaDialog, "#media-file-download");
 const mediaDestination = select(mediaDialog, "#media-move-to");
-const mediaFolderForm = select(mediaDialog, "#media-folder-edit");
-const mediaName = mediaFolderForm.elements.namedItem("name");
-const mediaRenameDialog = document.querySelector("#media-rename");
-const mediaRenameForm = select(mediaRenameDialog, "form");
-const mediaRenameName = mediaRenameForm.elements.namedItem("name");
-const mediaRenameError = select(mediaRenameDialog, "#media-rename-error");
-const mediaRenameCancel = select(mediaRenameForm, 'button[type="button"]');
-const mediaRenameSubmit = select(mediaRenameForm, 'button[type="submit"]');
+const mediaCreateOpen = select(mediaDialog, "#media-create-open");
+const mediaRenameOpen = select(mediaDialog, "#media-rename-open");
+const mediaNameDialog = document.querySelector("#media-folder-name");
+const mediaNameForm = select(mediaNameDialog, "form");
+const mediaName = mediaNameForm.elements.namedItem("name");
+const mediaNameError = select(mediaNameDialog, "#media-folder-name-error");
+const mediaNameCancel = select(mediaNameForm, 'button[type="button"]');
+const mediaNameSubmit = select(mediaNameForm, 'button[type="submit"]');
 const mediaBulk = select(mediaDialog, "#media-bulk");
 const mediaSelectAll = select(mediaBulk, "#media-select-all");
 const mediaDownloadSelected = select(mediaBulk, "#media-download-selected");
@@ -1360,7 +1383,7 @@ let mediaFileKey = "";
 let mediaBusy = false;
 let mediaExporting = false;
 let mediaRegieDisk = null;
-let mediaRenameFolder = null;
+let mediaNameAction = null;
 const mediaSelected = new Set();
 
 function mediaRows() {
@@ -1601,8 +1624,7 @@ function renderMediaManager(preferFolder) {
   select(mediaDialog,"#media-empty-all").disabled = mediaBusy || !rows.some(mediaFileCount);
   select(mediaDialog,"#media-empty-folder").disabled = mediaBusy || !folder.targets.some(target => target.folder.items.length);
   select(mediaDialog,"#media-folder-remove").disabled = mediaBusy || mediaFolders.value === "general";
-  select(mediaFolderForm,'button[type="submit"]').disabled = mediaBusy;
-  select(mediaFolderForm,"#media-rename-open").disabled = mediaBusy;
+  mediaCreateOpen.disabled = mediaRenameOpen.disabled = mediaBusy;
   mediaInput.disabled = mediaBusy || rows.some(row => !row.media_disk?.available) || mediaRegieDisk?.available === 0;
   select(mediaUpload, "button").disabled = mediaInput.disabled;
   const uploadHint = select(mediaUpload, "#media-upload-hint");
@@ -1632,7 +1654,6 @@ function openMediaManager(ids) {
   mediaIds = ids;
   mediaFileKey = "";
   mediaSelected.clear();
-  mediaName.value = "";
   mediaInput.value = "";
   mediaResult.textContent = "";
   mediaUploadStatus.hidden = true;
@@ -1644,7 +1665,7 @@ function openMediaManager(ids) {
   mediaReadRegieDisk();
 }
 mediaDialog.addEventListener("close", () => {
-  if (mediaRenameDialog.open) mediaRenameDialog.close();
+  if (mediaNameDialog.open) mediaNameDialog.close();
   mediaPlayer.replaceChildren();
   mediaPlayer.dataset.source = "";
 });
@@ -1745,60 +1766,64 @@ mediaRemoveSelected.onclick = action(() => {
     }});
 });
 
-mediaFolderForm.onsubmit = action(() => {
+function openMediaNameDialog(operation) {
+  if (mediaBusy || mediaNameDialog.open) return;
+  const rename = operation === "rename";
+  const folder = rename ? selectedMediaFolder() : null;
+  const targets = rename ? folder?.targets : mediaRows().map(row => ({row,id:"general"}));
+  if (!targets?.length) return;
+  mediaNameAction = {operation, targets};
+  select(mediaNameDialog,"h2").textContent = rename ? "Renommer le dossier" : "Créer un nouveau dossier";
+  mediaNameSubmit.textContent = rename ? "Renommer" : "Créer";
+  mediaName.value = folder?.name || "";
+  mediaNameError.hidden = true;
+  mediaNameDialog.showModal();
+  mediaName.select();
+}
+mediaCreateOpen.onclick = action(() => openMediaNameDialog("create"));
+mediaRenameOpen.onclick = action(() => openMediaNameDialog("rename"));
+mediaNameCancel.onclick = () => mediaNameDialog.close();
+mediaNameDialog.addEventListener("cancel", event => {
+  if (mediaNameSubmit.disabled) event.preventDefault();
+});
+mediaNameDialog.addEventListener("close", () => {
+  if (!mediaNameDialog.open) mediaNameAction = null;
+});
+mediaNameForm.onsubmit = action(async () => {
+  if (!mediaNameAction || mediaBusy) return;
   const name = mediaName.value.trim();
-  if (!name) { mediaResult.textContent = "Saisis le nom du dossier."; mediaName.focus(); return; }
-  const current = selectedMediaFolder();
-  if (!current) return;
-  const matches = item => item.name.normalize().toLocaleLowerCase("fr") === name.normalize().toLocaleLowerCase("fr");
-  const task = target => Object.values(target.row.media_folders).some(matches) ?
-    Promise.resolve() : mediaChange(target,{action:"create",name});
-  mediaName.value = "";
-  return mediaBatch(current.targets,task,"Dossier disponible",folderKey("",{name}));
-});
-select(mediaFolderForm,"#media-rename-open").onclick = action(() => {
-  const folder = selectedMediaFolder();
-  if (!folder || mediaBusy || mediaRenameDialog.open) return;
-  mediaRenameFolder = folder;
-  mediaRenameName.value = folder.name;
-  mediaRenameError.hidden = true;
-  mediaRenameDialog.showModal();
-  mediaRenameName.select();
-});
-mediaRenameCancel.onclick = () => mediaRenameDialog.close();
-mediaRenameDialog.addEventListener("cancel", event => {
-  if (mediaRenameSubmit.disabled) event.preventDefault();
-});
-mediaRenameDialog.addEventListener("close", () => {
-  if (!mediaRenameDialog.open) mediaRenameFolder = null;
-});
-mediaRenameForm.onsubmit = action(async () => {
-  if (!mediaRenameFolder || mediaBusy) return;
-  const name = mediaRenameName.value.trim();
   if (!name) {
-    mediaRenameError.textContent = "Saisis le nouveau nom du dossier.";
-    mediaRenameError.hidden = false;
-    mediaRenameName.focus();
+    mediaNameError.textContent = "Saisis le nom du dossier.";
+    mediaNameError.hidden = false;
+    mediaName.focus();
     return;
   }
-  const {targets} = mediaRenameFolder;
-  mediaRenameError.hidden = true;
-  mediaRenameName.disabled = mediaRenameCancel.disabled = mediaRenameSubmit.disabled = true;
+  const {operation, targets} = mediaNameAction;
+  const rename = operation === "rename";
+  const key = folderKey(rename ? targets[0].id : "", {name});
+  const saveName = target => {
+    if (!rename) {
+      const row = cards.get(target.row.id)?.data || target.row;
+      if (Object.values(row.media_folders).some(folder => folderKey("",folder) === key)) return;
+    }
+    return mediaChange(target,{action:operation,name});
+  };
+  mediaNameError.hidden = true;
+  mediaName.disabled = mediaNameCancel.disabled = mediaNameSubmit.disabled = true;
   try {
-    const failures = await mediaBatch(targets, target => mediaChange(target,{action:"rename",name}),
-      "Dossier renommé",folderKey(targets[0].id,{name}));
+    const failures = await mediaBatch(targets, saveName, rename ? "Dossier renommé" : "Dossier disponible", key);
     if (failures.length) {
-      mediaRenameError.textContent = failures.join(" · ");
-      mediaRenameError.hidden = false;
+      mediaNameError.textContent = failures.join(" · ");
+      mediaNameError.hidden = false;
     } else {
-      mediaRenameDialog.close();
+      mediaNameDialog.close();
     }
   } catch (error) {
-    mediaRenameError.textContent = error.message;
-    mediaRenameError.hidden = false;
+    mediaNameError.textContent = error.message;
+    mediaNameError.hidden = false;
   } finally {
-    mediaRenameName.disabled = mediaRenameCancel.disabled = mediaRenameSubmit.disabled = false;
-    if (mediaRenameDialog.open) mediaRenameName.focus();
+    mediaName.disabled = mediaNameCancel.disabled = mediaNameSubmit.disabled = false;
+    if (mediaNameDialog.open) mediaName.focus();
   }
 });
 select(mediaDialog,"#media-launch").onclick = action(() =>
@@ -2315,7 +2340,7 @@ async function refreshScreens() {
       box.textContent = "Aucun écran associé. Après une mise à jour, vérifie que ecrans.json est dans le dossier de la régie.";
       holder.append(box);
     }
-  } catch (error) { notice(error.message,true); }
+  } catch (error) { noticeError(error); }
 }
 function organizerFields() {
   const isNew = organizerTarget.value === "new";

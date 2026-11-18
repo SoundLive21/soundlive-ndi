@@ -56,8 +56,9 @@ def memory_bytes():
 
 
 def hardware_info():
+    hostname = socket.gethostname()
     if sys.platform == "win32":
-        return dict(os=f"Windows {platform.release()}", architecture=platform.machine(),
+        return dict(hostname=hostname, os=f"Windows {platform.release()}", architecture=platform.machine(),
                     cpu=os.environ.get("PROCESSOR_IDENTIFIER", platform.processor()), cores=os.cpu_count())
     cpu = {}
     for line in Path("/proc/cpuinfo").read_text().splitlines():
@@ -66,6 +67,7 @@ def hardware_info():
             cpu.setdefault(key.strip(), value.strip())
     model_path = Path("/sys/firmware/devicetree/base/model")
     return dict(
+        hostname=hostname,
         os=platform.freedesktop_os_release().get("PRETTY_NAME", "Linux"),
         architecture=platform.machine(),
         model=model_path.read_text().rstrip("\0\n") if model_path.is_file() else "",
