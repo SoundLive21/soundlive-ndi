@@ -47,6 +47,21 @@ REQUIRED = {"commun.py", "ecran.py", "diagnostic.py", "mise_a_jour.py", "tableau
             "tableau.html", "acces-refuse.html", "regie-windows.py", "versions_regie.py"}
 
 
+def required_files(version):
+    if release_number(version) >= (1, 4, 50):
+        return REQUIRED | {"terminal.html", "terminal_ssh.py"}
+    return REQUIRED
+
+
+def software_version(source, filename):
+    for entry in ast.parse(source, filename=filename).body:
+        if (isinstance(entry, ast.Assign) and isinstance(entry.value, ast.Constant)
+                and any(isinstance(target, ast.Name) and target.id == "SOFTWARE_VERSION"
+                        for target in entry.targets)):
+            return entry.value.value if release_number(entry.value.value) else None
+    return None
+
+
 def repository(value):
     value = value.strip()
     if value.startswith("https://github.com/"):
@@ -184,19 +199,13 @@ def archive_files(archive, version, archive_name=ARCHIVE):
             if prefix != folder or name not in allowed or name in files:
                 raise ValueError(f"Entrée de publication inattendue : {item.filename}.")
             files[name] = source.read(item)
-    if not REQUIRED <= files.keys():
-        raise ValueError("La publication ne contient pas les fichiers nécessaires à la régie.")
+    missing = required_files(version) - files.keys()
+    if missing:
+        raise ValueError("Fichiers nécessaires absents de la publication : " + ", ".join(sorted(missing)))
     for filename, value in files.items():
         if filename.endswith(".py"):
             compile(value, filename, "exec")
-    declared = None
-    for filename in ("tableau.py", "commun.py"):
-        for item in ast.parse(files[filename]).body:
-            if (isinstance(item, ast.Assign) and isinstance(item.value, ast.Constant)
-                    and any(isinstance(t, ast.Name) and t.id == "SOFTWARE_VERSION" for t in item.targets)):
-                declared = item.value.value
-        if declared is not None:
-            break
+    declared = software_version(files["tableau.py"], "tableau.py") or software_version(files["commun.py"], "commun.py")
     if declared != version:
         raise ValueError("La version du ZIP diffère de celle de la publication GitHub.")
     return files

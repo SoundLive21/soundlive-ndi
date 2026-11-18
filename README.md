@@ -204,6 +204,17 @@ autre configuration NAT. Pour une régie Windows reliée à un réseau physique,
 valide le passage Internet avec un lecteur avant de l'utiliser en prestation.
 Un pare-feu existant doit autoriser le routage entre les deux interfaces.
 
+Sous Windows, sélectionne la carte des écrans et clique sur **Diagnostic**
+pour vérifier WinNAT, les NAT existants et les deux interfaces. Si
+l’activation échoue, la fenêtre indique également l’étape, le message et
+le code d’erreur PowerShell. **Copier le diagnostic** permet de récupérer le
+rapport entier. Le même diagnostic peut être exécuté depuis PowerShell
+en administrateur, dans le dossier de la régie :
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\regie-internet-windows.ps1 -Action diagnostic -Gateway 10.10.2.99
+```
+
 Renseigne l'IPv4 dédiée de la régie comme passerelle des lecteurs, et renseigne
 un ou deux DNS. Le partage route l'IPv4 et le DHCP reste à la charge du réseau
 d'installation. Le réglage Ubuntu est valable jusqu'au redémarrage de la régie.

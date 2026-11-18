@@ -46,37 +46,69 @@ def qr_bitmap(modules):
     return f"P6\n{width} {width}\n255\n".encode("ascii") + border + b"".join(rows) + border
 
 
+def internet_registry(section, field):
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\SoundLive\{section}",
+                        access=winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+        return json.loads(winreg.QueryValueEx(key, field)[0])
+
+
 def internet_state():
     try:
         if sys.platform == "win32":
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\SoundLive\Internet",
-                                access=winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
-                return json.loads(winreg.QueryValueEx(key, "Settings")[0])
+            return internet_registry("Internet", "Settings")
         return json.loads(Path("/run/soundlive-ndi-internet.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
 
+def internet_report(report):
+    lines = list(report["details"])
+    if not report.get("success"):
+        lines.extend(("", f"Étape : {report.get('stage', '—')}", f"Erreur : {report.get('error', '—')}",
+                      f"Code : {report.get('code', '—')} · HRESULT {report.get('hresult', '—')}"))
+    return "\n".join(lines)
+
+
 def change_internet(root, operation, gateway=None):
     args = [operation, str(IPv4Address(gateway))] if gateway else [operation]
     if sys.platform == "win32":
-        powershell = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+        system = Path(os.environ["SystemRoot"])
+        executable = "WindowsPowerShell/v1.0/powershell.exe"
+        powershell = str(system / "System32" / executable)
+        sysnative = system / "Sysnative" / executable
+        request = secrets.token_hex(16)
         parameters = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                      str(root / "regie-internet-windows.ps1"), "-Action", operation]
+                      str(root / "regie-internet-windows.ps1"), "-Action", operation, "-RequestId", request]
         if gateway:
             parameters.extend(("-Gateway", args[1]))
-        script = ("$ErrorActionPreference = 'Stop'; "
-                  "$process = Start-Process -FilePath $env:SOUNDLIVE_POWERSHELL "
+        script = ("[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); "
+                  "$ErrorActionPreference = 'Stop'; "
+                  "try { $process = Start-Process -FilePath $env:SOUNDLIVE_POWERSHELL "
                   "-ArgumentList $env:SOUNDLIVE_INTERNET_ARGS -Verb RunAs -Wait -PassThru -WindowStyle Hidden; "
-                  "exit $process.ExitCode")
-        run = subprocess.run([powershell, "-NoProfile", "-NonInteractive", "-Command", script],
-                             capture_output=True, text=True, errors="replace",
+                  "exit $process.ExitCode } catch { "
+                  "$cause = $_.Exception; while ($cause) { "
+                  "if ($cause -is [ComponentModel.Win32Exception] -and $cause.NativeErrorCode -eq 1223) { exit 1223 }; "
+                  "$cause = $cause.InnerException }; [Console]::Error.WriteLine($_.Exception.Message); exit 2 }")
+        run = subprocess.run([str(sysnative) if sysnative.is_file() else powershell,
+                              "-NoProfile", "-NonInteractive", "-Command", script],
+                             capture_output=True, encoding="utf-8", errors="replace",
                              creationflags=subprocess.CREATE_NO_WINDOW,
                              env={**os.environ, "SOUNDLIVE_POWERSHELL": powershell,
                                   "SOUNDLIVE_INTERNET_ARGS": subprocess.list2cmdline(parameters)})
-        if run.returncode:
-            raise RuntimeError(run.stderr.strip() or "La modification du partage Internet a échoué.")
+        if run.returncode == 1223:
+            raise RuntimeError("La demande d’autorisation administrateur a été annulée.")
+        try:
+            report = internet_registry("InternetDiagnostic", "LastReport")
+        except (OSError, ValueError):
+            report = None
+        if isinstance(report, dict) and report.get("request") == request:
+            if run.returncode or not report.get("success"):
+                raise RuntimeError(internet_report(report))
+            return internet_report(report) if operation == "diagnostic" else None
+        raise RuntimeError(run.stderr.strip() or
+                           f"PowerShell a quitté sans rapport (code {run.returncode}). "
+                           "Vérifie que le lanceur et regie-internet-windows.ps1 viennent du même kit.")
     else:
         command = ["/usr/bin/python3", "-I", str(root / "regie-internet.py"), *args]
         if os.geteuid() != 0:
@@ -249,6 +281,32 @@ class Launcher:
         actions = ttk.Frame(content)
         actions.pack(fill="x")
         results = Queue()
+        diagnostic = None
+
+        def show_report(text, failed):
+            report = tk.Toplevel(dialog)
+            report.title("Échec du partage Internet" if failed else "Diagnostic du partage Internet")
+            report.transient(dialog)
+            pane = ttk.Frame(report, padding=14)
+            pane.pack(fill="both", expand=True)
+            field = tk.Text(pane, width=75, height=12, wrap="word")
+            scrollbar = ttk.Scrollbar(pane, orient="vertical", command=field.yview)
+            field.configure(yscrollcommand=scrollbar.set)
+            field.grid(row=0, column=0, sticky="nsew")
+            scrollbar.grid(row=0, column=1, sticky="ns")
+            pane.columnconfigure(0, weight=1)
+            pane.rowconfigure(0, weight=1)
+            field.insert("1.0", text)
+            field.configure(state="disabled")
+
+            def copy_report():
+                report.clipboard_clear()
+                report.clipboard_append(text)
+
+            buttons = ttk.Frame(pane)
+            buttons.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+            ttk.Button(buttons, text="Copier le diagnostic", command=copy_report).pack(side="left")
+            ttk.Button(buttons, text="Fermer", command=report.destroy).pack(side="right")
 
         def refresh():
             state = internet_state()
@@ -262,37 +320,44 @@ class Launcher:
             enable.configure(state="normal" if selected.get() in addresses and not gateway else "disabled")
             disable.configure(state="normal" if gateway else "disabled")
             close.configure(state="normal")
+            if diagnostic is not None:
+                diagnostic.configure(state="normal")
             dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
 
         def apply(operation):
-            gateway = addresses.get(selected.get()) if operation == "activer" else None
+            gateway = addresses.get(selected.get()) if operation != "desactiver" else None
             if operation == "activer" and not gateway:
                 return
-            if not messagebox.askyesno("Partage Internet",
+            if operation != "diagnostic" and not messagebox.askyesno("Partage Internet",
                                        f"Activer le partage via {gateway} ?" if gateway else "Couper le partage Internet ?",
                                        parent=dialog):
                 return
-            status.set("Modification en cours…")
+            status.set("Diagnostic en cours…" if operation == "diagnostic" else "Modification en cours…")
             for button in (enable, disable, close, selector):
                 button.configure(state="disabled")
+            if diagnostic is not None:
+                diagnostic.configure(state="disabled")
             dialog.protocol("WM_DELETE_WINDOW", lambda: None)
 
             def run():
                 try:
-                    change_internet(self.tableau.ROOT, operation, gateway)
-                    results.put("")
+                    report = change_internet(self.tableau.ROOT, operation, gateway)
+                    results.put((report, False))
                 except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
-                    results.put(str(error))
+                    results.put((str(error), True))
 
             def receive():
                 try:
-                    error = results.get_nowait()
+                    report, failed = results.get_nowait()
                 except Empty:
                     dialog.after(250, receive)
                     return
                 refresh()
-                if error:
-                    messagebox.showerror("Partage Internet", error, parent=dialog)
+                if report:
+                    if sys.platform == "win32":
+                        show_report(report, failed)
+                    else:
+                        messagebox.showerror("Partage Internet", report, parent=dialog)
 
             threading.Thread(target=run, daemon=True).start()
             dialog.after(250, receive)
@@ -302,6 +367,9 @@ class Launcher:
         close = ttk.Button(actions, text="Fermer", command=dialog.destroy)
         enable.pack(side="left", padx=(0, 8))
         disable.pack(side="left")
+        if sys.platform == "win32":
+            diagnostic = ttk.Button(actions, text="Diagnostic", command=lambda: apply("diagnostic"))
+            diagnostic.pack(side="left", padx=(8, 0))
         close.pack(side="right")
         selector.bind("<<ComboboxSelected>>", lambda _event: refresh())
         refresh()
