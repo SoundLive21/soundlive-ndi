@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Terminal SSH · SoundLive</title>
+<style>
+:root{font:16px system-ui,sans-serif;color-scheme:dark;background:#100d13;color:#f4eef6}
+*{box-sizing:border-box}body{margin:0;padding:clamp(16px,4vw,34px);max-width:1050px;margin-inline:auto}
+[hidden]{display:none!important}
+header{display:flex;justify-content:space-between;gap:12px;align-items:center}h1{font-size:1.4rem;margin:0}
+p{color:#cfc1d0;line-height:1.4}
+form{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+label{display:grid;gap:5px;font-size:.84rem;flex:1 1 150px}
+input,button{padding:8px 10px;border:1px solid #5e4865;border-radius:8px;color:inherit;background:#211926;font:inherit}
+button{cursor:pointer;font-weight:600}
+button[type=submit]{background:#a52742;border-color:#be3b54}
+button:disabled{opacity:.5;cursor:default}
+pre{background:#0a090d;color:#d9f3e0;border:1px solid #4b3a51;border-radius:10px;overflow:auto;
+padding:12px;font:14px/1.35 ui-monospace,Consolas,monospace;min-height:14em;position:relative;margin:0}
+pre:focus-visible{outline:2px solid #a9d6ff;outline-offset:3px}
+#state[data-level=error]{color:#ffacba}
+kbd{font:inherit;color:#d9f3e0}
+</style>
+</head>
+<body>
+<header><h1 id="title">Terminal SSH</h1><button id="disconnect" type="button" disabled>Déconnecter</button></header>
+<p id="state" role="status">Chargement du poste…</p>
+<form id="connect" hidden>
+  <label>Compte SSH<input name="user" maxlength="64" required autocomplete="username"></label>
+  <label>Phrase secrète de la clé<input name="passphrase" type="password" maxlength="512" autocomplete="off"></label>
+  <label>Empreinte SSH vérifiée<input name="fingerprint" maxlength="50" placeholder="SHA256:…"></label>
+  <button type="submit">Connecter</button>
+</form>
+<pre id="screen" tabindex="0" aria-label="Terminal SSH interactif"></pre>
+<p>Le terminal utilise la clé privée du poste de régie. Clique dans la zone du terminal pour saisir du texte. <kbd>Ctrl</kbd> + <kbd>C</kbd> interrompt la commande.</p>
+<script>
+"use strict";
+const target = new URLSearchParams(location.search).get("id") || "regie";
+const form = document.querySelector("#connect");
+const terminal = document.querySelector("#screen");
+const status = document.querySelector("#state");
+const disconnect = document.querySelector("#disconnect");
+let session = "", buffer = "", timer = 0, connecting = false;
+function message(text, error = false) {
+  status.textContent = text;
+  status.dataset.level = error ? "error" : "";
+}
+async function api(operation, data) {
+  const reply = await fetch("/api/ssh/" + operation, {method:"POST", headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(data), cache:"no-store"});
+  const payload = await reply.json();
+  if (!reply.ok) throw Error(payload.error || "Le terminal n’est pas disponible.");
+  return payload;
+}
+function controls() {
+  form.hidden = !!session;
+  disconnect.disabled = !session;
+  form.querySelector("button").disabled = connecting;
+}
+async function finish(reason, failed = false) {
+  const current = session;
+  session = ""; buffer = "";
+  clearTimeout(timer);
+  controls();
+  message(reason, failed);
+  if (current) await api("end", {session:current}).catch(() => {});
+}
+async function sync() {
+  const current = session;
+  if (!current) return;
+  const input = buffer.slice(0,4096);
+  buffer = buffer.slice(input.length);
+  try {
+    const data = await api("sync", {session:current, input});
+    if (session !== current) return;
+    const value = data.screen.slice();
+    if (!data.closed && data.cursor) {
+      const [x,y] = data.cursor;
+      if (value[y] && value[y][x] === " ") value[y] = value[y].slice(0,x) + "▏" + value[y].slice(x+1);
+    }
+    const next = value.join("\n");
+    if (next !== terminal.textContent) terminal.textContent = next;
+    if (data.closed) await finish("Session SSH terminée.");
+    else timer = setTimeout(sync, buffer.length ? 0 : 250);
+  } catch (error) {
+    if (session === current) await finish(error.message, true);
+  }
+}
+form.onsubmit = async event => {
+  event.preventDefault();
+  if (session || connecting) return;
+  connecting = true;
+  controls();
+  message("Connexion SSH en cours…");
+  try {
+    const data = Object.fromEntries(new FormData(form));
+    const opened = await api("start", {id:target, ...data});
+    session = opened.session;
+    terminal.textContent = "";
+    message("Session SSH ouverte");
+    terminal.focus();
+    sync();
+  } catch (error) {
+    message(error.message, true);
+  } finally {
+    form.elements.namedItem("passphrase").value = "";
+    connecting = false;
+    controls();
+  }
+};
+const special = {Enter:"\r", Backspace:"\x7f", Tab:"\t", Escape:"\x1b", ArrowUp:"\x1b[A",
+  ArrowDown:"\x1b[B", ArrowRight:"\x1b[C", ArrowLeft:"\x1b[D", Home:"\x1b[H", End:"\x1b[F",
+  Delete:"\x1b[3~", Insert:"\x1b[2~", PageUp:"\x1b[5~", PageDown:"\x1b[6~",
+  F1:"\x1bOP", F2:"\x1bOQ", F3:"\x1bOR", F4:"\x1bOS"};
+terminal.addEventListener("keydown", event => {
+  if (!session || event.metaKey || event.isComposing) return;
+  const altGraph = event.getModifierState("AltGraph");
+  if (!altGraph && event.ctrlKey && (event.shiftKey || event.key.toLowerCase() === "v")) return;
+  let value = special[event.key] || (Array.from(event.key).length === 1 ? event.key : "");
+  if (!altGraph && event.ctrlKey && /^[a-z@\[\]\\^_]$/i.test(value)) value = String.fromCharCode(value.toUpperCase().charCodeAt(0) & 31);
+  if (!value) return;
+  event.preventDefault();
+  if (buffer.length < 16000) buffer += (event.altKey && !altGraph ? "\x1b" : "") + value;
+});
+terminal.addEventListener("paste", event => {
+  if (!session) return;
+  event.preventDefault();
+  buffer = (buffer + event.clipboardData.getData("text").replace(/\r?\n/g,"\r")).slice(0,16000);
+});
+disconnect.onclick = () => finish("Session SSH fermée.");
+window.addEventListener("pagehide", () => {
+  if (session) fetch("/api/ssh/end",{method:"POST",keepalive:true,headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({session})}).catch(() => {});
+});
+api("target", {id:target}).then(data => {
+  document.title = "SSH · " + data.name;
+  document.querySelector("#title").textContent = data.name + " · SSH";
+  form.elements.namedItem("user").value = data.user;
+  form.hidden = false;
+  message(data.address + " · Port 22");
+}).catch(error => { form.hidden = true; message(error.message,true); });
+</script>
+</body>
+</html>

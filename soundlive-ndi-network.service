@@ -1,0 +1,9 @@
+[Unit]
+Description=IPv4 SoundLive-NDI et bascule Ethernet/Wi-Fi
+After=NetworkManager.service
+Requires=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/soundlive-ndi-network
+TimeoutStartSec=45

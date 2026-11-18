@@ -15,6 +15,8 @@ import tarfile
 from tempfile import TemporaryDirectory
 from urllib.parse import urlencode
 
+from versions_regie import FILES as PUBLICATION_FILES, required_files, software_version
+
 
 def run(*args, capture=False, cwd=None):
     process = subprocess.run(args, cwd=cwd, check=True, stdout=subprocess.PIPE if capture else None)
@@ -71,6 +73,10 @@ def generate_assets(commit, key, folder):
     source = folder / "source"
     source.mkdir()
     tracked = git_paths("ls-tree", "-r", "--name-only", "-z", commit)
+    missing = {"publier-version.py", *required_files(software_version(
+        git("show", f"{commit}:tableau.py"), "tableau.py"))} - tracked
+    if missing:
+        raise ValueError("Fichiers absents du commit à publier : " + ", ".join(sorted(missing)))
     archive = subprocess.check_output(["git", "archive", "--format=tar", commit,
                                        "--", *sorted(tracked & PUBLICATION_FILES)])
     with tarfile.open(fileobj=io.BytesIO(archive)) as snapshot:
@@ -151,11 +157,14 @@ def main():
         raise ValueError("Lance le script dans ton dépôt SoundLive-NDI.")
     if git("branch", "--show-current") != "main":
         raise ValueError("Place-toi sur la branche main pour publier.")
-    version_match = re.search(r'^SOFTWARE_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$',
-                              (root / "tableau.py").read_text(encoding="utf-8"), re.MULTILINE)
-    if version_match is None:
+    version = software_version((root / "tableau.py").read_bytes(), "tableau.py")
+    if version is None:
         raise ValueError("Version introuvable dans tableau.py.")
-    version = version_match[1]
+    missing = {"publier-version.py", *required_files(version)} - {
+        name for name in PUBLICATION_FILES if (root / name).is_file()
+    }
+    if missing:
+        raise ValueError("Fichiers nécessaires absents du dépôt : " + ", ".join(sorted(missing)))
     tag = f"v{version}"
     ref = f"refs/tags/{tag}"
     title = f"SoundLive-NDI {version}"
@@ -215,15 +224,6 @@ def main():
 
 
 # Seuls les fichiers du projet entrent dans le commit et le ZIP de publication.
-PUBLICATION_FILES = frozenset("""
-.gitignore LICENSE LICENSE.txt COPYING README.md LISEZ-MOI.txt
-SoundLive-NDI.c SoundLive-NDI.exe acces-refuse.html acces_regie.py commun.py
-compiler-lecteur-windows.ps1 demarrer-regie-ubuntu.sh demarrer-windows.bat
-diagnostic.py ecran.py installer-client-windows.py installer-client.cmd
-installer-client.sh installer-pi.sh installer-ubuntu.sh lancer-client.py
-lecteur-ndi-ubuntu.c lecteur-ndi-windows.exe mise_a_jour.py publier-version.py
-qrencoder.py regie-windows.py tableau.html tableau.py versions_regie.py
-""".split())
 SOURCE_FILES = PUBLICATION_FILES | {"publier-github.py"}
 ASSET_NAMES = ("SoundLive-NDI.zip", "SoundLive-NDI.zip.sig",
                "SoundLive-Ecrans.zip", "SoundLive-Ecrans.zip.sig")
@@ -231,5 +231,5 @@ ASSET_NAMES = ("SoundLive-NDI.zip", "SoundLive-NDI.zip.sig",
 if __name__ == "__main__":
     try:
         main()
-    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, SyntaxError, subprocess.CalledProcessError) as error:
         sys.exit(f"Publication interrompue : {error}")

@@ -1,0 +1,10 @@
+[Unit]
+Description=Surveillance du lien Ethernet des lecteurs SoundLive-NDI
+
+[Timer]
+OnBootSec=2s
+OnUnitInactiveSec=3s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
