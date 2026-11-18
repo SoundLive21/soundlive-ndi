@@ -4,11 +4,13 @@
 # Société SoundLive
 """Lanceur graphique de la régie SoundLive-NDI."""
 from datetime import datetime
+from ipaddress import IPv4Address
 import json
 import os
 from pathlib import Path
 from queue import Empty, Queue
 import secrets
+import shutil
 import subprocess
 import sys
 import threading
@@ -44,6 +46,49 @@ def qr_bitmap(modules):
     return f"P6\n{width} {width}\n255\n".encode("ascii") + border + b"".join(rows) + border
 
 
+def internet_state():
+    try:
+        if sys.platform == "win32":
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\SoundLive\Internet",
+                                access=winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+                return json.loads(winreg.QueryValueEx(key, "Settings")[0])
+        return json.loads(Path("/run/soundlive-ndi-internet.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def change_internet(root, operation, gateway=None):
+    args = [operation, str(IPv4Address(gateway))] if gateway else [operation]
+    if sys.platform == "win32":
+        powershell = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+        parameters = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                      str(root / "regie-internet-windows.ps1"), "-Action", operation]
+        if gateway:
+            parameters.extend(("-Gateway", args[1]))
+        script = ("$ErrorActionPreference = 'Stop'; "
+                  "$process = Start-Process -FilePath $env:SOUNDLIVE_POWERSHELL "
+                  "-ArgumentList $env:SOUNDLIVE_INTERNET_ARGS -Verb RunAs -Wait -PassThru -WindowStyle Hidden; "
+                  "exit $process.ExitCode")
+        run = subprocess.run([powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+                             capture_output=True, text=True, errors="replace",
+                             creationflags=subprocess.CREATE_NO_WINDOW,
+                             env={**os.environ, "SOUNDLIVE_POWERSHELL": powershell,
+                                  "SOUNDLIVE_INTERNET_ARGS": subprocess.list2cmdline(parameters)})
+        if run.returncode:
+            raise RuntimeError(run.stderr.strip() or "La modification du partage Internet a échoué.")
+    else:
+        command = ["/usr/bin/python3", "-I", str(root / "regie-internet.py"), *args]
+        if os.geteuid() != 0:
+            pkexec = shutil.which("pkexec")
+            if not pkexec:
+                raise RuntimeError("Installe pkexec et nftables, ou lance le script regie-internet.py avec sudo.")
+            command.insert(0, pkexec)
+        run = subprocess.run(command, capture_output=True, text=True)
+        if run.returncode:
+            raise RuntimeError(run.stderr.strip() or "La modification du partage Internet a échoué.")
+
+
 class Launcher:
     def __init__(self, window, tableau, access):
         self.window = window
@@ -63,6 +108,7 @@ class Launcher:
         self.status = tk.StringVar(value="Prêt à démarrer")
         self.remote_address = tk.StringVar(value="—")
         self.connection_status = tk.StringVar(value="Accès distant arrêté")
+        self.internet = None
 
         window.title(f"{APP_NAME} · Régie {tableau.SOFTWARE_VERSION}")
         window.minsize(620, 510)
@@ -148,7 +194,10 @@ class Launcher:
         ttk.Label(self.qr_panel, text="Scanne ce code depuis un appareil connecté au réseau de la régie.",
                   wraplength=290).pack(side="left", fill="x", expand=True)
 
-        ttk.Label(panel, text=COPYRIGHT).grid(row=7, sticky="w", pady=(8, 0))
+        share = ttk.Frame(panel)
+        share.grid(row=7, sticky="ew", pady=(10, 0))
+        ttk.Button(share, text="Partage Internet", command=self.internet_dialog).pack(side="left")
+        ttk.Label(panel, text=COPYRIGHT).grid(row=8, sticky="w", pady=(8, 0))
         window.update_idletasks()
         viewport.configure(width=min(panel.winfo_reqwidth(), window.winfo_screenwidth() * 9 // 10),
                            height=min(panel.winfo_reqheight(), window.winfo_screenheight() * 4 // 5))
@@ -173,6 +222,89 @@ class Launcher:
         preferred = next((label for label, ip in self.interfaces if ip == configured_ip), "")
         self.interface.set(current if current in labels else preferred or next(iter(labels), ""))
         self.controls()
+
+    def internet_dialog(self):
+        if self.internet is not None and self.internet.winfo_exists():
+            self.internet.lift()
+            return
+        self.load_interfaces()
+        dialog = tk.Toplevel(self.window)
+        self.internet = dialog
+        dialog.title("Partage Internet · Réseau écrans")
+        dialog.transient(self.window)
+        content = ttk.Frame(dialog, padding=18)
+        content.pack(fill="both", expand=True)
+        ttk.Label(content, text="Interface du réseau écrans").pack(anchor="w")
+        addresses = dict(self.interfaces)
+        selected = tk.StringVar()
+        selector = ttk.Combobox(content, width=48, textvariable=selected, values=list(addresses), state="readonly")
+        selector.pack(fill="x", pady=(3, 10))
+        if len(addresses) == 1:
+            selected.set(next(iter(addresses)))
+        ttk.Label(content, wraplength=440,
+                  text="La régie partage sa connexion Internet vers ce réseau. Utilise son IP comme passerelle sur les lecteurs."
+                  ).pack(anchor="w", pady=(0, 8))
+        status = tk.StringVar()
+        ttk.Label(content, textvariable=status, wraplength=440).pack(anchor="w", pady=(0, 8))
+        actions = ttk.Frame(content)
+        actions.pack(fill="x")
+        results = Queue()
+
+        def refresh():
+            state = internet_state()
+            gateway = state.get("gateway")
+            status.set(f"Partage configuré · {gateway}" if gateway else "Partage désactivé")
+            if gateway:
+                label = next((label for label, ip in addresses.items() if ip == gateway), "")
+                if label:
+                    selected.set(label)
+            selector.configure(state="disabled" if gateway else "readonly")
+            enable.configure(state="normal" if selected.get() in addresses and not gateway else "disabled")
+            disable.configure(state="normal" if gateway else "disabled")
+            close.configure(state="normal")
+            dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+
+        def apply(operation):
+            gateway = addresses.get(selected.get()) if operation == "activer" else None
+            if operation == "activer" and not gateway:
+                return
+            if not messagebox.askyesno("Partage Internet",
+                                       f"Activer le partage via {gateway} ?" if gateway else "Couper le partage Internet ?",
+                                       parent=dialog):
+                return
+            status.set("Modification en cours…")
+            for button in (enable, disable, close, selector):
+                button.configure(state="disabled")
+            dialog.protocol("WM_DELETE_WINDOW", lambda: None)
+
+            def run():
+                try:
+                    change_internet(self.tableau.ROOT, operation, gateway)
+                    results.put("")
+                except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+                    results.put(str(error))
+
+            def receive():
+                try:
+                    error = results.get_nowait()
+                except Empty:
+                    dialog.after(250, receive)
+                    return
+                refresh()
+                if error:
+                    messagebox.showerror("Partage Internet", error, parent=dialog)
+
+            threading.Thread(target=run, daemon=True).start()
+            dialog.after(250, receive)
+
+        enable = ttk.Button(actions, text="Activer", command=lambda: apply("activer"))
+        disable = ttk.Button(actions, text="Désactiver", command=lambda: apply("desactiver"))
+        close = ttk.Button(actions, text="Fermer", command=dialog.destroy)
+        enable.pack(side="left", padx=(0, 8))
+        disable.pack(side="left")
+        close.pack(side="right")
+        selector.bind("<<ComboboxSelected>>", lambda _event: refresh())
+        refresh()
 
     def reveal_password(self):
         self.entry.configure(show="" if self.visible.get() else "•")

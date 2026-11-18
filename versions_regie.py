@@ -33,6 +33,7 @@ FILES = frozenset((
     "ecran.py", "diagnostic.py", "mise_a_jour.py", "lancer-client.py",
     "installer-client.sh", "installer-client.cmd", "installer-client-windows.py",
     "preparer-lecteur-linux.sh", "preparer-lecteur-windows.ps1",
+    "regie-internet.py", "regie-internet-windows.ps1",
     "soundlive-ndi-network-static.sh", "soundlive-ndi-network-windows.ps1",
     "soundlive-ndi-network.service", "soundlive-ndi-network.timer",
     "installer-pi.sh", "installer-ubuntu.sh", "lecteur-ndi-ubuntu.c", "compiler-lecteur-windows.ps1",

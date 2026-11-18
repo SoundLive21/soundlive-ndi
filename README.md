@@ -116,66 +116,99 @@ Paquets de développement [SDL2](https://www.libsdl.org/release/).
 
 ### Préparer un lecteur avec une IPv4 fixe
 
-Les exemples utilisent trois adresses différentes pour trois lecteurs. Pour chaque
-lecteur, Ethernet et Wi-Fi partagent sa propre IPv4. Utilise une adresse libre
-hors de la plage DHCP, et relie les deux accès réseau au même sous-réseau.
-Ethernet est prioritaire. Au retrait du câble, le Wi-Fi récupère l'adresse après
-son association à la borne. Une courte interruption est possible.
+Lance la préparation depuis la session locale du lecteur. Branche l'Ethernet
+sur un réseau qui fournit un bail DHCP et donne accès à Internet. Le script
+essaie d'obtenir ce bail pour télécharger les paquets, dont FFmpeg, et préparer
+le moteur NDI. Les profils fixes `SOUNDLIVE-ETHERNET` et `SOUNDLIVE-WIFI` ne sont
+mis en service qu'après cette phase. Si le réseau d'installation est différent
+du réseau de diffusion, ajoute `--attendre-reseau-ecrans` ou
+`-AttendreReseauEcrans`. Le script attend alors que tu déplaces le câble
+avant d'appliquer l'IP fixe. Si les téléchargements passent déjà par une autre interface,
+utilise `--sans-dhcp-install` sous Linux ou `-SansDhcpInstallation` sous Windows.
 
-Lance ces commandes depuis le dossier extrait et la session locale du lecteur.
-Une installation neuve peut télécharger des dépendances. Prévois un accès
-Internet avant de passer sur le réseau isolé des écrans. Active l'ouverture
-automatique de la session si tu veux voir le lecteur démarrer dès l'allumage.
+Les deux interfaces d'un lecteur partagent sa propre IP fixe sur le même
+sous-réseau, hors de la plage DHCP. Ethernet est prioritaire. Dans les exemples,
+`10.10.2.99` est la passerelle du réseau écrans et l'adresse de la régie. Choisis
+ta passerelle et tes DNS selon ton installation. Le deuxième DNS est facultatif.
+
+Depuis la régie, crée une clé SSH dédiée si nécessaire et copie le fichier
+`id_soundlive.pub` à côté du kit sur le lecteur. Sous Linux, exécute
+`ssh-keygen -t ed25519 -f ~/.ssh/id_soundlive`. Sous PowerShell, exécute
+`ssh-keygen -t ed25519 -f "$env:USERPROFILE\.ssh\id_soundlive"`. Garde
+la clé privée dans le profil de la régie. Le script installe le serveur SSH
+si tu lui fournis la clé publique. Il affiche ensuite l'empreinte SSH du
+lecteur. Compare-la à celle proposée lors de ta première connexion.
+Depuis une régie Linux, utilise par exemple
+`ssh -i ~/.ssh/id_soundlive soundlive@10.10.2.103`. Dans PowerShell sur
+la régie, utilise `ssh -i "$env:USERPROFILE\.ssh\id_soundlive" soundlive@10.10.2.103`.
 
 ```bash
-# Raspberry Pi OS 64 bits
 bash installer-client.sh --plateforme pi --preparer \
-  --hote ndi-player-03 --ip 10.10.2.103/24 --wifi "Ecrans" \
-  --regie http://10.10.2.99:8765 --code CODE
-
-# Ubuntu Desktop 64 bits
-bash installer-client.sh --plateforme ubuntu --preparer \
-  --hote ndi-player-04 --ip 10.10.2.104/24 --wifi "Ecrans" \
-  --regie http://10.10.2.99:8765 --code CODE
+  --hote ndi-player-03 --ip 10.10.2.103/24 --wifi "Ecrans" --saisir-cle-wifi \
+  --passerelle 10.10.2.99 --dns 1.1.1.1 --dns2 9.9.9.9 \
+  --cle-ssh ./id_soundlive.pub --regie http://10.10.2.99:8765 --code CODE
 ```
 
-Sous Linux, NetworkManager doit gérer les deux cartes. Le script réutilise le
-profil Wi-Fi du SSID ou propose de s'y connecter pour enregistrer la clé.
-Sur un réseau sans DHCP, utilise un profil Wi-Fi déjà enregistré. Le script
-installe le FFmpeg de la distribution pour la vidéo locale. Ajoute `--verifier`
-pour vérifier les paramètres et la détection des cartes sans changer le système.
-`--passerelle` et `--dns` sont facultatifs. Les options `--ethernet` et
-`--interface-wifi` permettent de choisir une carte si plusieurs sont présentes.
-Pour diagnostiquer la bascule, utilise `journalctl -u soundlive-ndi-network.service -b`.
+Pour Ubuntu Desktop 64 bits, remplace `--plateforme pi` par
+`--plateforme ubuntu` et adapte le hostname et l'IP. NetworkManager doit
+gérer les deux cartes. Le SSID désigne le réseau Wi-Fi réel. Sans
+`--saisir-cle-wifi`, le script réutilise un profil enregistré du même SSID
+si possible ou demande la clé WPA2. Pour la fournir depuis un fichier privé
+contenant la clé sur la première ligne, remplace `--saisir-cle-wifi` par
+`--cle-wifi-fichier /chemin/prive/wifi.txt`. Utilise `--wifi-ouvert` pour un
+SSID sans mot de passe. `--verifier` vérifie les paramètres et la détection
+des cartes. `--ethernet` et `--interface-wifi` sélectionnent les cartes si
+plusieurs sont présentes. Pour diagnostiquer la bascule, utilise
+`journalctl -u soundlive-ndi-network.service -b`.
 
 ```powershell
 # Windows 10 ou 11 x64, PowerShell en administrateur sous le compte du lecteur
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\preparer-lecteur-windows.ps1 `
-  -Hote ndi-player-05 -Ip 10.10.2.105/24 -Wifi "Ecrans" `
-  -Regie http://10.10.2.99:8765 -Code CODE
+  -Hote ndi-player-05 -Ip 10.10.2.105/24 -Wifi "Ecrans" -SaisirCleWifi `
+  -Passerelle 10.10.2.99 -Dns 1.1.1.1 -Dns2 9.9.9.9 `
+  -CleSsh .\id_soundlive.pub -Regie http://10.10.2.99:8765 -Code CODE
 ```
 
-Sous Windows, le script réutilise le profil Wi-Fi ou demande le mot de passe
-WPA2 pour en créer un. Indique `-WifiOuvert` si le réseau n'a pas de mot de passe.
-Pour un profil existant, utilise `-ProfilWifi` si son nom diffère du SSID.
-`-ProfilWifiXml` importe un profil exporté. Utilise les cartes dédiées aux écrans
-car leur ancienne configuration IPv4 est remplacée. Le script installe Python
-avec Tcl/Tk et FFmpeg avec WinGet si nécessaire. Le moteur NDI Windows peut
-être déjà installé ou fourni avec `-Lecteur` et son `SDL2.dll` x64. Pour le
-compiler pendant l'installation, fournis `-SdlSdk C:\SDK\SDL2` et dispose
-du SDK NDI 6, du runtime NDI 6 et des outils Visual Studio Build Tools C++ x64.
-Le chemin du SDK NDI peut être spécifié avec `-NdiSdk`. Pour choisir les cartes,
-utilise `-Ethernet` et `-InterfaceWifi`. Les options `-Passerelle` et
-`-Dns` sont facultatives. `-Ffplay` accepte un binaire autonome dont tu
-disposes déjà. `-Verifier` valide les paramètres et la détection des cartes.
-Le diagnostic réseau est dans
-`C:\Program Files\SoundLive-NDI\Network\reseau.log` en cas d'erreur.
+Sous Windows, la clé SSH publique est ajoutée au fichier OpenSSH des comptes
+administrateurs avec les permissions requises. Le script réutilise le profil
+Wi-Fi du SSID ou demande la clé WPA2. `-SaisirCleWifi` redemande la clé.
+`-CleWifiFichier` prend un fichier privé contenant la clé sur la première
+ligne, `-WifiOuvert` sélectionne un réseau ouvert et `-ProfilWifiXml`
+importe un profil pour le même SSID. Les deux cartes doivent être dédiées
+au lecteur. Le script renomme les cartes et remplace leur configuration IPv4.
+Il installe Python avec Tcl/Tk et FFmpeg avec WinGet si nécessaire. Le moteur
+NDI Windows peut être déjà installé ou fourni avec `-Lecteur` et son
+`SDL2.dll` x64. Pour le compiler, fournis `-SdlSdk C:\SDK\SDL2` et dispose
+du SDK et du runtime NDI 6, ainsi que de Visual Studio Build Tools C++ x64.
+`-NdiSdk` définit le chemin du SDK NDI. `-Ethernet` et `-InterfaceWifi`
+sélectionnent les cartes. `-Ffplay` accepte un binaire autonome existant.
+`-Verifier` vérifie les paramètres et la détection des cartes. Le journal
+réseau se trouve dans `C:\Program Files\SoundLive-NDI\Network\reseau.log`.
 
 Un lecteur déjà associé conserve son association avec la commande sans code.
-Redémarre, vérifie son retour dans la régie avec le câble branché, puis
-débranche et rebranche le câble. Le lecteur doit retrouver la même IPv4.
-Envoie ensuite un JPG et un MP4 depuis **Images et vidéos** et lance leur
-lecture en mode média local.
+Pour que le lecteur démarre dès l'allumage, active l'ouverture automatique
+de la session graphique. Après redémarrage, débranche et rebranche le câble
+pour vérifier que la régie retrouve le lecteur avec la même IPv4. Teste ensuite
+un JPG et un MP4 via **Images et vidéos** en mode média local.
+
+### Partager Internet depuis la régie
+
+Dans le lanceur graphique, ouvre **Partage Internet**, sélectionne l'IPv4 de
+la carte dédiée aux écrans et clique sur **Activer** ou **Désactiver**. La
+régie prend comme sortie l'interface de sa route IPv4 vers Internet. Ses deux
+interfaces doivent être sur des sous-réseaux différents. Sur Ubuntu, installe
+`nftables` et assure-toi que `pkexec` est disponible pour l'élévation
+graphique. Sur Windows, cette option utilise WinNAT et demande une validation
+administrateur. WinNAT doit être disponible sur le poste et libre de toute
+autre configuration NAT. Pour une régie Windows reliée à un réseau physique,
+valide le passage Internet avec un lecteur avant de l'utiliser en prestation.
+Un pare-feu existant doit autoriser le routage entre les deux interfaces.
+
+Renseigne l'IPv4 dédiée de la régie comme passerelle des lecteurs, et renseigne
+un ou deux DNS. Le partage route l'IPv4 et le DHCP reste à la charge du réseau
+d'installation. Le réglage Ubuntu est valable jusqu'au redémarrage de la régie.
+Sous Windows, utilise **Désactiver** pour retirer le NAT SoundLive et restaurer
+les réglages de routage des deux interfaces.
 
 ## Publier une source NDI sur le réseau local
 
