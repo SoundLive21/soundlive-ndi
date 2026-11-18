@@ -3,7 +3,7 @@ SoundLive-NDI
 Auteur : DUVERNOY Matthieu & ChatGPT
 contact@soundlive.fr
 Société SoundLive
-Régie 1.4.24 · Lecteurs 1.4.14
+Régie 1.4.48 · Lecteurs 1.4.26
 
 1. SUR LE PC WINDOWS QUI DIFFUSE AVEC OBS
    Ferme l’ancien tableau et décompresse tout le ZIP dans le dossier de
@@ -39,6 +39,10 @@ RÉGIE SOUS UBUNTU DESKTOP
    Démarrage en console sur Ubuntu : python3 tableau.py
 
 2. AJOUTER UN ÉCRAN
+   Pour configurer en une commande le hostname, la même IPv4 via le Wi-Fi et
+   Ethernet et la lecture des médias locaux, suis « Préparer un lecteur avec
+   une IPv4 fixe » dans README.md.
+
    Le nouveau point d’entrée est installer-client.sh sous Linux et
    installer-client.cmd sous Windows. Le tableau indique la commande selon
    la plateforme. Consulte README.md pour installer le SDK NDI sur un Pi neuf

@@ -6,6 +6,10 @@
 set -euo pipefail
 base=$(cd -- "$(dirname -- "$0")" && pwd)
 if [[ ${1:-} == --reseau-auto && $# -eq 1 ]]; then
+    if [[ -e /etc/soundlive-ndi-network.conf ]]; then
+        echo "La bascule avec IPv4 fixe est déjà configurée. Utilise --preparer pour la modifier."
+        exit 1
+    fi
     if [[ ! -x /usr/bin/nmcli ]] || ! systemctl is-active --quiet NetworkManager.service; then
         echo "La bascule Wi-Fi nécessite NetworkManager actif sur ce lecteur."
         exit 1
@@ -86,6 +90,12 @@ if [[ -z $kind ]]; then
     else
         kind=ubuntu
     fi
+fi
+if [[ ${1:-} == --preparer ]]; then
+    case "$kind" in
+        pi|ubuntu) exec bash "$base/preparer-lecteur-linux.sh" "$kind" "${@:2}" ;;
+        *) echo "Plateforme attendue : pi ou ubuntu."; exit 2 ;;
+    esac
 fi
 case "$kind" in
     pi)

@@ -29,6 +29,10 @@ if ! /usr/bin/python3 -c 'import gi; gi.require_version("Gtk", "3.0"); from gi.r
     sudo apt update
     sudo apt install -y python3-gi gir1.2-gtk-3.0
 fi
+if ! command -v ffplay >/dev/null; then
+    sudo apt update
+    sudo apt install -y ffmpeg
+fi
 if [[ ${XDG_SESSION_TYPE:-} == wayland ]] && ! command -v wlr-randr >/dev/null; then
     sudo apt install -y wlr-randr
 elif [[ ${XDG_SESSION_TYPE:-} == x11 ]] && ! command -v xrandr >/dev/null; then
@@ -49,6 +53,9 @@ trap 'rm -f -- "$rule"' EXIT
 printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff\n' "$(id -un)" > "$rule"
 sudo visudo -cf "$rule"
 sudo -v
+if [[ -n ${SOUNDLIVE_NETWORK_PREPARATION:-} ]]; then
+    bash "$here/preparer-lecteur-linux.sh" appliquer "$SOUNDLIVE_NETWORK_PREPARATION"
+fi
 if ! $update; then
     /usr/bin/python3 "$here/ecran.py" associer "$1" "$2"
 elif [[ $# -eq 2 ]]; then

@@ -65,6 +65,8 @@ while ($true) {
     register = rf"""
 $ErrorActionPreference = 'Stop'
 $name = 'SoundLive-NDI Network'
+$static = Join-Path $env:ProgramFiles 'SoundLive-NDI\Network\configuration.json'
+if (Test-Path -LiteralPath $static) {{ throw 'La bascule IPv4 fixe est deja configuree.' }}
 $existing = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
 if ($existing -and $existing.State -eq 'Running') {{ Stop-ScheduledTask -TaskName $name }}
 $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument '-NoProfile -NonInteractive -EncodedCommand {encoded}'

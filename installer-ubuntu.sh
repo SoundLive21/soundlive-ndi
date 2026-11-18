@@ -197,6 +197,9 @@ rule="$temp/sudoers"
 printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff\n' "$account" >"$rule"
 sudo visudo -cf "$rule"
 sudo -v
+if [[ -n ${SOUNDLIVE_NETWORK_PREPARATION:-} ]]; then
+    bash "$here/preparer-lecteur-linux.sh" appliquer "$SOUNDLIVE_NETWORK_PREPARATION"
+fi
 
 if ! $update; then
     SOUNDLIVE_PLAYER=ubuntu /usr/bin/python3 "$here/ecran.py" associer "$1" "$2"

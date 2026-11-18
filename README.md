@@ -114,6 +114,69 @@ powershell -NoProfile -File .\compiler-lecteur-windows.ps1 -SdlSdk C:\SDK\SDL2
 SDK et runtime NDI sur [NDI](https://ndi.video/for-developers/ndi-sdk/download/).
 Paquets de développement [SDL2](https://www.libsdl.org/release/).
 
+### Préparer un lecteur avec une IPv4 fixe
+
+Les exemples utilisent trois adresses différentes pour trois lecteurs. Pour chaque
+lecteur, Ethernet et Wi-Fi partagent sa propre IPv4. Utilise une adresse libre
+hors de la plage DHCP, et relie les deux accès réseau au même sous-réseau.
+Ethernet est prioritaire. Au retrait du câble, le Wi-Fi récupère l'adresse après
+son association à la borne. Une courte interruption est possible.
+
+Lance ces commandes depuis le dossier extrait et la session locale du lecteur.
+Une installation neuve peut télécharger des dépendances. Prévois un accès
+Internet avant de passer sur le réseau isolé des écrans. Active l'ouverture
+automatique de la session si tu veux voir le lecteur démarrer dès l'allumage.
+
+```bash
+# Raspberry Pi OS 64 bits
+bash installer-client.sh --plateforme pi --preparer \
+  --hote ndi-player-03 --ip 10.10.2.103/24 --wifi "Ecrans" \
+  --regie http://10.10.2.99:8765 --code CODE
+
+# Ubuntu Desktop 64 bits
+bash installer-client.sh --plateforme ubuntu --preparer \
+  --hote ndi-player-04 --ip 10.10.2.104/24 --wifi "Ecrans" \
+  --regie http://10.10.2.99:8765 --code CODE
+```
+
+Sous Linux, NetworkManager doit gérer les deux cartes. Le script réutilise le
+profil Wi-Fi du SSID ou propose de s'y connecter pour enregistrer la clé.
+Sur un réseau sans DHCP, utilise un profil Wi-Fi déjà enregistré. Le script
+installe le FFmpeg de la distribution pour la vidéo locale. Ajoute `--verifier`
+pour vérifier les paramètres et la détection des cartes sans changer le système.
+`--passerelle` et `--dns` sont facultatifs. Les options `--ethernet` et
+`--interface-wifi` permettent de choisir une carte si plusieurs sont présentes.
+Pour diagnostiquer la bascule, utilise `journalctl -u soundlive-ndi-network.service -b`.
+
+```powershell
+# Windows 10 ou 11 x64, PowerShell en administrateur sous le compte du lecteur
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\preparer-lecteur-windows.ps1 `
+  -Hote ndi-player-05 -Ip 10.10.2.105/24 -Wifi "Ecrans" `
+  -Regie http://10.10.2.99:8765 -Code CODE
+```
+
+Sous Windows, le script réutilise le profil Wi-Fi ou demande le mot de passe
+WPA2 pour en créer un. Indique `-WifiOuvert` si le réseau n'a pas de mot de passe.
+Pour un profil existant, utilise `-ProfilWifi` si son nom diffère du SSID.
+`-ProfilWifiXml` importe un profil exporté. Utilise les cartes dédiées aux écrans
+car leur ancienne configuration IPv4 est remplacée. Le script installe Python
+avec Tcl/Tk et FFmpeg avec WinGet si nécessaire. Le moteur NDI Windows peut
+être déjà installé ou fourni avec `-Lecteur` et son `SDL2.dll` x64. Pour le
+compiler pendant l'installation, fournis `-SdlSdk C:\SDK\SDL2` et dispose
+du SDK NDI 6, du runtime NDI 6 et des outils Visual Studio Build Tools C++ x64.
+Le chemin du SDK NDI peut être spécifié avec `-NdiSdk`. Pour choisir les cartes,
+utilise `-Ethernet` et `-InterfaceWifi`. Les options `-Passerelle` et
+`-Dns` sont facultatives. `-Ffplay` accepte un binaire autonome dont tu
+disposes déjà. `-Verifier` valide les paramètres et la détection des cartes.
+Le diagnostic réseau est dans
+`C:\Program Files\SoundLive-NDI\Network\reseau.log` en cas d'erreur.
+
+Un lecteur déjà associé conserve son association avec la commande sans code.
+Redémarre, vérifie son retour dans la régie avec le câble branché, puis
+débranche et rebranche le câble. Le lecteur doit retrouver la même IPv4.
+Envoie ensuite un JPG et un MP4 depuis **Images et vidéos** et lance leur
+lecture en mode média local.
+
 ## Publier une source NDI sur le réseau local
 
 Le PC émetteur peut être la régie, un autre PC Windows ou un PC Ubuntu. Un
