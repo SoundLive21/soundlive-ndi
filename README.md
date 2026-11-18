@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.24** et le client **1.4.14**.
+Ce kit contient la régie **1.4.55** et le client **1.4.28**.
 
 ## Installer et lancer la régie
 
@@ -115,6 +115,10 @@ SDK et runtime NDI sur [NDI](https://ndi.video/for-developers/ndi-sdk/download/)
 Paquets de développement [SDL2](https://www.libsdl.org/release/).
 
 ### Préparer un lecteur avec une IPv4 fixe
+
+Dans le tableau, utilise **Ajouter un écran**, choisis Raspberry Pi ou PC
+Ubuntu et remplis **Préparer une IPv4 fixe et associer**. Après confirmation,
+le bouton **Copier** récupère la commande avec le code d’association.
 
 Lance la préparation depuis la session locale du lecteur. Branche l'Ethernet
 sur un réseau qui fournit un bail DHCP et donne accès à Internet. Le script
@@ -224,15 +228,18 @@ les réglages de routage des deux interfaces.
 
 ### Bureau distant et terminal SSH
 
-Dans **Informations** d’un lecteur, **SSH** ouvre le terminal dans une
-fenêtre séparée. **VNC** ouvre le client graphique. Ces boutons sont aussi
-dans **Informations système de la régie**. Depuis la console locale,
-SoundLive lance Remmina ou VNC Viewer sous Linux, et TigerVNC Viewer ou
-TightVNC Viewer sous
-Windows s’ils sont installés. Depuis l’interface HTTPS, le bouton VNC
-appelle le client associé aux liens `vnc://` sur le poste où se trouve le
-navigateur. L’adresse et le port sont affichés dans la popup pour une saisie
-manuelle dans le client.
+Dans **Informations** d’un lecteur ou de la régie, **SSH** ouvre le terminal
+dans une fenêtre séparée. **TigerVNC** lance le client depuis la console
+locale s’il est installé. Depuis l’interface HTTPS, le bouton télécharge un
+fichier `.tigervnc` à ouvrir dans TigerVNC Viewer sur le poste du navigateur.
+Les installations complètes Pi et Ubuntu ajoutent le paquet `tigervnc-viewer`.
+Sur un poste Linux déjà installé, utilise `sudo apt install tigervnc-viewer`.
+
+Lorsqu’un poste annonce RDP, l’interface affiche **Bureau RDP**. Sur une régie
+Windows il lance le client Microsoft intégré `mstsc.exe`. L’interface HTTPS
+fournit un fichier `.rdp`. Sur un poste Windows compatible, active le serveur
+dans **Paramètres → Système → Bureau à distance** pour que le diagnostic
+SoundLive annonce RDP.
 
 - Sur Raspberry Pi OS et Linux, ajoute `--bureau-distant` à la commande
   de préparation du lecteur. Sur une machine déjà installée, exécute
@@ -255,7 +262,7 @@ Les scripts d’installation du bureau distant fonctionnent aussi sur le PC
 de régie. Les postes doivent être joignables depuis le client VNC ou RDP
 sur le LAN de diffusion, ou via un VPN autorisé. Dans le cas de WayVNC, le
 client doit prendre en charge l’authentification configurée sur le Pi.
-Privilégie TigerVNC Viewer ou Remmina pour une connexion WayVNC.
+Utilise TigerVNC Viewer pour une connexion WayVNC.
 
 Pour le terminal SSH, installe les dépendances avec le Python du lanceur
 sur le **PC de régie** :
@@ -268,10 +275,12 @@ sudo apt install python3-paramiko python3-pyte
 py -3 -m pip install paramiko pyte
 ```
 
-Le terminal utilise `~/.ssh/id_soundlive` ou le chemin défini dans
-`SOUNDLIVE_SSH_KEY` au lancement de la régie. Le lecteur doit autoriser
+Dans le terminal, sélectionne **Clé SSH** ou **Mot de passe**. Pour la
+connexion par mot de passe, le serveur SSH du poste cible doit accepter
+cette méthode. En mode clé, le terminal utilise `~/.ssh/id_soundlive`
+ou le chemin défini dans `SOUNDLIVE_SSH_KEY` au lancement de la régie. Le lecteur doit autoriser
 la clé publique correspondante. La phrase secrète de la clé privée est
-demandée uniquement si nécessaire. Une clé d’hôte déjà approuvée dans
+demandée uniquement si nécessaire. Dans les deux modes, une clé d’hôte déjà approuvée dans
 `known_hosts` est reconnue. Sinon, renseigne l’empreinte SHA256 affichée
 sur le poste cible après l’installation SSH. Pour la régie elle-même,
 OpenSSH Server doit être actif et sa clé publique autorisée sur le compte
@@ -701,23 +710,27 @@ privée utilisée par la régie pour signer le push des lecteurs reste distincte
 
 ```bash
 ssh-keygen -t ed25519 -f /chemin/prive/soundlive-publication
-python3 publier-version.py --cle /chemin/prive/soundlive-publication
-gh release create v1.4.24 dist/SoundLive-NDI.zip dist/SoundLive-NDI.zip.sig --title 'SoundLive-NDI 1.4.24' --generate-notes
 ```
 
-Adapte le tag au numéro de `SOFTWARE_VERSION` dans `tableau.py`. La version
-des lecteurs est définie dans `commun.py`. Une release peut inclure les
-moteurs compilés sous les noms indiqués ci-dessus. Le ZIP est importé par
-la régie après vérification de sa signature.
+Depuis le dépôt GitHub déjà configuré, sur sa branche `main`, publie avec
+ta clé habituelle.
+
+```bash
+python3 publier-github.py --cle /chemin/prive/soundlive-publication --notes "Mise à jour de SoundLive-NDI"
+```
+
+Le script lit le tag dans `tableau.py`, signe les archives et les ajoute à
+la Release GitHub. La version des lecteurs est définie dans `commun.py`.
+Une release peut inclure les moteurs compilés sous les noms indiqués
+ci-dessus. La régie vérifie la signature avant d’importer le ZIP.
 Ne publie jamais les clés privées, le certificat privé de la régie, son fichier
 d’accès ou les associations des récepteurs.
 
-Pour proposer la mise à jour automatique aux régies **1.4.7 et
-antérieures**, ajoute `--compatibilite` à la commande `publier-version.py`.
-Joins aussi `dist/SoundLive-Ecrans.zip` et `dist/SoundLive-Ecrans.zip.sig`
-à la même publication. Ces deux fichiers permettent aux anciennes régies de
-passer à la nouvelle version. Tu peux également installer le nouveau ZIP
-manuellement en conservant le dossier de régie existant.
+La publication automatisée inclut les archives de compatibilité pour les
+régies **1.4.7 et antérieures**. Pour générer localement les mêmes fichiers
+signés, lance `publier-version.py --compatibilite` avec ta clé habituelle.
+Tu peux également installer le nouveau ZIP manuellement dans le dossier
+de régie existant.
 
 ## Mettre la régie à jour
 

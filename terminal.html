@@ -12,7 +12,7 @@ header{display:flex;justify-content:space-between;gap:12px;align-items:center}h1
 p{color:#cfc1d0;line-height:1.4}
 form{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin-bottom:12px}
 label{display:grid;gap:5px;font-size:.84rem;flex:1 1 150px}
-input,button{padding:8px 10px;border:1px solid #5e4865;border-radius:8px;color:inherit;background:#211926;font:inherit}
+input,select,button{padding:8px 10px;border:1px solid #5e4865;border-radius:8px;color:inherit;background:#211926;font:inherit}
 button{cursor:pointer;font-weight:600}
 button[type=submit]{background:#a52742;border-color:#be3b54}
 button:disabled{opacity:.5;cursor:default}
@@ -26,14 +26,16 @@ kbd{font:inherit;color:#d9f3e0}
 <body>
 <header><h1 id="title">Terminal SSH</h1><button id="disconnect" type="button" disabled>Déconnecter</button></header>
 <p id="state" role="status">Chargement du poste…</p>
-<form id="connect" hidden>
+<form id="connect" autocomplete="off" hidden>
   <label>Compte SSH<input name="user" maxlength="64" required autocomplete="username"></label>
+  <label>Authentification<select name="auth"><option value="key">Clé SSH</option><option value="password">Mot de passe</option></select></label>
   <label>Phrase secrète de la clé<input name="passphrase" type="password" maxlength="512" autocomplete="off"></label>
+  <label hidden>Mot de passe SSH<input name="password" type="password" maxlength="512" autocomplete="off" required disabled></label>
   <label>Empreinte SSH vérifiée<input name="fingerprint" maxlength="50" placeholder="SHA256:…"></label>
   <button type="submit">Connecter</button>
 </form>
 <pre id="screen" tabindex="0" aria-label="Terminal SSH interactif"></pre>
-<p>Le terminal utilise la clé privée du poste de régie. Clique dans la zone du terminal pour saisir du texte. <kbd>Ctrl</kbd> + <kbd>C</kbd> interrompt la commande.</p>
+<p>Clique dans la zone du terminal pour saisir du texte. <kbd>Ctrl</kbd> + <kbd>C</kbd> interrompt la commande.</p>
 <script>
 "use strict";
 const target = new URLSearchParams(location.search).get("id") || "regie";
@@ -41,7 +43,17 @@ const form = document.querySelector("#connect");
 const terminal = document.querySelector("#screen");
 const status = document.querySelector("#state");
 const disconnect = document.querySelector("#disconnect");
+const sshMethod = form.elements.namedItem("auth");
+const sshPassphrase = form.elements.namedItem("passphrase");
+const sshPassword = form.elements.namedItem("password");
 let session = "", buffer = "", timer = 0, connecting = false;
+function authFields() {
+  const password = sshMethod.value === "password";
+  sshPassphrase.disabled = sshPassphrase.closest("label").hidden = password;
+  sshPassword.disabled = sshPassword.closest("label").hidden = !password;
+  (password ? sshPassphrase : sshPassword).value = "";
+}
+sshMethod.addEventListener("change", authFields);
 function message(text, error = false) {
   status.textContent = text;
   status.dataset.level = error ? "error" : "";
@@ -56,6 +68,7 @@ async function api(operation, data) {
 function controls() {
   form.hidden = !!session;
   disconnect.disabled = !session;
+  sshMethod.disabled = connecting;
   form.querySelector("button").disabled = connecting;
 }
 async function finish(reason, failed = false) {
@@ -90,11 +103,11 @@ async function sync() {
 form.onsubmit = async event => {
   event.preventDefault();
   if (session || connecting) return;
+  const data = Object.fromEntries(new FormData(form));
   connecting = true;
   controls();
   message("Connexion SSH en cours…");
   try {
-    const data = Object.fromEntries(new FormData(form));
     const opened = await api("start", {id:target, ...data});
     session = opened.session;
     terminal.textContent = "";
@@ -104,7 +117,7 @@ form.onsubmit = async event => {
   } catch (error) {
     message(error.message, true);
   } finally {
-    form.elements.namedItem("passphrase").value = "";
+    sshPassphrase.value = sshPassword.value = "";
     connecting = false;
     controls();
   }
@@ -137,6 +150,7 @@ api("target", {id:target}).then(data => {
   document.title = "SSH · " + data.name;
   document.querySelector("#title").textContent = data.name + " · SSH";
   form.elements.namedItem("user").value = data.user;
+  authFields();
   form.hidden = false;
   message(data.address + " · Port 22");
 }).catch(error => { form.hidden = true; message(error.message,true); });

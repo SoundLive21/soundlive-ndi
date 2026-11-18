@@ -149,14 +149,20 @@ def change_internet(root, operation, gateway=None):
                            "Relance le diagnostic depuis PowerShell en administrateur (voir README.md).")
     else:
         command = ["/usr/bin/python3", "-I", str(root / "regie-internet.py"), *args]
-        if os.geteuid() != 0:
+        elevate = os.geteuid() != 0
+        if elevate:
             pkexec = shutil.which("pkexec")
             if not pkexec:
                 raise RuntimeError("Installe pkexec et nftables, ou lance le script regie-internet.py avec sudo.")
             command.insert(0, pkexec)
         run = subprocess.run(command, capture_output=True, text=True)
         if run.returncode:
-            raise RuntimeError(run.stderr.strip() or "La modification du partage Internet a échoué.")
+            details = "\n".join(part.strip() for part in (run.stdout, run.stderr) if part.strip())
+            if elevate and run.returncode in (126, 127):
+                raise RuntimeError("L’autorisation administrateur Ubuntu n’a pas été obtenue."
+                                   + (f"\n{details}" if details else ""))
+            raise RuntimeError(details or f"Le script de partage Internet a échoué (code {run.returncode}).")
+        return run.stdout.strip() if operation == "diagnostic" else None
 
 
 class Launcher:
@@ -319,7 +325,6 @@ class Launcher:
         actions = ttk.Frame(content)
         actions.pack(fill="x")
         results = Queue()
-        diagnostic = None
 
         def show_report(text, failed):
             report = tk.Toplevel(dialog)
@@ -358,8 +363,7 @@ class Launcher:
             enable.configure(state="normal" if selected.get() in addresses and not gateway else "disabled")
             disable.configure(state="normal" if gateway else "disabled")
             close.configure(state="normal")
-            if diagnostic is not None:
-                diagnostic.configure(state="normal")
+            diagnostic.configure(state="normal")
             dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
 
         def apply(operation):
@@ -371,10 +375,8 @@ class Launcher:
                                        parent=dialog):
                 return
             status.set("Diagnostic en cours…" if operation == "diagnostic" else "Modification en cours…")
-            for button in (enable, disable, close, selector):
+            for button in (enable, disable, close, selector, diagnostic):
                 button.configure(state="disabled")
-            if diagnostic is not None:
-                diagnostic.configure(state="disabled")
             dialog.protocol("WM_DELETE_WINDOW", lambda: None)
 
             def run():
@@ -392,10 +394,7 @@ class Launcher:
                     return
                 refresh()
                 if report:
-                    if sys.platform == "win32":
-                        show_report(report, failed)
-                    else:
-                        messagebox.showerror("Partage Internet", report, parent=dialog)
+                    show_report(report, failed)
 
             threading.Thread(target=run, daemon=True).start()
             dialog.after(250, receive)
@@ -405,9 +404,8 @@ class Launcher:
         close = ttk.Button(actions, text="Fermer", command=dialog.destroy)
         enable.pack(side="left", padx=(0, 8))
         disable.pack(side="left")
-        if sys.platform == "win32":
-            diagnostic = ttk.Button(actions, text="Diagnostic", command=lambda: apply("diagnostic"))
-            diagnostic.pack(side="left", padx=(8, 0))
+        diagnostic = ttk.Button(actions, text="Diagnostic", command=lambda: apply("diagnostic"))
+        diagnostic.pack(side="left", padx=(8, 0))
         close.pack(side="right")
         selector.bind("<<ComboboxSelected>>", lambda _event: refresh())
         refresh()

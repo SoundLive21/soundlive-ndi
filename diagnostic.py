@@ -23,8 +23,19 @@ ARM_CORES = {
 }
 
 def desktop_protocol():
+    if sys.platform == "win32":
+        import winreg
+        for path in (r"SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services",
+                     r"SYSTEM\CurrentControlSet\Control\Terminal Server"):
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path) as settings:
+                    deny, _ = winreg.QueryValueEx(settings, "fDenyTSConnections")
+            except OSError:
+                continue
+            return "rdp" if deny == 0 else "vnc"
+        return "vnc"
     desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
-    if sys.platform != "win32" and os.environ.get("XDG_SESSION_TYPE") == "wayland" and (
+    if os.environ.get("XDG_SESSION_TYPE") == "wayland" and (
             "gnome" in desktop or "ubuntu" in desktop):
         return "rdp"
     return "vnc"

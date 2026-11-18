@@ -42,7 +42,7 @@ from terminal_ssh import Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.54"
+SOFTWARE_VERSION = "1.4.55"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -718,18 +718,21 @@ def desktop_command(address, protocol):
     if sys.platform == "win32":
         if protocol == "rdp":
             return ["mstsc.exe", f"/v:{address}:3389"]
-        programs = Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
-        for name, directory in (("vncviewer.exe", "TigerVNC"), ("tvnviewer.exe", "TightVNC")):
-            program = shutil.which(name)
-            installed = programs / directory / name
-            if program or installed.is_file():
-                return [program or str(installed), f"{address}::5900"]
+        for folder in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"):
+            if programs := os.environ.get(folder):
+                viewer = Path(programs) / "TigerVNC" / "vncviewer.exe"
+                if viewer.is_file():
+                    return [str(viewer), f"{address}::5900"]
+        if viewer := shutil.which("vncviewer.exe"):
+            if "tigervnc" in {part.casefold() for part in Path(viewer).parts}:
+                return [viewer, f"{address}::5900"]
         return None
-    if program := shutil.which("remmina"):
-        port = 3389 if protocol == "rdp" else 5900
-        return [program, "-c", f"{protocol}://{address}:{port}"]
-    if protocol == "vnc" and (program := shutil.which("vncviewer")):
-        return [program, f"{address}::5900"]
+    if protocol == "rdp":
+        if program := shutil.which("remmina"):
+            return [program, "-c", f"rdp://{address}:3389"]
+    elif protocol == "vnc":
+        if program := shutil.which("xtigervncviewer") or shutil.which("tigervncviewer"):
+            return [program, f"{address}::5900"]
     return None
 
 
@@ -1348,6 +1351,9 @@ class Request(BaseHTTPRequestHandler):
         if path == "/api/pair":
             key = secrets.token_hex(8)
             code = secrets.token_urlsafe(9)
+            # The installers can interpret positional values beginning with "-" as options.
+            while code.startswith("-"):
+                code = secrets.token_urlsafe(9)
             kind = data.get("kind")
             if kind is not None and kind not in DEVICE_KINDS:
                 raise ValueError("Choisis Raspberry Pi, Ubuntu ou Windows.")

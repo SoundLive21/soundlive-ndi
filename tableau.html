@@ -147,7 +147,20 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .group-controls button{font-size:.8rem}
 #group-screens{max-height:220px;overflow:auto}
 #group-screens label{overflow-wrap:anywhere}
+.group-section{min-width:0;margin:10px 0 0;padding:0 8px 2px;border:1px solid var(--edge);border-radius:7px}
+.group-section legend{padding:0 5px;color:#ffd0dc;font-size:.88rem;font-weight:650;overflow-wrap:anywhere}
+#group-screens .group-section label{margin:7px 0}
 #confirm-detail{white-space:pre-wrap}
+#pair,#confirm-action:has(#confirm-command:not([hidden])){width:min(650px,94vw)}
+.pair-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:14px}
+.pair-network{min-width:0;border:1px solid var(--edge);border-radius:9px;margin:10px 0 0;padding:0 12px}
+.pair-network legend{padding:0 6px;font-size:.88rem;color:var(--sub)}
+.pair-network label{margin:8px 0}
+#pair-address-help,#confirm-copy-status{margin:6px 0 0}
+#confirm-command textarea{width:100%;resize:vertical;min-height:5em;padding:10px;border:1px solid var(--edge);border-radius:8px;background:#100d12;color:inherit;font:.84rem/1.55 monospace;overflow-wrap:anywhere}
+#confirm-command textarea:focus-visible{outline:2px solid #ff91a5;outline-offset:3px}
+#confirm-command .actions{justify-content:flex-start;align-items:center;margin-top:8px}
+@media(max-width:510px){.pair-grid{grid-template-columns:1fr}}
 .update-status{margin:0 0 10px;color:var(--sub)}
 .update-status[data-state="current"]{color:var(--green)}
 .update-status[data-state="failed"],.update-status[data-state="expired"]{color:#ff8fa0}
@@ -297,9 +310,31 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 <dialog id="pair" aria-labelledby="pair-title">
   <form id="pair-form" class="dialog-body">
     <h2 id="pair-title">Ajouter un écran</h2>
-    <label>Type de récepteur<select name="kind"><option value="pi">Raspberry Pi</option><option value="ubuntu">PC Ubuntu</option><option value="windows">PC Windows</option></select></label>
-    <label>Nom de l’écran<input name="name" maxlength="80" placeholder="Écran salle 1" required></label>
-    <div class="actions"><button type="submit" class="primary">Créer un code</button><button type="button" id="close">Fermer</button></div>
+    <div class="pair-grid">
+      <label>Type de récepteur<select name="kind"><option value="pi">Raspberry Pi</option><option value="ubuntu">PC Ubuntu</option><option value="windows">PC Windows</option></select></label>
+      <label>Nom de l’écran<input name="name" maxlength="80" placeholder="Écran salle 1" required></label>
+      <label id="pair-mode">Installation<select name="installation"><option value="static">Préparer une IPv4 fixe et associer</option><option value="basic">Associer uniquement</option></select></label>
+      <label>IPv4 de la régie<input name="regie" list="pair-addresses" inputmode="decimal" placeholder="10.10.2.99" maxlength="15" required aria-describedby="pair-address-help"></label>
+    </div>
+    <datalist id="pair-addresses"></datalist>
+    <p class="small" id="pair-address-help" hidden></p>
+    <fieldset class="pair-network" id="pair-network">
+      <legend>Réseau du lecteur</legend>
+      <div class="pair-grid">
+        <label>Nom d’hôte<input name="hostname" maxlength="63" placeholder="ndi-player-03" spellcheck="false" required></label>
+        <label>IPv4 fixe avec préfixe<input name="address" maxlength="18" placeholder="10.10.2.105/24" spellcheck="false" required></label>
+        <label>Nom du réseau Wi-Fi (SSID)<input name="ssid" maxlength="32" placeholder="SOUNDLIVE" spellcheck="false" required></label>
+        <label>Clé Wi-Fi<select name="wifi">
+          <option value="prompt">La saisir sur le lecteur</option>
+          <option value="saved">Réutiliser le profil enregistré</option>
+          <option value="open">Réseau ouvert</option>
+        </select></label>
+        <label>Passerelle IPv4 (facultative)<input name="gateway" maxlength="15" inputmode="decimal" placeholder="10.10.2.87"></label>
+        <label>DNS principal (facultatif)<input name="dns" maxlength="15" inputmode="decimal" placeholder="8.8.8.8"></label>
+        <label>DNS secondaire (facultatif)<input name="dns2" maxlength="15" inputmode="decimal" placeholder="8.8.4.4"></label>
+      </div>
+    </fieldset>
+    <div class="actions"><button type="submit" class="primary">Créer l’écran et générer la commande</button><button type="button" id="close">Fermer</button></div>
   </form>
 </dialog>
 <dialog id="screen-groups" aria-labelledby="screen-groups-title">
@@ -456,6 +491,13 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       <h2 id="confirm-title"></h2>
     </div>
     <p id="confirm-detail" role="status"></p>
+    <section id="confirm-command" hidden>
+      <label>Commande d’installation<textarea id="pair-command" rows="4" readonly spellcheck="false"></textarea></label>
+      <div class="actions">
+        <button type="button" id="confirm-copy">Copier</button>
+        <p class="small" id="confirm-copy-status" role="status"></p>
+      </div>
+    </section>
     <div class="actions">
       <button name="cancel" value="cancel" autofocus>Annuler</button>
       <button value="accept" class="primary" id="confirm-accept"></button>
@@ -626,6 +668,10 @@ const confirmTitle = select(confirmation, "#confirm-title");
 const confirmDetail = select(confirmation, "#confirm-detail");
 const confirmAccept = select(confirmation, "#confirm-accept");
 const confirmCancel = select(confirmation, 'button[name="cancel"]');
+const confirmCommand = select(confirmation, "#confirm-command");
+const pairCommand = select(confirmation, "#pair-command");
+const confirmCopy = select(confirmation, "#confirm-copy");
+const confirmCopyStatus = select(confirmation, "#confirm-copy-status");
 let pendingAction = null;
 const diagnostics = document.querySelector("#diagnostics");
 const testButton = select(diagnostics, "#latency-run");
@@ -648,10 +694,12 @@ let network = null;
 let receiverPort = location.protocol === "http:" ? (location.port || 80) : null;
 let networkLoading = false;
 let organizing = false;
-function isIPv4(value) {
+function validIPv4(value) {
   return /^(?:0|[1-9]\d{0,2})(?:\.(?:0|[1-9]\d{0,2})){3}$/.test(value) &&
-         value.split(".").every(part => Number(part) <= 255) &&
-         !/^(?:0\.|127\.)/.test(value) && Number(value.split(".")[0]) < 224;
+         value.split(".").every(part => Number(part) <= 255);
+}
+function isIPv4(value) {
+  return validIPv4(value) && !/^(?:0\.|127\.)/.test(value) && Number(value.split(".")[0]) < 224;
 }
 async function loadNetwork() {
   if (networkLoading) return;
@@ -663,6 +711,7 @@ async function loadNetwork() {
   }
   catch { network = []; }
   finally { networkLoading = false; }
+  fillPairAddresses();
   for (const card of cards.values()) if (card.data && !card.data.paired) renderPairing(card);
 }
 function renderPairing(card) {
@@ -1179,6 +1228,9 @@ function sortHandle(target, scope, key, keys, move, label) {
 }
 function showAction({title, detail, label, successTitle, perform}) {
   if (confirmation.open) return;
+  confirmCommand.hidden = true;
+  pairCommand.value = "";
+  confirmCopyStatus.textContent = "";
   pendingAction = {title, successTitle, perform};
   confirmation.dataset.state = "confirm";
   confirmTitle.textContent = title + " ?";
@@ -1190,6 +1242,22 @@ function showAction({title, detail, label, successTitle, perform}) {
   confirmation.showModal();
   confirmCancel.focus();
 }
+confirmCopy.onclick = async () => {
+  const text = pairCommand.value;
+  if (!text) return;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      confirmCopyStatus.textContent = "Commande copiée.";
+      return;
+    }
+  } catch {}
+  pairCommand.focus();
+  pairCommand.select();
+  let copied = false;
+  try { copied = document.execCommand("copy"); } catch {}
+  confirmCopyStatus.textContent = copied ? "Commande copiée." : "Commande sélectionnée. Appuie sur Ctrl+C pour la copier.";
+};
 function batchOutcome(detail, title, failures, total) {
   return {
     detail,
@@ -1219,6 +1287,10 @@ confirmationForm.onsubmit = async event => {
     confirmDetail.textContent = outcome.detail;
     confirmTitle.textContent = outcome.title;
     confirmation.dataset.state = outcome.failed ? "error" : "success";
+    if (outcome.command) {
+      pairCommand.value = outcome.command;
+      confirmCommand.hidden = false;
+    }
     showToast(outcome.title, outcome.failed ? "error" : "success", outcome.detail);
   } catch (error) {
     confirmTitle.textContent = "Action impossible";
@@ -1229,7 +1301,7 @@ confirmationForm.onsubmit = async event => {
   confirmCancel.hidden = true;
   confirmAccept.textContent = "Fermer";
   confirmAccept.disabled = false;
-  confirmAccept.focus();
+  (confirmCommand.hidden ? confirmAccept : confirmCopy).focus();
 };
 function severity(value, [low, high]) {
   return !Number.isFinite(value) ? "unknown" : value < low ? "good" : value < high ? "warn" : "bad";
@@ -1349,28 +1421,28 @@ function setupRemoteControls(dialog, {id, address, protocol, online = true}) {
   const rdp = protocol === "rdp";
   const port = rdp ? 3389 : 5900;
   const validIP = typeof address === "string" && /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(address);
-  select(desktop, "span").textContent = rdp ? "Bureau RDP" : "VNC";
+  select(desktop, "span").textContent = rdp ? "Bureau RDP" : "TigerVNC";
   desktop.disabled = !online || !validIP;
   info.hidden = !validIP;
-  info.textContent = validIP ? (rdp ? "RDP" : "VNC") + " · " + address + ":" + port : "";
+  info.textContent = validIP ? (rdp ? "RDP" : "TigerVNC") + " · " + address + ":" + port : "";
   desktop.onclick = action(async () => {
     if (!validIP) return;
     if (location.protocol === "http:") {
       const {opened} = await call("/api/desktop/open", {id,address});
       if (opened) return;
     }
-    if (rdp) {
-      const file = new Blob(["full address:s:" + address + ":" + port + "\r\nprompt for credentials:i:1\r\n"],
-        {type:"application/x-rdp"});
-      const url = URL.createObjectURL(file);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "SoundLive-" + address + ".rdp";
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
-    } else {
-      window.location.href = "vnc://" + address + ":" + port;
-    }
+    const file = rdp ?
+      new Blob(["full address:s:" + address + ":" + port + "\r\nprompt for credentials:i:1\r\n"],
+        {type:"application/x-rdp"}) :
+      new Blob(["TigerVNC Configuration file Version 1.0\n\nServerName=" + address + "::" + port + "\n"],
+        {type:"application/octet-stream"});
+    const url = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "SoundLive-" + address + (rdp ? ".rdp" : ".tigervnc");
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    if (!rdp) showToast("Fichier TigerVNC prêt", "success", "Ouvre-le avec TigerVNC Viewer.");
   });
 }
 document.querySelector("#regie-system-open").onclick = action(async () => {
@@ -2507,7 +2579,7 @@ function moveScreenOrder(scope, order, source, destination, group) {
     }
   });
 }
-function positionScreens(rows) {
+function orderedScreenGroups(rows) {
   const sections = new Map();
   for (const row of rows) {
     const name = row.group || "";
@@ -2518,8 +2590,14 @@ function positionScreens(rows) {
   const names = [...sections.keys()].sort((a, b) =>
     rank(sections.get(a)[0].group_order) - rank(sections.get(b)[0].group_order) ||
     Number(!a) - Number(!b) || screenNames.compare(a, b));
+  return new Map(names.map(name => [name, sections.get(name).sort((a,b) =>
+    rank(a.screen_order) - rank(b.screen_order) ||
+    screenNames.compare(a.name,b.name) || screenNames.compare(a.id,b.id))]));
+}
+function positionScreens(rows) {
+  const sections = orderedScreenGroups(rows);
   let nextSection = holder.firstElementChild;
-  for (const name of names) {
+  for (const [name, members] of sections) {
     if (!screenSections.has(name)) {
       const el = document.createElement("details");
       el.className = "screen-group";
@@ -2539,8 +2617,6 @@ function positionScreens(rows) {
     const {el, count, grid} = screenSections.get(name);
     if (el !== nextSection) holder.insertBefore(el, nextSection);
     nextSection = el.nextElementSibling;
-    const members = sections.get(name).sort((a,b) => rank(a.screen_order) - rank(b.screen_order) ||
-      screenNames.compare(a.name,b.name) || screenNames.compare(a.id,b.id));
     count.textContent = members.length + (members.length === 1 ? " écran" : " écrans");
     let nextCard = grid.firstElementChild;
     for (const row of members) {
@@ -2669,27 +2745,128 @@ organizerForm.onsubmit = action(() => {
     }
   });
 });
+const pairForm = document.querySelector("#pair-form");
+const pairNetwork = select(pairForm, "#pair-network");
+const pairMode = select(pairForm, "#pair-mode");
+const pairRegie = pairForm.elements.namedItem("regie");
+const pairAddressHelp = select(pairForm, "#pair-address-help");
+function fillPairAddresses() {
+  const addresses = (network || []).filter(item => isIPv4(item.ip));
+  const list = select(pairForm, "#pair-addresses");
+  list.replaceChildren(...addresses.map(item => new Option(item.label, item.ip)));
+  if (!pairRegie.value) {
+    pairRegie.value = addresses.find(item => item.ip === location.hostname)?.ip || addresses[0]?.ip || "";
+  }
+  pairAddressHelp.textContent = pairRegie.value ? "" : network === null ?
+    "Recherche des adresses de la régie…" : "Saisis l’IPv4 que le lecteur utilisera pour joindre la régie.";
+  pairAddressHelp.hidden = !pairAddressHelp.textContent;
+}
+function pairFields() {
+  const linux = pairForm.elements.namedItem("kind").value !== "windows";
+  const mode = pairForm.elements.namedItem("installation");
+  pairMode.hidden = mode.disabled = !linux;
+  pairNetwork.hidden = pairNetwork.disabled = !linux || mode.value !== "static";
+}
+function pairError(field, message) {
+  const input = pairForm.elements.namedItem(field);
+  input.setCustomValidity(message);
+  input.reportValidity();
+  return false;
+}
+function validatePairSettings(values) {
+  if (!values.name) return pairError("name", "Saisis un nom pour cet écran.");
+  if (!isIPv4(values.regie)) return pairError("regie", "Saisis l’IPv4 de la régie.");
+  if (values.installation !== "static") return true;
+  if (!/^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(values.hostname)) {
+    return pairError("hostname", "Utilise des lettres, des chiffres et des tirets, sans tiret aux extrémités.");
+  }
+  const address = values.address.match(/^(.+)\/(0|[1-9]\d?)$/);
+  if (!address || !isIPv4(address[1]) || address[1].startsWith("169.254.") || Number(address[2]) > 30) {
+    return pairError("address", "Saisis une IPv4 utilisable avec son préfixe, par exemple 10.10.2.105/24.");
+  }
+  const number = ip => ip.split(".").reduce((result, octet) => result * 256 + Number(octet), 0);
+  const size = 2 ** (32 - Number(address[2]));
+  const player = number(address[1]);
+  const first = Math.floor(player / size) * size;
+  const last = first + size - 1;
+  if (player === first || player === last || address[1] === values.regie) {
+    return pairError("address", "Choisis une adresse utilisable et différente de celle de la régie.");
+  }
+  if (!values.ssid || new TextEncoder().encode(values.ssid).length > 32 || /[\u0000-\u001f]/.test(values.ssid)) {
+    return pairError("ssid", "Le SSID doit contenir entre 1 et 32 octets, sans caractère de contrôle.");
+  }
+  if (values.ssid.startsWith("--")) {
+    return pairError("ssid", "Le script de préparation interprète un SSID commençant par deux tirets comme une option.");
+  }
+  if (values.gateway) {
+    const gateway = isIPv4(values.gateway) ? number(values.gateway) : -1;
+    if (gateway <= first || gateway >= last || gateway === player) {
+      return pairError("gateway", "La passerelle doit être une autre IPv4 utilisable du sous-réseau du lecteur.");
+    }
+  }
+  if (values.dns2 && !values.dns) return pairError("dns", "Saisis le DNS principal avant le secondaire.");
+  for (const field of ["dns", "dns2"]) {
+    if (values[field] && !validIPv4(values[field])) return pairError(field, "Saisis une IPv4 valide.");
+  }
+  return true;
+}
+function bashArg(value) {
+  return /^[a-zA-Z0-9_./:@+-]+$/.test(value) ? value : "'" + value.replaceAll("'", "'\\''") + "'";
+}
+function installationCommand(values, port, code) {
+  const address = "http://" + values.regie + ":" + port;
+  if (values.kind === "windows") return ".\\installer-client.cmd " + address + " " + code;
+  const args = ["bash", "installer-client.sh", "--plateforme", values.kind];
+  if (values.installation !== "static") return [...args, address, code].map(bashArg).join(" ");
+  args.push("--preparer", "--hote", values.hostname, "--ip", values.address, "--wifi", values.ssid);
+  if (values.wifi === "prompt") args.push("--saisir-cle-wifi");
+  if (values.wifi === "open") args.push("--wifi-ouvert");
+  for (const [field, flag] of [["gateway", "--passerelle"], ["dns", "--dns"], ["dns2", "--dns2"]]) {
+    if (values[field]) args.push(flag, values[field]);
+  }
+  args.push("--regie", address, "--code", code);
+  return args.map(bashArg).join(" ");
+}
+pairForm.addEventListener("change", pairFields);
+pairForm.addEventListener("input", () => {
+  for (const input of pairForm.querySelectorAll("input")) input.setCustomValidity("");
+  if (pairRegie.value) pairAddressHelp.hidden = true;
+});
 document.querySelector("#add").onclick = () => {
+  pairFields();
+  fillPairAddresses();
   dialog.showModal();
   loadNetwork();
 };
 document.querySelector("#close").onclick = () => dialog.close();
-const pairForm = document.querySelector("#pair-form");
 pairForm.onsubmit = action(() => {
-  const inputs = new FormData(pairForm);
-  const name = String(inputs.get("name")).trim();
-  const kind = inputs.get("kind");
+  const values = Object.fromEntries(new FormData(pairForm));
+  for (const field of ["name", "regie", "hostname", "address", "gateway", "dns", "dns2"]) {
+    if (values[field] !== undefined) values[field] = values[field].trim();
+  }
+  if (!validatePairSettings(values)) return;
+  const port = Number(receiverPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    pairAddressHelp.textContent = "Port des lecteurs indisponible. Réessaie après le chargement du réseau.";
+    pairAddressHelp.hidden = false;
+    loadNetwork();
+    return;
+  }
+  const {name, kind} = values;
   showAction({
     title:"Créer un code pour " + name,
     detail:"Le code d’association " + deviceLabels[kind] + " sera valable 15 minutes.",
     label:"Créer le code",
-    successTitle:"Code créé",
     async perform() {
-      await call("/api/pair", {name, kind});
+      const {code} = await call("/api/pair", {name, kind});
       pairForm.reset();
       dialog.close();
       await refresh(true);
-      return "La commande d’installation est affichée sur la fiche « " + name + " ».";
+      return {
+        title:"Code créé pour « " + name + " »",
+        detail:"Lance la commande depuis le dossier du kit sur le lecteur. Le code est valable 15 minutes.",
+        command:installationCommand(values, port, code)
+      };
     }
   });
 });
@@ -2822,16 +2999,24 @@ groupOpen.onclick = () => {
   groupResolutionSource.dataset.choices = "";
   renderGroupVolume();
   const rows = Array.from(cards.values(), card => card.data).filter(row => row.paired);
-  groupScreens.replaceChildren(...rows.map(row => {
-    const label = document.createElement("label");
-    label.className = "check";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.value = row.id;
-    input.checked = true;
-    const status = row.online ? "En ligne" : "Hors ligne";
-    label.append(input, row.name + " · " + status);
-    return label;
+  groupScreens.replaceChildren(...Array.from(orderedScreenGroups(rows), ([name, members]) => {
+    const section = document.createElement("fieldset");
+    section.className = "group-section";
+    const title = document.createElement("legend");
+    title.textContent = name || "Sans groupe";
+    section.append(title);
+    for (const row of members) {
+      const label = document.createElement("label");
+      label.className = "check";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.value = row.id;
+      input.checked = true;
+      const status = row.online ? "En ligne" : "Hors ligne";
+      label.append(input, row.name + " · " + status);
+      section.append(label);
+    }
+    return section;
   }));
   groupFields();
   group.showModal();

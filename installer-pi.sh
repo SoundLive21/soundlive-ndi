@@ -29,9 +29,12 @@ if ! /usr/bin/python3 -c 'import gi; gi.require_version("Gtk", "3.0"); from gi.r
     sudo apt update
     sudo apt install -y python3-gi gir1.2-gtk-3.0
 fi
-if ! command -v ffplay >/dev/null; then
+packages=()
+command -v ffplay >/dev/null || packages+=(ffmpeg)
+command -v xtigervncviewer >/dev/null || packages+=(tigervnc-viewer)
+if (( ${#packages[@]} )); then
     sudo apt update
-    sudo apt install -y ffmpeg
+    sudo apt install -y "${packages[@]}"
 fi
 if [[ ${XDG_SESSION_TYPE:-} == wayland ]] && ! command -v wlr-randr >/dev/null; then
     sudo apt install -y wlr-randr

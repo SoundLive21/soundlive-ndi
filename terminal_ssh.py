@@ -60,24 +60,33 @@ class Terminals:
 
     def start(self, owner, host, data):
         user = data.get("user", "")
-        phrase = data.get("passphrase", "")
+        method = data.get("auth", "key")
         fingerprint = data.get("fingerprint", "")
         if not isinstance(user, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", user):
             raise ValueError("Indique le nom du compte SSH.")
-        if not isinstance(phrase, str) or len(phrase) > 512:
-            raise ValueError("Phrase secrète invalide.")
+        if method not in ("key", "password"):
+            raise ValueError("Choisis la clé SSH ou le mot de passe.")
         if not isinstance(fingerprint, str) or (fingerprint and
                 not re.fullmatch(r"SHA256:[A-Za-z0-9+/]{43}", fingerprint)):
             raise ValueError("Saisis une empreinte SSH SHA256 complète.")
+        if method == "password":
+            password = data.get("password", "")
+            if not isinstance(password, str) or not 0 < len(password) <= 512:
+                raise ValueError("Saisis le mot de passe du compte SSH.")
+            auth = {"password": password}
+        else:
+            phrase = data.get("passphrase", "")
+            if not isinstance(phrase, str) or len(phrase) > 512:
+                raise ValueError("Phrase secrète invalide.")
+            identity = Path(os.environ.get("SOUNDLIVE_SSH_KEY") or Path.home() / ".ssh" / "id_soundlive")
+            if not identity.is_file():
+                raise RuntimeError("La clé privée id_soundlive est introuvable sur la régie (voir README.md).")
+            auth = {"key_filename": str(identity), "passphrase": phrase or None}
         try:
             import paramiko
             import pyte
         except ImportError as error:
             raise RuntimeError("Installe Paramiko et pyte sur le PC de régie (voir README.md).") from error
-
-        identity = Path(os.environ.get("SOUNDLIVE_SSH_KEY") or Path.home() / ".ssh" / "id_soundlive")
-        if not identity.is_file():
-            raise RuntimeError("La clé privée id_soundlive est introuvable sur la régie (voir README.md).")
 
         class HostKeyPolicy(paramiko.MissingHostKeyPolicy):
             def missing_host_key(self, client, hostname, key):
@@ -95,8 +104,8 @@ class Terminals:
             client = session.client
             client.load_system_host_keys()
             client.set_missing_host_key_policy(HostKeyPolicy())
-            client.connect(host, username=user, key_filename=str(identity), passphrase=phrase or None,
-                           allow_agent=False, look_for_keys=False, timeout=5, auth_timeout=8, banner_timeout=6)
+            client.connect(host, username=user, allow_agent=False, look_for_keys=False,
+                           timeout=5, auth_timeout=8, banner_timeout=6, **auth)
             session.screen = pyte.Screen(COLUMNS, LINES)
             session.stream = pyte.ByteStream(session.screen)
             session.channel = client.invoke_shell(term="xterm", width=COLUMNS, height=LINES)
@@ -108,11 +117,14 @@ class Terminals:
             if isinstance(error, paramiko.PasswordRequiredException):
                 raise RuntimeError("La clé privée nécessite sa phrase secrète.") from error
             if isinstance(error, paramiko.AuthenticationException):
-                raise RuntimeError("Clé refusée. Vérifie le compte, sa clé publique et la phrase secrète.") from error
+                detail = ("Mot de passe refusé. Vérifie les identifiants et que le serveur autorise cette méthode."
+                          if method == "password" else
+                          "Clé refusée. Vérifie le compte, sa clé publique et la phrase secrète.")
+                raise RuntimeError(detail) from error
             if isinstance(error, paramiko.SSHException) and str(error).startswith("Empreinte SSH"):
                 raise RuntimeError(str(error)) from error
             if isinstance(error, (paramiko.SSHException, OSError)):
-                raise RuntimeError("Connexion SSH impossible. Vérifie le service, la clé et l’adresse.") from error
+                raise RuntimeError("Connexion SSH impossible. Vérifie le service et l’adresse.") from error
             raise
         return {"session": identifier, "columns": COLUMNS, "lines": LINES}
 

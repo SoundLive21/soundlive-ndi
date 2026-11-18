@@ -116,29 +116,56 @@ if $client_only; then
 fi
 
 case "$(dpkg --print-architecture)" in
-    amd64) sdk_arch=x86_64-linux-gnu ;;
-    arm64) sdk_arch=aarch64-linux-gnu ;;
-    *) echo "Architecture non prise en charge. Ubuntu doit être en 64 bits."; exit 1 ;;
+    amd64)
+        sdk_arch=x86_64-linux-gnu
+        sdk_machine='Advanced Micro Devices X86-64'
+        sdk_libdirs=("$sdk_arch")
+        ;;
+    arm64)
+        sdk_arch=aarch64-linux-gnu
+        sdk_machine=AArch64
+        sdk_libdirs=("$sdk_arch" aarch64-rpi4-linux-gnueabi aarch64-newtek-linux-gnu)
+        ;;
+    *) echo "Architecture non prise en charge. Le lecteur doit utiliser un système 64 bits."; exit 1 ;;
 esac
 
 if $render_only; then
-    if ! command -v gcc >/dev/null || ! command -v pkg-config >/dev/null || ! pkg-config --exists sdl2; then
+    if ! command -v gcc >/dev/null || ! command -v readelf >/dev/null ||
+        ! command -v pkg-config >/dev/null || ! pkg-config --exists sdl2; then
         sudo apt update
-        sudo apt install -y gcc pkg-config libsdl2-dev
+        sudo apt install -y gcc binutils pkg-config libsdl2-dev
     fi
 else
     sudo apt update
-    sudo apt install -y gcc pkg-config libsdl2-dev python3 python3-gi python3-gi-cairo gir1.2-gtk-3.0 \
-        avahi-daemon libavahi-client3 curl ca-certificates x11-xserver-utils ffmpeg
+    sudo apt install -y gcc binutils pkg-config libsdl2-dev python3 python3-gi python3-gi-cairo gir1.2-gtk-3.0 \
+        avahi-daemon libavahi-client3 curl ca-certificates x11-xserver-utils ffmpeg tigervnc-viewer
     sudo systemctl enable --now avahi-daemon
 fi
+
+find_ndi_library() {
+    local root=$1 directory candidate header
+    [[ -r "$root/include/Processing.NDI.Lib.h" ]] || return 1
+    for directory in "${sdk_libdirs[@]}"; do
+        for candidate in "$root/lib/$directory/libndi.so.6" "$root/lib/$directory"/libndi.so.6.*; do
+            [[ -f "$candidate" && -r "$candidate" ]] || continue
+            header=$(LC_ALL=C readelf -hW -- "$candidate" 2>/dev/null) || continue
+            if [[ $header =~ Class:[[:blank:]]+ELF64 && $header =~ Type:[[:blank:]]+DYN &&
+                  $header =~ Machine:[[:blank:]]+$sdk_machine ]]; then
+                printf '%s\n' "$candidate"
+                return 0
+            fi
+        done
+    done
+    return 1
+}
 
 temp=$(mktemp -d)
 trap 'rm -rf -- "$temp"' EXIT
 sdk="${NDI_SDK_DIR:-$app/ndi-sdk}"
-if [[ ! -r "$sdk/include/Processing.NDI.Lib.h" || ! -r "$sdk/lib/$sdk_arch/libndi.so.6" ]]; then
+if ! ndi_library=$(find_ndi_library "$sdk"); then
     if [[ -n ${NDI_SDK_DIR:-} ]]; then
-        echo "SDK NDI 6 introuvable pour $sdk_arch dans NDI_SDK_DIR."
+        printf 'SDK NDI 6 incomplet pour %s dans %s. Répertoires attendus : %s.\n' \
+            "$sdk_arch" "$sdk" "${sdk_libdirs[*]}" >&2
         exit 1
     fi
     sdk_url=https://downloads.ndi.tv/SDK/NDI_SDK_Linux/Install_NDI_SDK_v6_Linux.tar.gz
@@ -158,19 +185,20 @@ if [[ ! -r "$sdk/include/Processing.NDI.Lib.h" || ! -r "$sdk/lib/$sdk_arch/libnd
         bash ./Install_NDI_SDK_v6_Linux.sh
     )
     sdk="$temp/NDI SDK for Linux"
+    if ! ndi_library=$(find_ndi_library "$sdk"); then
+        printf 'Bibliothèque NDI 6 ELF64 compatible %s introuvable dans %s. Répertoires attendus : %s.\n' \
+            "$sdk_arch" "$sdk" "${sdk_libdirs[*]}" >&2
+        exit 1
+    fi
 fi
 
-if [[ ! -r "$sdk/include/Processing.NDI.Lib.h" || ! -r "$sdk/lib/$sdk_arch/libndi.so.6" ]]; then
-    echo "Le SDK NDI 6 n’a pas été extrait pour $sdk_arch."
-    exit 1
-fi
-
+printf 'Bibliothèque NDI 6 sélectionnée : %s\n' "${ndi_library#"$sdk"/}"
+mkdir -p "$temp/lib"
+install -m 644 "$ndi_library" "$temp/lib/libndi.so.6"
 read -r -a sdl_flags <<< "$(pkg-config --cflags --libs sdl2)"
 gcc -O2 -std=c11 -Wall -Wextra -I"$sdk/include" "$here/lecteur-ndi-ubuntu.c" \
     "${sdl_flags[@]}" -Wl,-rpath,'$ORIGIN/lib' \
-    "$sdk/lib/$sdk_arch/libndi.so.6" -o "$temp/lecteur-ndi-ubuntu"
-mkdir -p "$temp/lib"
-install -m 644 "$sdk/lib/$sdk_arch/libndi.so.6" "$temp/lib/libndi.so.6"
+    -L"$temp/lib" -l:libndi.so.6 -o "$temp/lecteur-ndi-ubuntu"
 if $render_only; then
     if ! /usr/bin/python3 -c 'import cairo, gi; gi.require_foreign("cairo")' >/dev/null 2>&1; then
         sudo apt install -y python3-gi-cairo
@@ -186,7 +214,12 @@ if $render_only; then
     echo "Moteur d’affichage mis à jour. Pousse ensuite le nouveau client depuis la régie."
     exit 0
 fi
-"$temp/lecteur-ndi-ubuntu" --sources >/dev/null
+"$temp/lecteur-ndi-ubuntu" --sources >/dev/null || {
+    result=$?
+    printf 'Le moteur NDI a échoué au démarrage (code %s) avec %s.\n' \
+        "$result" "${ndi_library#"$sdk"/}" >&2
+    exit "$result"
+}
 
 account=$(id -un)
 if [[ ! $account =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$ ]]; then
@@ -216,7 +249,7 @@ mv -fT "$app/.lecteur-ndi-ubuntu.new" "$app/lecteur-ndi-ubuntu"
 if [[ $sdk == "$temp/NDI SDK for Linux" ]]; then
     mkdir -p "$app/ndi-sdk/lib/$sdk_arch"
     cp -a -- "$sdk/include" "$app/ndi-sdk/"
-    install -m 644 "$sdk/lib/$sdk_arch/libndi.so.6" "$app/ndi-sdk/lib/$sdk_arch/libndi.so.6"
+    install -m 644 "$temp/lib/libndi.so.6" "$app/ndi-sdk/lib/$sdk_arch/libndi.so.6"
 fi
 sudo install -o root -g root -m 0440 "$rule" /etc/sudoers.d/soundlive-ecrans
 
