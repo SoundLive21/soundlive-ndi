@@ -80,10 +80,10 @@ function Invoke-SoundLiveSharing {
     $notes.Add("Sortie Internet : $($uplink.Name) · prochain saut $($route.NextHop)")
 
     $script:stage = 'Sélection de la carte du réseau écrans'
-    if (-not $Gateway) { throw 'Sélectionne l’adresse IPv4 de la carte reliée aux écrans.' }
+    if (-not $Gateway) { throw "Sélectionne l'adresse IPv4 de la carte reliée aux écrans." }
     $ipv4 = @(Get-NetIPAddress -AddressFamily IPv4 -AddressState Preferred)
     $lanIp = @($ipv4 | Where-Object IPAddress -eq $Gateway)
-    if ($lanIp.Count -ne 1) { throw 'L’adresse choisie doit être active sur une seule carte de la régie.' }
+    if ($lanIp.Count -ne 1) { throw "L'adresse choisie doit être active sur une seule carte de la régie." }
     $lanIp = $lanIp[0]
     $lan = $adapters | Where-Object ifIndex -eq $lanIp.InterfaceIndex
     if (-not $lan) { throw 'Carte du réseau écrans introuvable.' }
@@ -134,7 +134,7 @@ function Invoke-SoundLiveSharing {
     }
     $notes.Add("Sous-réseau NAT prévu : $prefix")
     if ($Action -eq 'diagnostic') {
-        $notes.Add('Vérifications terminées. L’activation peut être essayée.')
+        $notes.Add("Vérifications terminées. L'activation peut être essayée.")
         return
     }
 
@@ -170,7 +170,7 @@ function Invoke-SoundLiveSharing {
         }
         if ($restored -and (Test-Path -LiteralPath $stateKey)) {
             try { Remove-Item -LiteralPath $stateKey -Force }
-            catch { $notes.Add("Nettoyage de l’état SoundLive : $($_.Exception.Message)") }
+            catch { $notes.Add("Nettoyage de l'état SoundLive : $($_.Exception.Message)") }
         }
         throw $failure
     }
