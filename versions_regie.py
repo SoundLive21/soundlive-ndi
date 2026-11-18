@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 from tempfile import TemporaryDirectory
 from threading import Lock, Thread
 from time import monotonic
@@ -45,6 +46,8 @@ FILES = frozenset((
 ))
 REQUIRED = {"commun.py", "ecran.py", "diagnostic.py", "mise_a_jour.py", "tableau.py",
             "tableau.html", "acces-refuse.html", "regie-windows.py", "versions_regie.py"}
+ADDITIONAL_FILE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}\.(?:py|html|css|js|c|h|sh|ps1|cmd|bat|exe|service|timer|txt|md)")
+WINDOWS_DEVICE = re.compile(r"(?:con|prn|aux|nul|com[0-9]|lpt[0-9])", re.IGNORECASE)
 
 
 def required_files(version):
@@ -185,23 +188,56 @@ def release_manifest(archive, archive_name=ARCHIVE):
     return f"{archive_name} {sha256(archive).hexdigest()}".encode("ascii")
 
 
-def archive_files(archive, version, archive_name=ARCHIVE):
+def declared_publication_files(source):
+    for entry in ast.parse(source, filename="versions_regie.py").body:
+        if not isinstance(entry, ast.Assign) or not any(
+                isinstance(target, ast.Name) and target.id == "FILES" for target in entry.targets):
+            continue
+        value = entry.value
+        if (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+                and value.func.id == "frozenset" and len(value.args) == 1 and not value.keywords):
+            value = value.args[0]
+        if isinstance(value, (ast.Tuple, ast.List, ast.Set)) and all(
+                isinstance(item, ast.Constant) and isinstance(item.value, str) for item in value.elts):
+            return {item.value for item in value.elts}
+        break
+    raise ValueError("La publication ne déclare pas sa liste de fichiers au format attendu.")
+
+
+def archive_files(archive, version, archive_name=ARCHIVE, *, signature_verified=False):
     folder = archive_name.removesuffix(".zip")
     allowed = FILES
     if archive_name == LEGACY_ARCHIVE:
         allowed = FILES.difference(LEGACY_LAUNCHER_NAMES).union(LEGACY_LAUNCHER_NAMES.values())
+    known_folded = {name.casefold() for name in allowed}
     files = {}
+    names_folded = set()
+    additions = set()
     with ZipFile(BytesIO(archive)) as source:
         if len(source.infolist()) > 100 or sum(item.file_size for item in source.infolist()) > MAX_ARCHIVE:
             raise ValueError("Archive de publication trop volumineuse.")
         for item in source.infolist():
             prefix, _, name = item.filename.partition("/")
-            if prefix != folder or name not in allowed or name in files:
+            folded = name.casefold()
+            mode = stat.S_IFMT(item.external_attr >> 16)
+            if (prefix != folder or not name or folded in names_folded or
+                    mode not in (0, stat.S_IFREG) or item.is_dir()):
                 raise ValueError(f"Entrée de publication inattendue : {item.filename}.")
+            if name not in allowed:
+                if (not signature_verified or folded in known_folded or not ADDITIONAL_FILE.fullmatch(name)
+                        or WINDOWS_DEVICE.fullmatch(name.partition(".")[0])):
+                    raise ValueError(f"Entrée de publication inattendue : {item.filename}.")
+                additions.add(name)
+            names_folded.add(folded)
             files[name] = source.read(item)
     missing = required_files(version) - files.keys()
     if missing:
         raise ValueError("Fichiers nécessaires absents de la publication : " + ", ".join(sorted(missing)))
+    # The signed snapshot can explicitly introduce more source files without executing its manifest.
+    if additions:
+        undeclared = additions - declared_publication_files(files["versions_regie.py"])
+        if undeclared:
+            raise ValueError("Entrées absentes de la liste de publication : " + ", ".join(sorted(undeclared)))
     for filename, value in files.items():
         if filename.endswith(".py"):
             compile(value, filename, "exec")
@@ -219,7 +255,7 @@ def install(root, release, public):
     archive = download(url, MAX_ARCHIVE)
     signature = download(url + ".sig", 16 * 1024)
     verify_release(public, archive, signature, archive_name)
-    files = archive_files(archive, version, archive_name)
+    files = archive_files(archive, version, archive_name, signature_verified=True)
     with TemporaryDirectory(dir=root, prefix=".soundlive-publication-") as folder:
         stage = Path(folder)
         backup = stage / "backup"

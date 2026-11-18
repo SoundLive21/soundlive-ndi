@@ -729,3 +729,14 @@ automatiquement après l’installation d’une mise à jour. Si tu as lancé
 la mise à jour depuis une version antérieure, rouvre le lanceur une fois.
 Clique ensuite sur **Démarrer la régie**. Le tableau permet d’envoyer le
 paquet client signé aux récepteurs quand une version client est proposée.
+
+Une régie antérieure à la 1.4.50 peut refuser un nouveau fichier avec le
+message « Entrée de publication inattendue ». Pour passer à la 1.4.52,
+ferme le lanceur et copie les fichiers du dossier `SoundLive-NDI` du ZIP
+dans le dossier existant de la régie. Conserve les fichiers de configuration
+locaux, dont `ecrans.json` et `source-publications.json`, puis relance
+`SoundLive-NDI.exe` sous Windows.
+
+À partir de la 1.4.52, le lanceur vérifie la signature de la publication
+avant de lire sa liste de fichiers. Il peut ainsi installer les nouveaux
+fichiers du logiciel explicitement déclarés dans la publication signée.
