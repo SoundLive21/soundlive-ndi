@@ -1717,7 +1717,7 @@ async function mediaBatch(targets, perform, done, preferFolder) {
   } finally {
     mediaBusy = false;
     renderMediaManager(preferFolder);
-    mediaReadRegieDisk();
+    if (mediaDialog.open) mediaReadRegieDisk();
   }
 }
 const selectedMediaFolder = () => mediaGroups(mediaRows()).get(mediaFolders.value);
@@ -1725,7 +1725,21 @@ const selectedMediaEntry = () => mediaEntries(selectedMediaFolder()).get(mediaFi
 const mediaChange = (target, data) => call("/api/media-settings",{id:target.row.id,folder:target.id,...data});
 const returnToNdi = row => call("/api/media-settings",{id:row.id,action:"play",enabled:false});
 
-async function reorderMedia(sourceKey, destinationKey) {
+function confirmReturnToNdi(targets) {
+  const active = targets.filter(({row})=>row.media?.enabled);
+  if (mediaBusy || !active.length) return;
+  showAction({
+    title:"Revenir à la diffusion NDI",
+    detail:active.map(({row})=>row.name).join(", ") + "\nLa source NDI configurée remplacera le média local.",
+    label:"Revenir au NDI", successTitle:"Résultat par écran",
+    async perform() {
+      await mediaBatch(active,({row})=>returnToNdi(row),"Retour au NDI demandé");
+      return mediaResult.textContent;
+    }
+  });
+}
+
+function reorderMedia(sourceKey, destinationKey) {
   const entries = mediaEntries(selectedMediaFolder());
   const source = entries.get(sourceKey), destination = entries.get(destinationKey);
   if (!source || !destination || mediaBusy) return;
@@ -1739,12 +1753,21 @@ async function reorderMedia(sourceKey, destinationKey) {
   }
   const focused = document.activeElement?.closest("#media-list li")?.dataset.key === sourceKey;
   const message = targets.length < mediaRows().length ? "Ordre modifié sur les lecteurs contenant les deux fichiers" : "Ordre mis à jour";
-  await mediaBatch(targets, target => mediaChange(target, {action:"reorder", file:target.item.id,
-    anchor:anchors.get(target.row.id), after}), message);
-  if (focused) {
-    const line = [...mediaList.children].find(node => node.dataset.key === sourceKey);
-    select(line || mediaList, ".drag-handle")?.focus();
-  }
+  showAction({
+    title:"Réorganiser les fichiers",
+    detail:"« " + source.item.name + " » " + (after ? "après" : "avant") + " « " + destination.item.name + " »\n" +
+      targets.map(({row})=>row.name).join(", "),
+    label:"Déplacer", successTitle:"Résultat par écran",
+    async perform() {
+      await mediaBatch(targets, target => mediaChange(target, {action:"reorder", file:target.item.id,
+        anchor:anchors.get(target.row.id), after}), message);
+      if (focused) confirmation.addEventListener("close", () => {
+        const line = [...mediaList.children].find(node => node.dataset.key === sourceKey);
+        select(line || mediaList, ".drag-handle")?.focus();
+      }, {once:true});
+      return mediaResult.textContent;
+    }
+  });
 }
 mediaSelectAll.onchange = () => {
   mediaSelected.clear();
@@ -1855,10 +1878,20 @@ mediaNameForm.onsubmit = action(async () => {
     if (mediaNameDialog.open) mediaName.focus();
   }
 });
-select(mediaDialog,"#media-launch").onclick = action(() =>
-  mediaBatch(selectedMediaFolder().targets,target=>mediaChange(target,{action:"play",enabled:true}),"Lecture demandée"));
-select(mediaDialog,"#media-ndi").onclick = action(() =>
-  mediaBatch(selectedMediaFolder().targets,({row})=>returnToNdi(row),"Retour au NDI demandé"));
+select(mediaDialog,"#media-launch").onclick = action(() => {
+  const folder = selectedMediaFolder();
+  if (mediaBusy || !folder || folder.targets.some(target=>!target.folder.items.length)) return;
+  showAction({
+    title:"Lancer ce dossier",
+    detail:"« " + folder.name + " » sera diffusé sur " + folder.targets.map(({row})=>row.name).join(", ") + ".",
+    label:"Lancer la lecture", successTitle:"Résultat par écran",
+    async perform() {
+      await mediaBatch(folder.targets,target=>mediaChange(target,{action:"play",enabled:true}),"Lecture demandée");
+      return mediaResult.textContent;
+    }
+  });
+});
+select(mediaDialog,"#media-ndi").onclick = action(() => confirmReturnToNdi(selectedMediaFolder()?.targets || []));
 select(mediaDialog,"#media-empty-all").onclick = action(() => {
   const targets = mediaRows().map(row => ({row, count:mediaFileCount(row)})).filter(({count}) => count > 0);
   if (mediaBusy || !targets.length) return;
@@ -1944,15 +1977,19 @@ function uploadMedia(path, file, progress) {
   });
 }
 function showMediaUpload(value, text) {
+  const status = text + " · " + value + " %";
   mediaUploadStatus.hidden = false;
   select(mediaUploadStatus,"progress").value = value;
-  select(mediaUploadStatus,"#media-upload-text").textContent = text + " · " + value + " %";
+  select(mediaUploadStatus,"#media-upload-text").textContent = status;
+  if (confirmation.open && confirmation.dataset.state === "busy") confirmDetail.textContent = status;
+  return status;
 }
-mediaUpload.onsubmit = action(async () => {
+mediaUpload.onsubmit = action(() => {
   const files = [...mediaInput.files];
-  const targets = selectedMediaFolder().targets;
+  const folder = selectedMediaFolder();
+  if (mediaBusy || !folder || !files.length) return;
+  const {targets} = folder;
   const bytes = files.reduce((sum,file)=>sum+file.size,0);
-  if (!files.length) return;
   if (files.some(file=>file.size===0 || file.size>256 * 1024 ** 2)) {
     mediaResult.textContent = "Chaque fichier doit être non vide et peser au plus 256 Mio.";
     return;
@@ -1964,6 +2001,18 @@ mediaUpload.onsubmit = action(async () => {
       quota + " sur la régie.";
     return;
   }
+  showAction({
+    title:"Envoyer les fichiers",
+    detail:files.length + " fichier(s) · " + mediaFormat(bytes) + " par écran\n« " + folder.name + " » · " +
+      targets.map(({row})=>row.name).join(", "),
+    label:"Envoyer", successTitle:"Résultat par écran",
+    async perform() {
+      const status = await sendMediaFiles(targets, files, bytes);
+      return status + "\n" + mediaResult.textContent;
+    }
+  });
+});
+async function sendMediaFiles(targets, files, bytes) {
   mediaInput.value = "";
   let committed = 0;
   const total = bytes * targets.length;
@@ -1984,9 +2033,9 @@ mediaUpload.onsubmit = action(async () => {
       throw Error((sent ? sent + "/" + files.length + " fichier(s) enregistré(s) · " : "") + error.message);
     }
   },"Fichiers enregistrés");
-  showMediaUpload(Math.floor(100 * committed / total),
+  return showMediaUpload(Math.floor(100 * committed / total),
     committed === total ? "Envoi vers la régie terminé" : "Envoi incomplet");
-});
+}
 
 function cardFor(id) {
   if (cards.has(id)) return cards.get(id);
@@ -2012,17 +2061,7 @@ function cardFor(id) {
   heading.insertBefore(handle, ui.badge);
   const mediaButton = select(el, ".manage-media");
   mediaButton.onclick = () => openMediaManager([id]);
-  const ndiButton = ui["return-ndi"];
-  ndiButton.onclick = action(async () => {
-    if (ndiButton.disabled || !card.data.media?.enabled) return;
-    ndiButton.disabled = true;
-    try {
-      await returnToNdi(card.data);
-      await refresh(true);
-    } finally {
-      ndiButton.disabled = false;
-    }
-  });
+  ui["return-ndi"].onclick = action(() => confirmReturnToNdi([{row:card.data}]));
   card.preview = createPreview(select(el, ".screen-preview"), "Capture de l’écran", id, true);
   const controls = select(el, "details");
   try { controls.open = localStorage.getItem("soundlive-controls-" + id) === "open"; }
@@ -2286,19 +2325,29 @@ function sectionKeys() {
   return [...holder.querySelectorAll(":scope > .screen-group")].map(section => section.dataset.group);
 }
 let screenOrderBusy = false;
-async function moveScreenOrder(scope, order, source, destination, group) {
+function moveScreenOrder(scope, order, source, destination, group) {
   if (screenOrderBusy) return;
   const from = order.indexOf(source), to = order.indexOf(destination);
   if (from < 0 || to < 0 || from === to) return;
   order.splice(from, 1);
   order.splice(to, 0, source);
-  screenOrderBusy = true;
-  try {
-    await call("/api/screen-order",{scope,order,group});
-  } finally {
-    await refresh(true);
-    screenOrderBusy = false;
-  }
+  const movingGroup = scope === "groups";
+  const name = movingGroup ? source || "Sans groupe" : cards.get(source)?.data?.name || source;
+  showAction({
+    title:movingGroup ? "Réorganiser les groupes" : "Réorganiser les écrans",
+    detail:"« " + name + " » passera à la position " + (to+1) + ".",
+    label:"Déplacer", successTitle:"Ordre enregistré",
+    async perform() {
+      screenOrderBusy = true;
+      try {
+        await call("/api/screen-order",{scope,order,group});
+        return "« " + name + " » est à la position " + (to+1) + ".";
+      } finally {
+        await refresh(true);
+        screenOrderBusy = false;
+      }
+    }
+  });
 }
 function positionScreens(rows) {
   const sections = new Map();
@@ -2410,29 +2459,38 @@ organizerButton.onclick = () => {
 };
 organizerForm.addEventListener("change", organizerFields);
 select(organizer, ".close-organizer").onclick = () => organizer.close();
-organizerForm.onsubmit = async event => {
-  event.preventDefault();
+organizerForm.onsubmit = action(() => {
   if (organizing) return;
   const ids = [...organizerList.querySelectorAll("input:checked")].map(input => input.value);
   if (!ids.length) return;
-  organizing = true;
-  organizerFields();
   organizerError.hidden = true;
-  try {
-    const value = organizerTarget.value;
-    const name = value === "new" ? organizerName.value.trim() : value.slice(6);
-    if (value === "new" && !name) throw Error("Saisis un nom pour le nouveau groupe.");
-    await call("/api/screen-groups", {ids, group:name});
-    organizer.close();
-    await refresh(true);
-  } catch (error) {
-    organizerError.textContent = error.message;
+  const value = organizerTarget.value;
+  const name = value === "new" ? organizerName.value.trim() : value.slice(6);
+  if (value === "new" && !name) {
+    organizerError.textContent = "Saisis un nom pour le nouveau groupe.";
     organizerError.hidden = false;
-  } finally {
-    organizing = false;
-    organizerFields();
+    return;
   }
-};
+  const screens = ids.map(id=>cards.get(id)?.data?.name || id).join(", ");
+  showAction({
+    title:name ? "Affecter les écrans au groupe" : "Retirer les écrans de leur groupe",
+    detail:screens + (name ? "\nGroupe « " + name + " »" : ""),
+    label:"Enregistrer", successTitle:"Groupes enregistrés",
+    async perform() {
+      organizing = true;
+      organizerFields();
+      try {
+        await call("/api/screen-groups", {ids, group:name});
+        organizer.close();
+        await refresh(true);
+        return screens + " · " + (name || "Sans groupe");
+      } finally {
+        organizing = false;
+        organizerFields();
+      }
+    }
+  });
+});
 document.querySelector("#add").onclick = () => {
   dialog.showModal();
   loadNetwork();
