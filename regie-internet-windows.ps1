@@ -1,14 +1,12 @@
 ﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory=$true)][ValidateSet('activer', 'desactiver', 'diagnostic')][string]$Action,
-    [string]$Gateway,
-    [ValidatePattern('^[a-f0-9]{32}$')][string]$RequestId
+    [string]$Gateway
 )
 $ErrorActionPreference = 'Stop'
 $name = 'SoundLive-NDI Internet'
 $rootKey = 'HKLM:\SOFTWARE\SoundLive'
 $stateKey = Join-Path $rootKey 'Internet'
-$reportKey = Join-Path $rootKey 'InternetDiagnostic'
 $stage = 'Initialisation'
 $notes = [System.Collections.Generic.List[string]]::new()
 
@@ -179,8 +177,7 @@ function Invoke-SoundLiveSharing {
     $notes.Add("Partage SoundLive activé via $Gateway.")
 }
 
-[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
-$report = @{ request=$RequestId; action=$Action; success=$false }
+$report = @{ success=$false }
 try {
     $edition = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
     $notes.Add("Windows : $($edition.EditionID) · build $($edition.CurrentBuild).$($edition.UBR)")
@@ -191,16 +188,11 @@ try {
     $report.code = [string]$_.FullyQualifiedErrorId
     $report.hresult = '0x{0:X8}' -f $_.Exception.HResult
 }
-$report.stage = $stage
-$report.details = $notes.ToArray()
-if ($RequestId) {
-    Write-SoundLiveSetting $reportKey 'LastReport' $report
-} else {
-    $report.details | Write-Output
-    if (-not $report.success) {
-        Write-Output "Étape : $($report.stage)"
-        Write-Output "Erreur : $($report.error)"
-        Write-Output "Code : $($report.code) · HRESULT $($report.hresult)"
-    }
+$notes | Write-Output
+if (-not $report.success) {
+    Write-Output "Étape : $stage"
+    Write-Output "Erreur : $($report.error)"
+    Write-Output "Code : $($report.code) · HRESULT $($report.hresult)"
+    exit 1
 }
-if (-not $report.success) { exit 1 }
+exit 0

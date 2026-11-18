@@ -209,7 +209,8 @@ pour vérifier WinNAT, les NAT existants et les deux interfaces. Si
 l’activation échoue, la fenêtre indique également l’étape, le message et
 le code d’erreur PowerShell. **Copier le diagnostic** permet de récupérer le
 rapport entier. Le même diagnostic peut être exécuté depuis PowerShell
-en administrateur, dans le dossier de la régie :
+en administrateur, dans le dossier de la régie. Cette commande affiche
+directement le résultat si le lanceur ne peut pas récupérer son rapport :
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\regie-internet-windows.ps1 -Action diagnostic -Gateway 10.10.2.99

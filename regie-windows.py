@@ -3,6 +3,7 @@
 # contact@soundlive.fr
 # Société SoundLive
 """Lanceur graphique de la régie SoundLive-NDI."""
+from base64 import b64encode
 from datetime import datetime
 from ipaddress import IPv4Address
 import json
@@ -62,12 +63,45 @@ def internet_state():
         return {}
 
 
-def internet_report(report):
-    lines = list(report["details"])
-    if not report.get("success"):
-        lines.extend(("", f"Étape : {report.get('stage', '—')}", f"Erreur : {report.get('error', '—')}",
-                      f"Code : {report.get('code', '—')} · HRESULT {report.get('hresult', '—')}"))
-    return "\n".join(lines)
+def internet_worker(path, operation, gateway, request):
+    job = b64encode(json.dumps(dict(path=str(path), action=operation, gateway=gateway,
+                                    request=request)).encode("utf-8")).decode("ascii")
+    # Keep the script path and arguments out of the elevated process command-line parser.
+    return "$jobData = '" + job + "'\n" + r"""
+$ErrorActionPreference = 'Stop'
+$job = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($jobData)) | ConvertFrom-Json
+$lines = [System.Collections.Generic.List[string]]::new()
+$code = 0
+try {
+    $parameters = @{ Action = $job.action }
+    if ($job.gateway) { $parameters.Gateway = $job.gateway }
+    $LASTEXITCODE = 0
+    & $job.path @parameters *>&1 | ForEach-Object { $lines.Add($_.ToString()) }
+    $code = $LASTEXITCODE
+} catch {
+    $lines.Add($_.ToString())
+    if ($_.FullyQualifiedErrorId) { $lines.Add("Code PowerShell : $($_.FullyQualifiedErrorId)") }
+    if ($_.InvocationInfo.PositionMessage) { $lines.Add($_.InvocationInfo.PositionMessage.Trim()) }
+    $code = 1
+}
+if (-not $lines.Count) { $lines.Add("Script terminé avec le code $code.") }
+$report = @{ request=$job.request; success=($code -eq 0); output=($lines -join [Environment]::NewLine) }
+try {
+    $hive = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Registry64')
+    try {
+        $key = $hive.CreateSubKey('SOFTWARE\SoundLive\InternetDiagnostic')
+        try { $key.SetValue('LastReport', ($report | ConvertTo-Json -Compress)) }
+        finally { $key.Dispose() }
+    } finally { $hive.Dispose() }
+} catch {
+    $message = "Enregistrement du diagnostic impossible : $($_.Exception.Message)" +
+        [Environment]::NewLine + [Environment]::NewLine + $report.output
+    Add-Type -AssemblyName System.Windows.Forms
+    [System.Windows.Forms.MessageBox]::Show($message, 'Diagnostic SoundLive-NDI') | Out-Null
+    exit 3
+}
+exit $code
+"""
 
 
 def change_internet(root, operation, gateway=None):
@@ -77,13 +111,14 @@ def change_internet(root, operation, gateway=None):
         executable = "WindowsPowerShell/v1.0/powershell.exe"
         powershell = str(system / "System32" / executable)
         sysnative = system / "Sysnative" / executable
+        helper = root / "regie-internet-windows.ps1"
+        if not helper.is_file():
+            raise RuntimeError(f"Script du partage Internet introuvable : {helper}")
         request = secrets.token_hex(16)
-        parameters = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                      str(root / "regie-internet-windows.ps1"), "-Action", operation, "-RequestId", request]
-        if gateway:
-            parameters.extend(("-Gateway", args[1]))
-        script = ("[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); "
-                  "$ErrorActionPreference = 'Stop'; "
+        worker = internet_worker(helper, operation, args[1] if gateway else None, request)
+        encoded = b64encode(worker.encode("utf-16-le")).decode("ascii")
+        script = ("$ErrorActionPreference = 'Stop'; "
+                  "try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false) } catch {}; "
                   "try { $process = Start-Process -FilePath $env:SOUNDLIVE_POWERSHELL "
                   "-ArgumentList $env:SOUNDLIVE_INTERNET_ARGS -Verb RunAs -Wait -PassThru -WindowStyle Hidden; "
                   "exit $process.ExitCode } catch { "
@@ -95,20 +130,23 @@ def change_internet(root, operation, gateway=None):
                              capture_output=True, encoding="utf-8", errors="replace",
                              creationflags=subprocess.CREATE_NO_WINDOW,
                              env={**os.environ, "SOUNDLIVE_POWERSHELL": powershell,
-                                  "SOUNDLIVE_INTERNET_ARGS": subprocess.list2cmdline(parameters)})
+                                  "SOUNDLIVE_INTERNET_ARGS":
+                                      f"-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}"})
         if run.returncode == 1223:
             raise RuntimeError("La demande d’autorisation administrateur a été annulée.")
         try:
             report = internet_registry("InternetDiagnostic", "LastReport")
         except (OSError, ValueError):
             report = None
-        if isinstance(report, dict) and report.get("request") == request:
+        if isinstance(report, dict) and report.get("request") == request and isinstance(report.get("output"), str):
             if run.returncode or not report.get("success"):
-                raise RuntimeError(internet_report(report))
-            return internet_report(report) if operation == "diagnostic" else None
+                raise RuntimeError(report["output"])
+            return report["output"] if operation == "diagnostic" else None
+        if run.returncode == 3:
+            raise RuntimeError("Windows n’a pas pu enregistrer le rapport. Le résultat est dans la fenêtre « Diagnostic SoundLive-NDI ».")
         raise RuntimeError(run.stderr.strip() or
-                           f"PowerShell a quitté sans rapport (code {run.returncode}). "
-                           "Vérifie que le lanceur et regie-internet-windows.ps1 viennent du même kit.")
+                           f"Le processus PowerShell élevé a quitté avant de transmettre son rapport (code {run.returncode}). "
+                           "Relance le diagnostic depuis PowerShell en administrateur (voir README.md).")
     else:
         command = ["/usr/bin/python3", "-I", str(root / "regie-internet.py"), *args]
         if os.geteuid() != 0:
