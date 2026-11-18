@@ -52,6 +52,11 @@ button{padding:9px 13px;cursor:pointer;background:#2b222f;font-weight:600;white-
 .full-action{width:100%;margin-top:12px}
 .button-red{background:#a62541;border-color:#bc3d55;color:#fff}
 #media-manager{width:min(920px,94vw)}
+#media-timing{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin-top:10px}
+#media-timing label{margin:0}
+#media-timing p{flex-basis:100%;margin:0}
+.remote-actions button{display:inline-flex;align-items:center;gap:8px}
+.remote-actions svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
 #media-folder-edit .actions{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}
 @media(max-width:640px){
   #media-folder-edit .actions{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -167,8 +172,6 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .regie-system .metric.disk strong{margin-inline-start:0}
 .regie-system .disk-free{grid-column:1/-1}
 .regie-details{grid-column:1/-1}
-.regie-details summary{color:#ffd0dc;cursor:pointer;font-size:.88rem}
-.regie-details .facts{margin:5px 0 0}
 @media(max-width:460px){
   .regie-system .metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
   #regie-latency{grid-column:1/-1;display:flex}
@@ -260,7 +263,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       </div>
     </div>
     <p class="small" id="traffic-help">Trafic total de l’interface sélectionnée, NDI compris lorsque ce PC diffuse.</p>
-    <details class="regie-details"><summary>Informations système de la régie</summary><dl class="facts"></dl></details>
+    <div class="regie-details"><button type="button" id="regie-system-open">Informations système de la régie</button></div>
   </section>
   <details class="preview-section" id="source-previews">
     <summary>Aperçu des sources NDI disponibles</summary>
@@ -385,6 +388,12 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       <button class="primary" type="button" id="media-launch">Lancer ce dossier</button>
       <button type="button" id="media-ndi">Revenir à la diffusion NDI</button>
     </div>
+    <form id="media-timing">
+      <label>Durée des images (s)<input name="images" type="number" min="1" max="3600" required></label>
+      <label>Durée max. des vidéos (s)<input name="videos" type="number" min="0" max="3600" required></label>
+      <button type="submit">Enregistrer les durées</button>
+      <p class="small">0 = lire la vidéo jusqu’à la fin.</p>
+    </form>
     <p class="small" id="media-status"></p>
     <div class="media-grid">
       <div>
@@ -468,10 +477,36 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
     <ul class="interfaces"></ul>
     <p class="small">Débit total de chaque interface. Latence HTTP entre le récepteur et la régie.</p>
     <div class="test-result" role="status"></div>
-    <div class="actions">
+    <div class="actions remote-actions">
       <button type="button" id="latency-run">Tester la latence</button>
+      <button type="button" class="open-ssh">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 6 6 6-6 6m8 0h6"/></svg>SSH
+      </button>
+      <button type="button" class="open-desktop">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>
+        <span>VNC</span>
+      </button>
       <form method="dialog"><button autofocus>Fermer</button></form>
     </div>
+    <p class="small desktop-address" hidden></p>
+  </div>
+</dialog>
+<dialog id="regie-diagnostics" aria-labelledby="regie-diagnostics-title">
+  <div class="dialog-body">
+    <h2 id="regie-diagnostics-title">Informations de la régie</h2>
+    <dl class="facts"></dl>
+    <label>Adresse pour le bureau distant<select class="desktop-target"></select></label>
+    <div class="actions remote-actions">
+      <button type="button" class="open-ssh">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 6 6 6-6 6m8 0h6"/></svg>SSH
+      </button>
+      <button type="button" class="open-desktop">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>
+        <span>VNC</span>
+      </button>
+      <form method="dialog"><button autofocus>Fermer</button></form>
+    </div>
+    <p class="small desktop-address" hidden></p>
   </div>
 </dialog>
 <template id="preview-template">
@@ -1015,7 +1050,8 @@ const trafficRx = document.querySelector("#traffic-rx");
 const regieSystem = document.querySelector(".regie-system");
 const regieTiles = Object.fromEntries(["cpu","ram","disk"].map(key => [key, select(regieSystem,"." + key)]));
 const regieLatency = document.querySelector("#regie-latency");
-const regieFacts = document.querySelector(".regie-details .facts");
+const regieDiagnostics = document.querySelector("#regie-diagnostics");
+const regieFacts = select(regieDiagnostics, ".facts");
 const trafficFormat = new Intl.NumberFormat("fr-FR", {maximumFractionDigits:2});
 function rateText(rate) {
   return Number.isFinite(rate) ? trafficFormat.format(rate) + " Mbit/s" : "—";
@@ -1303,10 +1339,61 @@ function renderRegieSystem(stats = {}) {
   renderSystemMetrics(regieTiles, stats, diagnosticDisk(stats));
   renderFacts(regieFacts, systemFacts(stats || {}, "Disque des médias"));
 }
+function setupRemoteControls(dialog, {id, address, protocol, online = true}) {
+  const ssh = select(dialog, ".open-ssh");
+  const desktop = select(dialog, ".open-desktop");
+  const info = select(dialog, ".desktop-address");
+  ssh.disabled = !online;
+  ssh.onclick = () => window.open("/terminal?id=" + encodeURIComponent(id), "_blank",
+    "popup,noopener,width=980,height=735");
+  const rdp = protocol === "rdp";
+  const port = rdp ? 3389 : 5900;
+  const validIP = typeof address === "string" && /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(address);
+  select(desktop, "span").textContent = rdp ? "Bureau RDP" : "VNC";
+  desktop.disabled = !online || !validIP;
+  info.hidden = !validIP;
+  info.textContent = validIP ? (rdp ? "RDP" : "VNC") + " · " + address + ":" + port : "";
+  desktop.onclick = action(async () => {
+    if (!validIP) return;
+    if (location.protocol === "http:") {
+      const {opened} = await call("/api/desktop/open", {id,address});
+      if (opened) return;
+    }
+    if (rdp) {
+      const file = new Blob(["full address:s:" + address + ":" + port + "\r\nprompt for credentials:i:1\r\n"],
+        {type:"application/x-rdp"});
+      const url = URL.createObjectURL(file);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "SoundLive-" + address + ".rdp";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } else {
+      window.location.href = "vnc://" + address + ":" + port;
+    }
+  });
+}
+document.querySelector("#regie-system-open").onclick = action(async () => {
+  const control = select(regieDiagnostics,".desktop-target");
+  const network = await call("/api/network");
+  const addresses = network.addresses || [];
+  const active = trafficRows.find(row => row.id === trafficInterface.value)?.addresses || [];
+  control.replaceChildren(...addresses.map(({ip,label}) => new Option(label + " · " + ip, ip)));
+  const preferred = active.find(ip => addresses.some(row => row.ip === ip));
+  if (preferred) control.value = preferred;
+  const refresh = () => setupRemoteControls(regieDiagnostics, {id:"regie",address:control.value,
+    protocol:network.desktop_protocol});
+  control.onchange = refresh;
+  refresh();
+  regieDiagnostics.showModal();
+});
 function renderDiagnostics(card) {
   const row = card.data;
   const report = row.report;
   const data = report.diagnostic || {};
+  setupRemoteControls(diagnostics, {id:row.id, address:report.ip,
+    protocol:data.desktop_protocol || (row.kind === "ubuntu" && /Ubuntu 26\./.test(data.os || "") ? "rdp" : "vnc"),
+    online:row.online && row.paired});
   select(diagnostics, "h2").textContent = row.name;
   select(diagnostics, "#diagnostics-state").textContent = row.online ?
     (report.diagnostic ? report.state : "Mets à jour ce récepteur pour recevoir ses informations système.") :
@@ -1438,6 +1525,8 @@ function commonResolutions(rows) {
 }
 const mediaDialog = document.querySelector("#media-manager");
 const mediaFolders = select(mediaDialog, "#media-folders");
+const mediaTiming = select(mediaDialog, "#media-timing");
+let mediaTimingKey = "";
 const mediaList = select(mediaDialog, "#media-list");
 const mediaUpload = select(mediaDialog, "#media-upload");
 const mediaInput = select(mediaUpload, "input");
@@ -1689,6 +1778,19 @@ function renderMediaManager(preferFolder) {
   mediaSelect(mediaFolders, folders, preferFolder);
   const folder = groups.get(mediaFolders.value);
   if (!folder) return;
+  const timings = folder.targets.map(({folder}) => [folder.timing?.image_seconds ?? 10, folder.timing?.video_seconds ?? 0]);
+  const timingKey = JSON.stringify([mediaFolders.value, timings]);
+  if (timingKey !== mediaTimingKey) {
+    mediaTimingKey = timingKey;
+    for (const [index, name] of ["images", "videos"].entries()) {
+      const field = mediaTiming.elements.namedItem(name);
+      const seconds = timings[0]?.[index];
+      const unanimous = seconds != null && timings.every(timing => timing[index] === seconds);
+      field.value = unanimous ? seconds : "";
+      field.placeholder = unanimous ? "" : "Durées différentes";
+    }
+  }
+  for (const field of mediaTiming.elements) field.disabled = mediaBusy;
   const entries = mediaEntries(folder);
   const active = folder.targets.filter(({row,id}) => row.media.enabled && row.media_folder === id);
   const running = active.filter(({row}) => row.online && row.report.active_media &&
@@ -1737,6 +1839,7 @@ function openMediaManager(ids) {
   mediaFileKey = "";
   mediaSelected.clear();
   mediaInput.value = "";
+  mediaTimingKey = "";
   mediaResult.textContent = "";
   mediaUploadStatus.hidden = true;
   const rows = mediaRows();
@@ -1752,6 +1855,21 @@ mediaDialog.addEventListener("close", () => {
   mediaPlayer.dataset.source = "";
 });
 mediaFolders.onchange = () => { mediaFileKey = ""; mediaSelected.clear(); renderMediaManager(); };
+mediaTiming.onsubmit = event => {
+  event.preventDefault();
+  const folder = selectedMediaFolder();
+  if (mediaBusy || !folder || !mediaTiming.reportValidity()) return;
+  const image_seconds = mediaTiming.elements.namedItem("images").valueAsNumber;
+  const video_seconds = mediaTiming.elements.namedItem("videos").valueAsNumber;
+  showAction({
+    title:"Durées de rotation",
+    detail:"« " + folder.name + " » · Images " + image_seconds + " s · Vidéos " +
+      (video_seconds ? video_seconds + " s maximum." : "jusqu’à la fin."),
+    label:"Enregistrer",
+    perform:() => mediaBatch(folder.targets,
+      target => mediaChange(target,{action:"timing",image_seconds,video_seconds}),"Durées enregistrées")
+  });
+};
 
 async function mediaBatch(targets, perform, done, preferFolder) {
   if (mediaBusy) throw Error("Une opération sur les médias est déjà en cours.");

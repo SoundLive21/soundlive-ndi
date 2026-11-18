@@ -1114,7 +1114,8 @@ class LocalMedia:
         return path, item["name"]
 
     def schedule_image(self):
-        self.deadline = time.monotonic() + 10 if len(self.applied["items"]) > 1 else None
+        self.deadline = (time.monotonic() + self.applied.get("image_seconds", 10)
+                         if len(self.applied["items"]) > 1 else None)
 
     def command(self, settings):
         path, name = self.selected_file()
@@ -1126,7 +1127,8 @@ class LocalMedia:
         if image:
             self.schedule_image()
         else:
-            self.deadline = None
+            duration = self.applied.get("video_seconds", 0)
+            self.deadline = time.monotonic() + duration if duration else None
         seek = [] if image else ["-loop", "0"] if single else ["-autoexit"]
         still = ["-pattern_type", "none"] if image else []
         volume = 0 if settings["muted"] else settings["volume"]

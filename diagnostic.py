@@ -22,6 +22,13 @@ ARM_CORES = {
     "0xd0b": "ARM Cortex-A76",
 }
 
+def desktop_protocol():
+    desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
+    if sys.platform != "win32" and os.environ.get("XDG_SESSION_TYPE") == "wayland" and (
+            "gnome" in desktop or "ubuntu" in desktop):
+        return "rdp"
+    return "vnc"
+
 
 def cpu_ticks():
     if sys.platform == "win32":
@@ -244,7 +251,7 @@ class Diagnostic:
         self.refresh_at = 0
 
     def sample_system(self, disk_path=None):
-        data = {}
+        data = {"desktop_protocol": desktop_protocol()}
         try:
             total, idle = cpu_ticks()
             if self.last_ticks:

@@ -210,6 +210,78 @@ d'installation. Le réglage Ubuntu est valable jusqu'au redémarrage de la régi
 Sous Windows, utilise **Désactiver** pour retirer le NAT SoundLive et restaurer
 les réglages de routage des deux interfaces.
 
+### Bureau distant et terminal SSH
+
+Dans **Informations** d’un lecteur, **SSH** ouvre le terminal dans une
+fenêtre séparée. **VNC** ouvre le client graphique. Ces boutons sont aussi
+dans **Informations système de la régie**. Depuis la console locale,
+SoundLive lance Remmina ou VNC Viewer sous Linux, et TigerVNC Viewer ou
+TightVNC Viewer sous
+Windows s’ils sont installés. Depuis l’interface HTTPS, le bouton VNC
+appelle le client associé aux liens `vnc://` sur le poste où se trouve le
+navigateur. L’adresse et le port sont affichés dans la popup pour une saisie
+manuelle dans le client.
+
+- Sur Raspberry Pi OS et Linux, ajoute `--bureau-distant` à la commande
+  de préparation du lecteur. Sur une machine déjà installée, exécute
+  `bash installer-bureau-distant-linux.sh` depuis sa session graphique.
+  Raspberry Pi OS Wayland utilise WayVNC. Sur une session X11, choisis un
+  mot de passe VNC puis rouvre la session pour démarrer x11vnc.
+- Sur Windows, ajoute `-Vnc` à la commande de préparation ou exécute
+  `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\installer-bureau-distant-windows.ps1`
+  dans un PowerShell administrateur. Choisis **TightVNC Server** en mode
+  service et définis un mot de passe dans l’assistant. Pour utiliser le
+  MSI officiel déjà téléchargé, indique `-VncMsi C:\chemin\tightvnc.msi`.
+- Sous Ubuntu GNOME en Wayland, ouvre **Paramètres → Système → Bureau distant
+  → Partage du bureau**, active le partage et le contrôle et configure les
+  identifiants. Le bouton devient **Bureau RDP** et utilise le port 3389
+  avec la session affichée. Depuis HTTPS, il fournit un fichier de connexion
+  `.rdp`. Utilise le port affiché dans les paramètres si Ubuntu en choisit
+  un autre.
+
+Les scripts d’installation du bureau distant fonctionnent aussi sur le PC
+de régie. Les postes doivent être joignables depuis le client VNC ou RDP
+sur le LAN de diffusion, ou via un VPN autorisé. Dans le cas de WayVNC, le
+client doit prendre en charge l’authentification configurée sur le Pi.
+Privilégie TigerVNC Viewer ou Remmina pour une connexion WayVNC.
+
+Pour le terminal SSH, installe les dépendances avec le Python du lanceur
+sur le **PC de régie** :
+
+```bash
+sudo apt install python3-paramiko python3-pyte
+```
+
+```powershell
+py -3 -m pip install paramiko pyte
+```
+
+Le terminal utilise `~/.ssh/id_soundlive` ou le chemin défini dans
+`SOUNDLIVE_SSH_KEY` au lancement de la régie. Le lecteur doit autoriser
+la clé publique correspondante. La phrase secrète de la clé privée est
+demandée uniquement si nécessaire. Une clé d’hôte déjà approuvée dans
+`known_hosts` est reconnue. Sinon, renseigne l’empreinte SHA256 affichée
+sur le poste cible après l’installation SSH. Pour la régie elle-même,
+OpenSSH Server doit être actif et sa clé publique autorisée sur le compte
+à utiliser. Sous Windows, la commande
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\installer-ssh-windows.ps1 -CleSsh "$env:USERPROFILE\.ssh\id_soundlive.pub"`
+prépare OpenSSH depuis un PowerShell administrateur. L’empreinte hôte
+Windows s’obtient avec
+`ssh-keygen -lf "$env:ProgramData\ssh\ssh_host_ed25519_key.pub"`.
+Sous Linux, installe `openssh-server` et utilise
+`ssh-copy-id -i ~/.ssh/id_soundlive.pub "$USER@127.0.0.1"` si le compte
+accepte déjà une connexion SSH. L’empreinte s’obtient avec
+`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`.
+
+### Durée de rotation des médias
+
+Dans **Images et vidéos**, sélectionne un dossier, règle **Durée des images**
+et **Durée max. des vidéos**, puis clique sur **Enregistrer les durées**.
+Par défaut, les images tournent toutes les 10 secondes et les vidéos vont à
+leur fin. Une durée maximale positive fait passer au média suivant au plus
+tard à la durée indiquée. Une image seule reste affichée. Une vidéo seule
+boucle. Mets à jour les lecteurs en version 1.4.27 pour appliquer ces durées.
+
 ## Publier une source NDI sur le réseau local
 
 Le PC émetteur peut être la régie, un autre PC Windows ou un PC Ubuntu. Un

@@ -6,6 +6,7 @@
 import argparse
 from base64 import b64decode
 from contextlib import contextmanager
+from getpass import getuser
 from hashlib import sha256
 import hmac
 from html import escape
@@ -13,6 +14,7 @@ from ipaddress import IPv4Address
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import CookieError, SimpleCookie
 import json
+import os
 from pathlib import Path
 import re
 import secrets
@@ -31,14 +33,16 @@ from acces_regie import (PORT as REMOTE_PORT, SESSION_COOKIE, SESSION_WARNING, U
 from commun import (APP_NAME, MEDIA_CHUNK, MEDIA_COUNT_LIMIT, MEDIA_DISK_PERCENT, MEDIA_FILE_LIMIT, MEDIA_FOLDER_LIMIT,
                     MEDIA_LIBRARY_LIMIT, MEDIA_TOTAL_LIMIT,
                     ORIENTATIONS, PREVIEW_LIMIT, SOFTWARE_VERSION as CLIENT_VERSION,
-                    media_available, media_config, media_disk, media_name, media_revision, options, release_number)
-from diagnostic import Diagnostic, NetworkRates, network_info
+                    media_available, media_config, media_disk, media_name, media_revision, media_timing,
+                    options, release_number)
+from diagnostic import Diagnostic, NetworkRates, desktop_protocol, network_info
 from mise_a_jour import ENGINE_ASSETS, SAFE_ID, contents, digest, engine_name, full_contents, package, prepare_key
 from qrencoder import QRCode, QRErrorCorrectLevel
+from terminal_ssh import Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.49"
+SOFTWARE_VERSION = "1.4.50"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -58,6 +62,7 @@ PAGE = ((ROOT / "tableau.html").read_bytes()
         .replace(b"__RESOLUTION_CONTROLS_ENABLED__", str(RESOLUTION_CONTROLS_ENABLED).lower().encode("ascii"))
         .replace(b"__PREVIEW_INTERVAL__", str(PREVIEW_AUTO_INTERVAL).encode("ascii")))
 LOGIN_PAGE = (ROOT / "acces-refuse.html").read_text(encoding="utf-8")
+TERMINAL_PAGE = (ROOT / "terminal.html").read_bytes()
 BLOCKED_MESSAGE = "Cette adresse IP est bloquée sur la régie. Contacte la régie pour demander le déblocage."
 LOGIN_NOTICES = {
     "fermee": "Tu as été déconnecté de la régie.",
@@ -461,8 +466,8 @@ def load_screen_order():
 
 def screen_media(row):
     state = row.get("media", {"enabled": False, "items": []})
-    folder = row.get("media_folder", MEDIA_DEFAULT_FOLDER)
-    return dict(enabled=state["enabled"], items=media_folders(row)[folder]["items"])
+    folder = media_folders(row)[row.get("media_folder", MEDIA_DEFAULT_FOLDER)]
+    return dict(enabled=state["enabled"], items=folder["items"], **folder.get("timing", {}))
 
 
 def media_folders(row):
@@ -479,7 +484,7 @@ def save_media(row, folders, active, enabled, *, resume=False, empty=False):
     previous = {field: row[field] for field in fields if field in row}
     settings, version = row["options"], row["version"]
     row.update(media_folders=folders, media_folder=active,
-               media=media_config(dict(enabled=enabled, items=folders[active]["items"])))
+               media=media_config(dict(enabled=enabled, items=folders[active]["items"], **folders[active].get("timing", {}))))
     if empty:
         row["media_generation"] = row.get("media_generation", 0) + 1
     if resume and not settings["enabled"]:
@@ -572,6 +577,8 @@ def diagnostic_report(payload):
     if not isinstance(payload, dict):
         return None
     report = {}
+    if payload.get("desktop_protocol") in ("vnc", "rdp"):
+        report["desktop_protocol"] = payload["desktop_protocol"]
     for field in ("hostname", "os", "architecture", "model", "cpu"):
         value = payload.get(field)
         if isinstance(value, str):
@@ -706,6 +713,43 @@ def local_addresses():
     ))
     return ordered
 
+
+def desktop_command(address, protocol):
+    if sys.platform == "win32":
+        if protocol == "rdp":
+            return ["mstsc.exe", f"/v:{address}:3389"]
+        programs = Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+        for name, directory in (("vncviewer.exe", "TigerVNC"), ("tvnviewer.exe", "TightVNC")):
+            program = shutil.which(name)
+            installed = programs / directory / name
+            if program or installed.is_file():
+                return [program or str(installed), f"{address}::5900"]
+        return None
+    if program := shutil.which("remmina"):
+        port = 3389 if protocol == "rdp" else 5900
+        return [program, "-c", f"{protocol}://{address}:{port}"]
+    if protocol == "vnc" and (program := shutil.which("vncviewer")):
+        return [program, f"{address}::5900"]
+    return None
+
+
+def support_target(key):
+    if key == "regie":
+        return dict(address="127.0.0.1", name="Régie", user=getuser(), desktop=desktop_protocol())
+    with LOCK:
+        row = SCREENS.get(key) if isinstance(key, str) else None
+        report = row.get("report", {}) if row and row.get("token") else {}
+        if time.time() - report.get("seen", 0) >= ONLINE_AGE:
+            raise ValueError("Le lecteur doit être associé et en ligne.")
+        address = IPv4Address(report["ip"])
+        if address.is_loopback or address.is_unspecified or address.is_multicast:
+            raise ValueError("Adresse du lecteur invalide.")
+        diagnostic = report.get("diagnostic") or {}
+        protocol = diagnostic.get("desktop_protocol") or (
+            "rdp" if row.get("kind") == "ubuntu" and diagnostic.get("os", "").startswith("Ubuntu 26.") else "vnc")
+        return dict(address=str(address), name=row["name"], user="soundlive", desktop=protocol)
+
+
 class Request(BaseHTTPRequestHandler):
     def setup(self):
         self.request.settimeout(8)
@@ -763,7 +807,7 @@ class Request(BaseHTTPRequestHandler):
             return True
         address = self.client_address[0]
         connections = self.server.remote_connections
-        page = path in ("/", "/connexion")
+        page = path in ("/", "/connexion", "/terminal")
         if connections.is_blocked(address):
             self.refuse_blocked(page)
             return False
@@ -842,6 +886,8 @@ class Request(BaseHTTPRequestHandler):
             self.send_media_archive(url.query)
         elif path == "/":
             self.reply(200, PAGE.replace(b"__REMOTE_ONLY__", b"" if remote else b"hidden"))
+        elif path == "/terminal":
+            self.reply(200, TERMINAL_PAGE)
         elif remote and path == "/connexion":
             notice = LOGIN_NOTICES.get(url.query.removeprefix("etat="), "")
             self.login_page(notice=notice)
@@ -849,7 +895,8 @@ class Request(BaseHTTPRequestHandler):
             self.session_status()
         elif path == "/api/network":
             self.reply(200, {"addresses": local_addresses(),
-                             "port": getattr(self.server, "receiver_port", self.server.server_port)})
+                             "port": getattr(self.server, "receiver_port", self.server.server_port),
+                             "desktop_protocol": desktop_protocol()})
         elif path == "/api/interface-traffic":
             self.reply(200, self.server.interface_traffic.read())
         elif path == "/api/regie-latency":
@@ -950,6 +997,25 @@ class Request(BaseHTTPRequestHandler):
             value = json.loads(payload)
             if not isinstance(value, dict):
                 raise ValueError("Requête invalide.")
+            if path.startswith("/api/ssh/"):
+                self.terminal_action(path.removeprefix("/api/ssh/"), value)
+                return
+            if path == "/api/desktop/open":
+                if remote:
+                    self.reply(403, {"error": "Le lancement d’un client sur la régie est réservé à la console locale."})
+                    return
+                key = value.get("id")
+                target = support_target(key)
+                address = target["address"]
+                if key == "regie":
+                    address = str(IPv4Address(value.get("address", "")))
+                    if address not in {item["ip"] for item in local_addresses()}:
+                        raise ValueError("Choisis une adresse du PC de régie.")
+                command = desktop_command(address, target["desktop"])
+                if command:
+                    subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self.reply(200, {"opened": command is not None})
+                return
             if remote and path == "/api/session/prolonger":
                 reason, self.session_remaining = self.server.remote_connections.observe(
                     self.client_address[0], self.remote_session, renew=True)
@@ -974,6 +1040,26 @@ class Request(BaseHTTPRequestHandler):
             print(error, flush=True)
             status, result = 500, {"error": "Le serveur n’a pas pu terminer la demande."}
         self.reply(status, result)
+
+    def terminal_action(self, operation, value):
+        owner = (self.client_address[0], getattr(self, "remote_session", None))
+        terminals = self.server.terminals
+        try:
+            if operation in ("target", "start"):
+                target = support_target(value.get("id"))
+                result = target if operation == "target" else terminals.start(owner, target["address"], value)
+            elif operation == "sync":
+                result = terminals.sync(owner, value.get("session"), value.get("input"))
+            elif operation == "end":
+                terminals.end(owner, value.get("session"))
+                result = {"ok": True}
+            else:
+                self.reply(404, {"error": "Action terminal inconnue."})
+                return
+        except (ValueError, RuntimeError) as error:
+            self.reply(400, {"error": str(error)})
+            return
+        self.reply(200, result)
 
     def upload_media(self, raw_query, length):
         if self.headers.get_content_type() != "application/octet-stream" or not 0 < length <= MEDIA_FILE_LIMIT:
@@ -1191,6 +1277,9 @@ class Request(BaseHTTPRequestHandler):
             del folders[folder_id]
             if folder_id == active:
                 active, enabled = MEDIA_DEFAULT_FOLDER, False
+        elif action == "timing":
+            timing = media_timing(dict(image_seconds=data["image_seconds"], video_seconds=data["video_seconds"]))
+            folders[folder_id] = {**folder, "timing": timing}
         elif action == "play":
             enabled = data["enabled"]
             if type(enabled) is not bool:
@@ -1486,6 +1575,7 @@ class Regie:
         self.remote_url = None
         self.connections = None
         self.server = ThreadingHTTPServer(("0.0.0.0", port), Request)
+        self.server.terminals = Terminals()
         self.server.interface_traffic = InterfaceTraffic()
         self.server.publication_status = publication_status or PublicationStatus(
             ROOT / "source-publications.json", SOFTWARE_VERSION)
@@ -1512,11 +1602,13 @@ class Regie:
                 self.connections = RemoteConnections(REMOTE_ACCESS / "adresses-bloquees.json")
                 self.remote = RemoteDashboard(REMOTE_ACCESS, Request, self.server.server_port)
                 self.remote.interface_traffic = self.server.interface_traffic
+                self.remote.terminals = self.server.terminals
                 self.server.waiting_qr = waiting_access(*self.remote.server_address)
                 self.remote_url = f"https://{self.remote.server_address[0]}:{self.remote.server_port}"
                 self.server.remote_connections = self.remote.remote_connections = self.connections
                 self.remote.publication_status = self.server.publication_status
         except BaseException:
+            self.server.terminals.close()
             if self.remote is not None:
                 self.remote.server_close()
             self.server.server_close()
@@ -1526,6 +1618,7 @@ class Regie:
         threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True).start()
 
     def close(self):
+        self.server.terminals.close()
         for server in (self.remote, self.server):
             if server is not None:
                 server.shutdown()

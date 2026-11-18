@@ -13,7 +13,7 @@ import sys
 DEFAULT_SOURCE = "OBS (Programme)"
 APP_NAME = "SoundLive-NDI"
 COPYRIGHT = "© 2026 Société SoundLive"
-SOFTWARE_VERSION = "1.4.26"
+SOFTWARE_VERSION = "1.4.27"
 PREVIEW_LIMIT = 160 * 1024
 ORIENTATIONS = ("landscape", "portrait-left", "portrait-right")
 MEDIA_FILE_LIMIT = 256 * 1024 * 1024
@@ -53,13 +53,21 @@ def media_items(items, limit):
     return verified
 
 
+def media_timing(value):
+    image, video = value.get("image_seconds", 10), value.get("video_seconds", 0)
+    if type(image) is not int or not 1 <= image <= 3600 or type(video) is not int or not 0 <= video <= 3600:
+        raise ValueError("Durée invalide. Images de 1 à 3600 secondes, vidéos de 0 à 3600 secondes.")
+    return {name: seconds for name, seconds, default in
+            (("image_seconds", image, 10), ("video_seconds", video, 0)) if seconds != default}
+
+
 def media_config(value):
     if not isinstance(value, dict) or type(value.get("enabled")) is not bool:
         raise ValueError("Mode de lecture locale invalide.")
     verified = media_items(value.get("items"), MEDIA_COUNT_LIMIT)
     if sum(item["size"] for item in verified) > MEDIA_TOTAL_LIMIT:
         raise ValueError("Liste de médias trop volumineuse.")
-    return dict(enabled=value["enabled"] and bool(verified), items=verified)
+    return dict(enabled=value["enabled"] and bool(verified), items=verified, **media_timing(value))
 
 
 def media_revision(config):
