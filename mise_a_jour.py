@@ -28,6 +28,13 @@ NAMESPACE = "soundlive-update"
 SAFE_ID = re.compile(r"[a-f0-9]{64}")
 PUBLIC_KEY = "regie-update.pub"
 RESTART = 75
+CLIENT_UPDATE_ISSUES = ("launcher_required", "client_key_required", "client_openssh_required")
+
+
+class OpenSSHError(RuntimeError):
+    def __init__(self, message, reason="failed"):
+        super().__init__(message)
+        self.reason = reason
 
 
 def contents(folder):
@@ -101,13 +108,61 @@ def ssh_keygen(*args, data=None):
                                 capture_output=True, timeout=8,
                                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
     except FileNotFoundError as error:
-        raise RuntimeError("Client OpenSSH requis : ssh-keygen est introuvable.") from error
+        raise OpenSSHError("Client OpenSSH requis : ssh-keygen est introuvable.", "missing") from error
     except subprocess.TimeoutExpired as error:
-        raise RuntimeError("ssh-keygen n’a pas répondu.") from error
+        raise OpenSSHError("ssh-keygen n’a pas répondu.", "timeout") from error
     if result.returncode:
         message = result.stderr.decode(errors="replace").strip()
-        raise RuntimeError(message or "Échec de la vérification OpenSSH.")
+        normalized = message.lower()
+        if "bad permissions" in normalized or "unprotected private key file" in normalized:
+            raise OpenSSHError(message, "permissions")
+        raise OpenSSHError(message or "Échec de la vérification OpenSSH.")
     return result.stdout
+
+
+def protect_windows_signing_key(private):
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$path = $env:SOUNDLIVE_UPDATE_KEY_PATH
+$file = Get-Item -LiteralPath $path -Force
+if ($file.PSIsContainer -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    throw 'Invalid signing key path.'
+}
+$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+$acl = Get-Acl -LiteralPath $path
+if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) {
+    $acl.SetOwner($sid)
+}
+$acl.SetSecurityDescriptorSddlForm(
+    "D:P(A;;FA;;;$($sid.Value))",
+    [Security.AccessControl.AccessControlSections]::Access
+)
+Set-Acl -LiteralPath $path -AclObject $acl
+"""
+    powershell = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                              "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    try:
+        result = subprocess.run([powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+                                env={**os.environ, "SOUNDLIVE_UPDATE_KEY_PATH": str(private.absolute())},
+                                stdin=subprocess.DEVNULL, capture_output=True, timeout=8,
+                                creationflags=subprocess.CREATE_NO_WINDOW)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise OpenSSHError(f"Impossible de protéger la clé de mise à jour Windows. {error}",
+                           "permissions") from error
+    if result.returncode:
+        detail = result.stderr.decode(errors="replace").strip()
+        raise OpenSSHError(f"Impossible de protéger la clé de mise à jour Windows. {detail}", "permissions")
+
+
+def use_signing_key(private, *args):
+    try:
+        return ssh_keygen(*args)
+    except OpenSSHError as error:
+        if sys.platform != "win32" or error.reason != "permissions":
+            raise
+    # Repair only the local signing key, and only when OpenSSH has rejected its permissions.
+    protect_windows_signing_key(private)
+    return ssh_keygen(*args)
 
 
 def prepare_key(folder):
@@ -116,7 +171,7 @@ def prepare_key(folder):
     if not private.is_file():
         ssh_keygen("-t", "ed25519", "-N", "", "-C", NAMESPACE, "-f", private)
     public = folder / PUBLIC_KEY
-    public.write_bytes(ssh_keygen("-y", "-f", private))
+    public.write_bytes(use_signing_key(private, "-y", "-f", private))
     return public
 
 
@@ -124,7 +179,7 @@ def package(private, files, device, job, nonce, version):
     with TemporaryDirectory() as tmp:
         message = Path(tmp) / "manifest"
         message.write_bytes(manifest(device, job, nonce, version))
-        ssh_keygen("-Y", "sign", "-f", private, "-n", NAMESPACE, message)
+        use_signing_key(private, "-Y", "sign", "-f", private, "-n", NAMESPACE, message)
         signature = message.with_suffix(".sig").read_bytes().replace(b"\r\n", b"\n")
     # OpenSSH 9.2 exige un LF à la fin de l'en-tête de la signature.
     if not (signature.startswith(b"-----BEGIN SSH SIGNATURE-----\n")

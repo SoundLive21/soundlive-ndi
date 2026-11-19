@@ -36,13 +36,14 @@ from commun import (APP_NAME, MEDIA_CHUNK, MEDIA_COUNT_LIMIT, MEDIA_DISK_PERCENT
                     media_available, media_config, media_disk, media_name, media_revision, media_timing,
                     options, release_number)
 from diagnostic import Diagnostic, NetworkRates, desktop_protocol, network_info
-from mise_a_jour import ENGINE_ASSETS, SAFE_ID, contents, digest, engine_name, full_contents, package, prepare_key
+from mise_a_jour import (CLIENT_UPDATE_ISSUES, ENGINE_ASSETS, SAFE_ID, OpenSSHError, contents, digest,
+                         engine_name, full_contents, package, prepare_key)
 from qrencoder import QRCode, QRErrorCorrectLevel
 from terminal_ssh import HostKeyCheck, Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.56"
+SOFTWARE_VERSION = "1.4.57"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -256,7 +257,8 @@ def update_availability(report, now, key_exists):
     if payload and report.get("client_version") == payload[1]:
         return "current"
     if not report.get("can_update"):
-        return "unsupported"
+        issue = report.get("update_issue")
+        return issue if issue in CLIENT_UPDATE_ISSUES else "unsupported"
     if payload is None or (report.get("update_has_engine") and engine_name(report.get("update_target")) not in payload[0]):
         return "package_missing"
     return "available" if key_exists else "key_required"
@@ -1049,7 +1051,18 @@ class Request(BaseHTTPRequestHandler):
             with LOCK:
                 status, result = self.apply(path, value)
             if path == "/api/client-package" and status == 200:
-                result = package(UPDATE_KEY, **result)
+                try:
+                    result = package(UPDATE_KEY, **result)
+                except (OSError, RuntimeError) as error:
+                    print(f"Signature des mises à jour : {error}", flush=True)
+                    reason = error.reason if isinstance(error, OpenSSHError) else "failed"
+                    message = {
+                        "missing": "Le client OpenSSH (ssh-keygen) est introuvable sur la régie.",
+                        "timeout": "OpenSSH ne répond pas pendant la signature sur la régie.",
+                        "permissions": "La régie n’a pas pu sécuriser sa clé privée de mise à jour.",
+                    }.get(reason, "La régie n’a pas pu signer le paquet.")
+                    status, result = 503, {"code": "update_signing_failed",
+                                           "error": message + " Sur la régie, lance tableau.py --tester-mises-a-jour."}
         except (KeyError, ValueError, TypeError) as error:
             status, result = 400, {"error": str(error)}
         except (OSError, RuntimeError) as error:
@@ -1458,6 +1471,8 @@ class Request(BaseHTTPRequestHandler):
             release = data.get("client_release")
             release = release if release_number(release) else None
             can_update = data.get("can_update") is True and version is not None
+            update_issue = data.get("update_issue")
+            update_issue = update_issue if not can_update and update_issue in CLIENT_UPDATE_ISSUES else None
             update_target = data.get("update_target")
             update_target = update_target if isinstance(update_target, str) and update_target in ENGINE_ASSETS else None
             active_source = data.get("active_source")
@@ -1513,6 +1528,7 @@ class Request(BaseHTTPRequestHandler):
                                  display_preview_kind="player" if data.get("display_preview_kind") == "player" else "monitor",
                                  display_preview_error=str(data.get("display_preview_error") or "")[:240],
                                  can_update=can_update, client_version=version, client_release=release,
+                                 update_issue=update_issue,
                                  update_target=update_target, update_has_engine=data.get("update_has_engine") is True,
                                  update_result=result,
                                  latency_ms=bounded_number(data.get("latency_ms"), 10000))
@@ -1656,6 +1672,8 @@ def main():
     setup = parser.add_mutually_exclusive_group()
     setup.add_argument("--preparer-mises-a-jour", action="store_true",
                        help="créer ou réexporter la clé publique des mises à jour")
+    setup.add_argument("--tester-mises-a-jour", action="store_true",
+                       help="tester la signature de la régie avec sa clé privée existante")
     setup.add_argument("--activer-acces-distant", metavar="IP",
                        help="préparer l’accès HTTPS sur l’IPv4 du PC de régie")
     setup.add_argument("--desactiver-acces-distant", action="store_true",
@@ -1681,6 +1699,15 @@ def main():
         except (OSError, RuntimeError) as error:
             sys.exit(str(error))
         print(f"Clé publique à copier sur les récepteurs : {public}")
+        return
+    if args.tester_mises_a_jour:
+        if not UPDATE_KEY.is_file():
+            sys.exit("Clé de mise à jour absente. Prépare-la avec tableau.py --preparer-mises-a-jour.")
+        try:
+            package(UPDATE_KEY, {}, "a" * 16, "b" * 32, "c" * 64, "d" * 64)
+        except (OSError, RuntimeError) as error:
+            sys.exit(f"Signature impossible : {error}")
+        print("Signature OK. La régie peut signer les mises à jour.")
         return
     regie = Regie(args.port)
     try:

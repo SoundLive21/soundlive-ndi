@@ -640,6 +640,18 @@ lecteur a déjà été installé sans la clé, relance une installation locale
 avec cette clé et l’option `--mettre-a-jour` avant le premier push. Le
 client OpenSSH doit être présent sur la régie et les lecteurs.
 
+La clé publique des mises à jour est distincte de la clé utilisée pour
+ouvrir une session SSH. Sur un lecteur déjà installé et associé, tu peux
+copier `regie-update.pub` dans `~/.local/share/soundlive-ecrans` sous Linux
+ou dans `%LOCALAPPDATA%\SoundLive\client` sous Windows, puis rouvrir la
+session du lecteur pour qu’il la charge.
+
+Si la régie refuse de signer, teste la clé existante dans le dossier de
+la régie avec `py -3 tableau.py --tester-mises-a-jour` sous Windows ou
+`python3 tableau.py --tester-mises-a-jour` sous Linux. Sous Windows, si
+OpenSSH refuse les permissions de la clé privée, la régie tente de réserver
+son accès au compte qui la lance et réessaie la signature une fois.
+
 ```bash
 bash installer-client.sh --plateforme pi --mettre-a-jour
 bash installer-client.sh --plateforme ubuntu --mettre-a-jour-client

@@ -2529,7 +2529,7 @@ function render(row) {
     update ?
     [updateStates[update.state], update.message].filter(Boolean).join(" · ") :
     availability === "available" ? "Version " + clientRelease + " disponible" :
-    ["current","unsupported","key_required","newer","package_missing"].includes(availability) ? updateStates[availability] : "";
+    availability === "offline" ? "" : (updateStates[availability] || "");
   updateStatus.hidden = !updateStatus.textContent;
   form.hidden = !row.options;
   ui.pending.hidden = row.paired;
@@ -2960,6 +2960,9 @@ const updateStates = {
   current:"Déjà à jour",
   offline:"Hors ligne",
   unsupported:"Installation locale requise",
+  launcher_required:"Démarre le lecteur avec le lanceur SoundLive-NDI",
+  client_key_required:"Clé publique de mise à jour absente sur le lecteur",
+  client_openssh_required:"Client OpenSSH requis sur le lecteur",
   key_required:"Clé de signature absente sur la régie",
   package_missing:"Moteur de cette plateforme absent sur la régie",
   newer:"Version du lecteur plus récente que la régie",

@@ -1160,7 +1160,14 @@ class DashboardClient:
         self.latency_ms = None
         self.latency_test = None
         self.updater = ClientUpdate(APP, CLIENT_DIR)
-        self.can_update = "SOUNDLIVE_APP" in os.environ and self.updater.public.is_file()
+        self.update_issue = None
+        if "SOUNDLIVE_APP" not in os.environ:
+            self.update_issue = "launcher_required"
+        elif not self.updater.public.is_file():
+            self.update_issue = "client_key_required"
+        elif not shutil.which("ssh-keygen"):
+            self.update_issue = "client_openssh_required"
+        self.can_update = self.update_issue is None
         self.target = update_target()
         files = self.updater.installed_files(self.target)
         self.version = digest(files)
@@ -1228,6 +1235,7 @@ class DashboardClient:
         report.update(kind=DEVICE_KIND, latency_ms=self.latency_ms, latency_test=self.latency_test,
                       diagnostic=self.diagnostic.sample(server), can_update=self.can_update,
                       client_version=self.version, client_release=SOFTWARE_VERSION, update_target=self.target,
+                      update_issue=self.update_issue,
                       update_has_engine=self.has_versioned_engine,
                       orientation_status=self.orientation_report,
                       display=self.display_info, display_capture=bool(image_preview or uses_internal or uses_portal or uses_monitor),
