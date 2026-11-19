@@ -36,6 +36,7 @@ from commun import (APP_NAME, MEDIA_CHUNK, MEDIA_COUNT_LIMIT, MEDIA_DISK_PERCENT
                     media_available, media_config, media_disk, media_name, media_revision, media_timing,
                     options, release_number)
 from diagnostic import Diagnostic, NetworkRates, desktop_protocol, network_info
+from installation_lecteur import KEYS_PATH, installation_keys, prepare_installations
 from mise_a_jour import (CLIENT_UPDATE_ISSUES, ENGINE_ASSETS, SAFE_ID, OpenSSHError, contents, digest,
                          engine_name, full_contents, package, prepare_key)
 from qrencoder import QRCode, QRErrorCorrectLevel
@@ -43,7 +44,7 @@ from terminal_ssh import HostKeyCheck, Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.57"
+SOFTWARE_VERSION = "1.4.58"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -70,6 +71,7 @@ LOGIN_NOTICES = {
     "expiree": "La session a expiré ou a été fermée. Reconnecte-toi pour reprendre.",
 }
 LOCK = threading.Lock()
+INSTALLATION_KEYS_LOCK = threading.Lock()
 POWER_REQUEST_AGE = 25
 ONLINE_AGE = 12
 RESOLUTIONS = ("360p", "720p", "1080p", "4K")
@@ -772,9 +774,10 @@ class Request(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
-    def reply(self, status, value, *, location=None, session=None):
+    def reply(self, status, value, *, location=None, session=None, content_type=None):
         if isinstance(value, bytes):
-            body, content_type = value, "text/html; charset=utf-8"
+            body = value
+            content_type = content_type or "text/html; charset=utf-8"
         else:
             body = json.dumps(value, ensure_ascii=False).encode()
             content_type = "application/json; charset=utf-8"
@@ -889,6 +892,15 @@ class Request(BaseHTTPRequestHandler):
         url = urlsplit(self.path)
         path = url.path
         remote = getattr(self.server, "remote_dashboard", False)
+        if path == KEYS_PATH and not remote:
+            try:
+                with INSTALLATION_KEYS_LOCK:
+                    keys = installation_keys(ROOT)
+            except (OSError, ValueError):
+                self.reply(404, {"error": "Prépare les clés d’installation depuis la régie."})
+                return
+            self.reply(200, keys, content_type="application/json; charset=utf-8")
+            return
         if path == "/api/client-media":
             self.send_media(url.query, preview=False)
             return
@@ -952,6 +964,7 @@ class Request(BaseHTTPRequestHandler):
                         id=key, name=row["name"], options=row.get("options"),
                         report=report, online=now - report.get("seen", 0) < ONLINE_AGE,
                         pairing=row.get("pairing") if now < row.get("pairing_until", 0) else None,
+                        installation_fingerprint=row.get("installation_fingerprint"),
                         paired="token" in row, version=row.get("version", 0), kind=row.get("kind"),
                         support=support_methods(row.get("kind")),
                         group=row.get("group"), resolution_limit=row.get("resolution_limit"),
@@ -1012,6 +1025,15 @@ class Request(BaseHTTPRequestHandler):
             value = json.loads(payload)
             if not isinstance(value, dict):
                 raise ValueError("Requête invalide.")
+            if path == "/api/pair":
+                value.pop("installation_fingerprint", None)
+                if value.get("prepare_installation") is True:
+                    try:
+                        with INSTALLATION_KEYS_LOCK:
+                            value["installation_fingerprint"] = prepare_installations(ROOT)
+                    except (OSError, RuntimeError, ValueError) as error:
+                        self.reply(409, {"error": f"Impossible de préparer les clés d’installation. {error}"})
+                        return
             if path.startswith("/api/ssh/"):
                 self.terminal_action(path.removeprefix("/api/ssh/"), value)
                 return
@@ -1390,8 +1412,11 @@ class Request(BaseHTTPRequestHandler):
             if kind is not None and kind not in DEVICE_KINDS:
                 raise ValueError("Choisis Raspberry Pi, Ubuntu ou Windows.")
             SCREENS[key] = dict(name=safe_text(data["name"]), kind=kind, pairing=code, pairing_until=now + 900)
+            fingerprint = data.get("installation_fingerprint")
+            if fingerprint:
+                SCREENS[key]["installation_fingerprint"] = fingerprint
             save()
-            return 200, {"code": code}
+            return 200, {"code": code, "installation_fingerprint": fingerprint}
         if path == "/api/enroll":
             for key, row in SCREENS.items():
                 if now < row.get("pairing_until", 0) and token_matches(data.get("code"), row["pairing"]):
@@ -1408,6 +1433,7 @@ class Request(BaseHTTPRequestHandler):
                     row.update(options=settings, token=token, serial=serial, version=1, kind=kind)
                     del row["pairing"]
                     del row["pairing_until"]
+                    row.pop("installation_fingerprint", None)
                     save()
                     return 200, dict(id=key, token=token, name=row["name"])
             return 403, {"error": "Code expiré ou inconnu."}
@@ -1674,6 +1700,8 @@ def main():
                        help="créer ou réexporter la clé publique des mises à jour")
     setup.add_argument("--tester-mises-a-jour", action="store_true",
                        help="tester la signature de la régie avec sa clé privée existante")
+    setup.add_argument("--preparer-installations", action="store_true",
+                       help="préparer les clés publiques récupérées par les installateurs lecteurs")
     setup.add_argument("--activer-acces-distant", metavar="IP",
                        help="préparer l’accès HTTPS sur l’IPv4 du PC de régie")
     setup.add_argument("--desactiver-acces-distant", action="store_true",
@@ -1699,6 +1727,13 @@ def main():
         except (OSError, RuntimeError) as error:
             sys.exit(str(error))
         print(f"Clé publique à copier sur les récepteurs : {public}")
+        return
+    if args.preparer_installations:
+        try:
+            fingerprint = prepare_installations(ROOT)
+        except (OSError, RuntimeError, ValueError) as error:
+            sys.exit(str(error))
+        print(f"Clés publiques prêtes. Empreinte : {fingerprint}")
         return
     if args.tester_mises_a_jour:
         if not UPDATE_KEY.is_file():

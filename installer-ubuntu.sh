@@ -67,7 +67,7 @@ check_association() {
 }
 
 install_client() {
-    if [[ -r "$here/regie-update.pub" ]]; then
+    if [[ -z ${SOUNDLIVE_INSTALL_FINGERPRINT:-} && -r "$here/regie-update.pub" ]]; then
         if ! command -v ssh-keygen >/dev/null; then
             sudo apt install -y openssh-client
         fi
@@ -107,6 +107,9 @@ if $client_only; then
     if [[ ! -x "$app/lecteur-ndi-ubuntu" || ! -r "$app/lib/libndi.so.6" ]]; then
         echo "Installation Ubuntu incomplète. Lance la mise à jour complète avec --mettre-a-jour."
         exit 1
+    fi
+    if [[ -n ${SOUNDLIVE_INSTALL_FINGERPRINT:-} ]]; then
+        bash "$here/installer-ssh-linux.sh" recuperer "$SOUNDLIVE_INSTALL_REGIE" "$SOUNDLIVE_INSTALL_FINGERPRINT" "$app"
     fi
     check_association "${@:2}"
     install_client
@@ -232,6 +235,10 @@ sudo visudo -cf "$rule"
 sudo -v
 if [[ -n ${SOUNDLIVE_NETWORK_PREPARATION:-} ]]; then
     bash "$here/preparer-lecteur-linux.sh" appliquer "$SOUNDLIVE_NETWORK_PREPARATION"
+fi
+if [[ -n ${SOUNDLIVE_INSTALL_FINGERPRINT:-} ]]; then
+    mkdir -p "$app"
+    bash "$here/installer-ssh-linux.sh" recuperer "$SOUNDLIVE_INSTALL_REGIE" "$SOUNDLIVE_INSTALL_FINGERPRINT" "$app"
 fi
 
 if ! $update; then

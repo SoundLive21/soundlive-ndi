@@ -319,41 +319,16 @@ if $dhcp; then
     fi
 fi
 
-if [[ -n $ssh_public ]]; then
-    if ! command -v ssh-keygen >/dev/null || ! dpkg-query -W -f='${Status}' openssh-server 2>/dev/null | grep -Fxq 'install ok installed'; then
-        sudo apt-get update
-        sudo apt-get install -y openssh-server openssh-client
-    fi
-    /usr/bin/python3 - "$ssh_public" <<'SSH'
-import os
-from pathlib import Path
-import re
-import subprocess
-import sys
-
-key = Path(sys.argv[1]).read_text(encoding="utf-8").strip()
-if not re.fullmatch(r"(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)) [A-Za-z0-9+/=]+(?: [^\r\n]*)?", key):
-    raise SystemExit("Fournis une seule clé publique OpenSSH (.pub).")
-subprocess.run(["ssh-keygen", "-lf", "-"], input=key + "\n", text=True, check=True)
-identity = key.split()[1]
-os.umask(0o077)
-directory = Path.home() / ".ssh"
-directory.mkdir(exist_ok=True)
-directory.chmod(0o700)
-authorized = directory / "authorized_keys"
-with authorized.open("a+", encoding="utf-8") as output:
-    authorized.chmod(0o600)
-    output.seek(0)
-    contents = output.read()
-    if not any(identity in line.split() for line in contents.splitlines() if not line.startswith("#")):
-        output.write(("" if not contents or contents.endswith("\n") else "\n") + key + "\n")
-SSH
-    sudo systemctl enable --now ssh.service
+if [[ -n ${SOUNDLIVE_INSTALL_FINGERPRINT:-} || -n $ssh_public ]]; then
+    bash "$base/installer-ssh-linux.sh" installer
 fi
-
-if $desktop_remote; then
+if [[ -n $ssh_public ]]; then
+    bash "$base/installer-ssh-linux.sh" autoriser "$ssh_public"
+fi
+if $desktop_remote || [[ -n ${SOUNDLIVE_INSTALL_FINGERPRINT:-} ]]; then
     bash "$base/installer-bureau-distant-linux.sh" "$kind"
 fi
+export SOUNDLIVE_INSTALL_REGIE="$regie"
 
 export SOUNDLIVE_NETWORK_PREPARATION="$work/preparation"
 export SOUNDLIVE_ATTENDRE_RESEAU="$attendre"

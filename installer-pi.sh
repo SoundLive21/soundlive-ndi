@@ -59,6 +59,9 @@ sudo -v
 if [[ -n ${SOUNDLIVE_NETWORK_PREPARATION:-} ]]; then
     bash "$here/preparer-lecteur-linux.sh" appliquer "$SOUNDLIVE_NETWORK_PREPARATION"
 fi
+if [[ -n ${SOUNDLIVE_INSTALL_FINGERPRINT:-} ]]; then
+    bash "$here/installer-ssh-linux.sh" recuperer "$SOUNDLIVE_INSTALL_REGIE" "$SOUNDLIVE_INSTALL_FINGERPRINT" "$app"
+fi
 if ! $update; then
     /usr/bin/python3 "$here/ecran.py" associer "$1" "$2"
 elif [[ $# -eq 2 ]]; then
@@ -66,7 +69,7 @@ elif [[ $# -eq 2 ]]; then
 elif ! /usr/bin/python3 "$here/ecran.py" verifier; then
     echo "Mise à jour locale possible. Pour rétablir la connexion, vérifie le tableau et l’adresse du PC."
 fi
-if [[ -r "$here/regie-update.pub" ]]; then
+if [[ -z ${SOUNDLIVE_INSTALL_FINGERPRINT:-} && -r "$here/regie-update.pub" ]]; then
     if ! command -v ssh-keygen >/dev/null; then
         sudo apt install -y openssh-client
     fi

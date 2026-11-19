@@ -725,7 +725,7 @@ async function loadNetwork() {
 function renderPairing(card) {
   const row = card.data;
   const panel = card.ui.pending;
-  const revision = JSON.stringify([row.pairing, row.kind, network, receiverPort]);
+  const revision = JSON.stringify([row.pairing, row.kind, row.installation_fingerprint, network, receiverPort]);
   if (card.pairingRevision === revision) return;
   card.pairingRevision = revision;
   panel.replaceChildren();
@@ -736,9 +736,10 @@ function renderPairing(card) {
     text.textContent = "Code expiré. Retire cette fiche puis ajoute un nouvel écran.";
     return;
   }
-  const installer = row.kind === "windows" ? ".\\installer-client.cmd" :
-    "bash installer-client.sh --plateforme " + (row.kind || "pi");
-  text.textContent = "Lance cette commande sur le récepteur depuis le dossier du kit.";
+  const windows = row.kind === "windows";
+  text.textContent = windows && row.installation_fingerprint
+    ? "Lance la commande dans PowerShell en administrateur sous le compte du lecteur."
+    : "Lance cette commande sur le récepteur depuis le dossier du kit.";
   const code = document.createElement("code");
   const label = document.createElement("label");
   label.textContent = "Adresse du PC de régie";
@@ -778,7 +779,8 @@ function renderPairing(card) {
     help.textContent = ip.startsWith("169.254.") ?
       "Adresse automatique. Vérifie que le récepteur est joignable sur ce réseau avant de l’associer." : "";
     if (isIPv4(ip) && receiverPort) {
-      code.textContent = installer + " http://" + ip + ":" + receiverPort + " " + row.pairing;
+      code.textContent = installationCommand({kind:row.kind || "pi",regie:ip}, receiverPort,
+        row.pairing, row.installation_fingerprint);
     } else if (isIPv4(ip)) {
       code.textContent = network === null ? "Recherche du port des récepteurs…" :
         "Port des récepteurs indisponible. Actualise la page pour réessayer.";
@@ -2825,10 +2827,12 @@ function validatePairSettings(values) {
 function bashArg(value) {
   return /^[a-zA-Z0-9_./:@+-]+$/.test(value) ? value : "'" + value.replaceAll("'", "'\\''") + "'";
 }
-function installationCommand(values, port, code) {
+function installationCommand(values, port, code, fingerprint) {
   const address = "http://" + values.regie + ":" + port;
-  if (values.kind === "windows") return ".\\installer-client.cmd " + address + " " + code;
+  const keys = fingerprint ? ["--empreinte-regie", fingerprint] : [];
+  if (values.kind === "windows") return [".\\installer-client.cmd", ...keys, address, code].join(" ");
   const args = ["bash", "installer-client.sh", "--plateforme", values.kind];
+  args.push(...keys);
   if (values.installation !== "static") return [...args, address, code].map(bashArg).join(" ");
   args.push("--preparer", "--hote", values.hostname, "--ip", values.address, "--wifi", values.ssid);
   if (values.wifi === "prompt") args.push("--saisir-cle-wifi");
@@ -2870,14 +2874,17 @@ pairForm.onsubmit = action(() => {
     detail:"Le code d’association " + deviceLabels[kind] + " sera valable 15 minutes.",
     label:"Créer le code",
     async perform() {
-      const {code} = await call("/api/pair", {name, kind});
+      const {code, installation_fingerprint: fingerprint} = await call("/api/pair",
+        {name, kind, prepare_installation:true});
       pairForm.reset();
       dialog.close();
       await refresh(true);
       return {
         title:"Code créé pour « " + name + " »",
-        detail:"Lance la commande depuis le dossier du kit sur le lecteur. Le code est valable 15 minutes.",
-        command:installationCommand(values, port, code)
+        detail:kind === "windows"
+          ? "Lance la commande depuis le kit dans PowerShell en administrateur sous le compte du lecteur. Le code est valable 15 minutes."
+          : "Lance la commande depuis le dossier du kit sur le lecteur. Le code est valable 15 minutes.",
+        command:installationCommand(values, port, code, fingerprint)
       };
     }
   });

@@ -29,7 +29,7 @@ from commun import (APP_NAME, COPYRIGHT, DEFAULT_SOURCE, MEDIA_CHUNK, MEDIA_DISK
                     ORIENTATIONS, PREVIEW_LIMIT, SOFTWARE_VERSION, client_lock,
                     media_available, media_config, media_disk, media_items, media_revision, options, release_number)
 from diagnostic import Diagnostic
-from mise_a_jour import ClientUpdate, FULL_LIMIT, RESTART, digest, engine_name, update_target
+from mise_a_jour import ClientUpdate, FULL_LIMIT, RESTART, digest, engine_name, ssh_keygen_path, update_target
 
 HOME = Path.home()
 WINDOWS = sys.platform == "win32"
@@ -1165,7 +1165,7 @@ class DashboardClient:
             self.update_issue = "launcher_required"
         elif not self.updater.public.is_file():
             self.update_issue = "client_key_required"
-        elif not shutil.which("ssh-keygen"):
+        elif not ssh_keygen_path():
             self.update_issue = "client_openssh_required"
         self.can_update = self.update_issue is None
         self.target = update_target()

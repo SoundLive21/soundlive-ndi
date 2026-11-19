@@ -14,6 +14,7 @@ param(
     [string]$CleWifiFichier,
     [switch]$SaisirCleWifi,
     [string]$CleSsh,
+    [ValidatePattern('^[a-f0-9]{64}$')][string]$EmpreinteRegie,
     [string]$Passerelle,
     [string]$Dns,
     [string]$Dns2,
@@ -261,9 +262,11 @@ try {
     }
     if ($CleSsh) {
         & (Join-Path $PSScriptRoot 'installer-ssh-windows.ps1') -CleSsh $CleSsh
+    } elseif ($EmpreinteRegie) {
+        & (Join-Path $PSScriptRoot 'installer-ssh-windows.ps1') -InstallerSeulement
     }
-    if ($Vnc -or $VncMsi) {
-        & (Join-Path $PSScriptRoot 'installer-bureau-distant-windows.ps1') -VncMsi $VncMsi
+    if ($Vnc -or $VncMsi -or $EmpreinteRegie) {
+        & (Join-Path $PSScriptRoot 'installer-bureau-distant-windows.ps1') -VncMsi $VncMsi -ActiverRdp:([bool]$EmpreinteRegie)
     }
     $python = Find-DisplayPython
     if (-not $python) {
@@ -442,11 +445,12 @@ try {
     }
 
     $arguments = @('--lecteur', $player)
+    if ($EmpreinteRegie) { $arguments += @('--empreinte-regie', $EmpreinteRegie, '--acces-deja-prepare') }
     if ($paired) { $arguments += @('--mettre-a-jour', $Regie.AbsoluteUri) }
     else { $arguments += @($Regie.AbsoluteUri, $Code) }
     & $python (Join-Path $PSScriptRoot 'installer-client-windows.py') @arguments
     if ($LASTEXITCODE -ne 0) { throw 'Installation ou association du lecteur Windows impossible.' }
-    if ($CleSsh) {
+    if ($CleSsh -or $EmpreinteRegie) {
         Write-Host "Cible SSH : $env:USERNAME@$address"
         Write-Host 'Empreinte de ce lecteur :'
         & "$env:SystemRoot\System32\OpenSSH\ssh-keygen.exe" -lf (Join-Path $env:ProgramData 'ssh\ssh_host_ed25519_key.pub')

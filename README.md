@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.55** et le client **1.4.28**.
+Ce kit contient la régie **1.4.58** et le client **1.4.31**.
 
 ## Installer et lancer la régie
 
@@ -135,7 +135,28 @@ sous-réseau, hors de la plage DHCP. Ethernet est prioritaire. Dans les exemples
 `10.10.2.99` est la passerelle du réseau écrans et l'adresse de la régie. Choisis
 ta passerelle et tes DNS selon ton installation. Le deuxième DNS est facultatif.
 
-Depuis la régie, crée une clé SSH dédiée si nécessaire et copie le fichier
+La commande créée par **Ajouter un écran** inclut `--empreinte-regie`.
+Elle récupère les deux clés publiques après la bascule réseau, vérifie
+leur empreinte et installe la clé SSH dans le compte du lecteur et la
+clé de vérification des mises à jour dans son dossier applicatif.
+Les installateurs déclenchent aussi la préparation du bureau distant.
+Sous Windows, lance la commande en administrateur sous le compte du lecteur.
+
+Pour préparer la régie Windows après l’installation du kit, lance depuis
+un PowerShell administrateur sous le compte qui utilisera le lanceur :
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\installer-bureau-distant-windows.ps1 -Regie
+```
+
+Sur une régie Linux, installe le client OpenSSH ainsi que `python3-paramiko`
+et `python3-pyte`, puis lance `python3 tableau.py --preparer-installations`.
+Le script prépare les clés sur le poste de régie. Une ancienne identité
+`~/.ssh/id_soundlive` déjà configurée continue d’être utilisée. Une nouvelle
+identité SSH est créée dans `.soundlive-update/ssh`.
+
+Pour une installation manuelle avec ta propre clé, crée depuis la régie
+une clé SSH dédiée si nécessaire et copie le fichier
 `id_soundlive.pub` à côté du kit sur le lecteur. Sous Linux, exécute
 `ssh-keygen -t ed25519 -f ~/.ssh/id_soundlive`. Sous PowerShell, exécute
 `ssh-keygen -t ed25519 -f "$env:USERPROFILE\.ssh\id_soundlive"`. Garde
@@ -244,7 +265,7 @@ Pour recevoir une connexion MSRDP, active le serveur Windows dans
   de préparation du lecteur. Sur une machine déjà installée, exécute
   `bash installer-bureau-distant-linux.sh` depuis sa session graphique.
   Raspberry Pi OS Wayland utilise WayVNC. Sur une session X11, choisis un
-  mot de passe VNC puis rouvre la session pour démarrer x11vnc.
+  mot de passe VNC puis rouvre la session pour démarrer le serveur TigerVNC.
 - Sur Windows, ajoute `-Vnc` à la commande de préparation ou exécute
   `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\installer-bureau-distant-windows.ps1`
   dans un PowerShell administrateur. Choisis **TightVNC Server** en mode
@@ -252,14 +273,45 @@ Pour recevoir une connexion MSRDP, active le serveur Windows dans
   MSI officiel déjà téléchargé, indique `-VncMsi C:\chemin\tightvnc.msi`.
 - Sous Ubuntu, le bouton TigerVNC suppose qu’un serveur VNC écoute sur le
   port 5900. Le partage intégré à GNOME Wayland utilise RDP. Pour accéder
-  à la session affichée dans TigerVNC, utilise une session X11 avec x11vnc
-  si cette session est disponible sur ton installation.
+  à la session affichée dans TigerVNC, utilise une session X11 ou un
+  environnement Wayland avec un w0vncserver compatible.
 
 Les scripts d’installation du bureau distant fonctionnent aussi sur le PC
 de régie. Les postes doivent être joignables depuis le client VNC ou RDP
 sur le LAN de diffusion, ou via un VPN autorisé. Dans le cas de WayVNC, le
 client doit prendre en charge l’authentification configurée sur le Pi.
 Utilise TigerVNC Viewer pour une connexion WayVNC.
+
+Pour une préparation Windows avec IP fixe, ajoute
+`-EmpreinteRegie EMPREINTE`, disponible dans la commande produite par
+le tableau. Le script installe TigerVNC Viewer et active le serveur
+TightVNC compatible après configuration de son mot de passe. Il active
+aussi MSRDP sur les éditions Windows compatibles. Windows Home accepte
+VNC et peut utiliser le client MSRDP vers un autre poste. Sous Linux, le
+partage de l’écran physique utilise WayVNC sur Pi, TigerVNC sur X11 ou un
+`w0vncserver` compatible sur Wayland lorsque disponible.
+
+### Déplacer la régie sur un autre PC
+
+Arrête l’ancienne régie et transfère les données suivantes par un moyen
+privé avant le premier démarrage sur le nouveau PC :
+
+- Le dossier `.soundlive-update` et le fichier `regie-update.pub` pour
+  conserver la signature des mises à jour et les clés SSH portables.
+- Le fichier `ecrans.json` pour conserver les associations. Copie aussi
+  `disposition-ecrans.json` et `.soundlive-medias` si tu utilises ces données.
+- Si SSH utilisait `~/.ssh/id_soundlive` ou `SOUNDLIVE_SSH_KEY`, transfère
+  cette identité et son fichier `.pub` vers l’emplacement correspondant
+  sur le nouveau PC. Garde ces clés privées hors des archives des lecteurs
+  et des publications GitHub.
+- `source-publications.json` et `publication.pub` si tu utilises les
+  mises à jour GitHub de la régie.
+
+Réattribue au nouveau PC la même IPv4 de diffusion et le même port. Si
+l’adresse change, utilise le mode `--mettre-a-jour` des lecteurs avec
+la nouvelle URL pour conserver leurs associations. Sous Ubuntu, utilise
+`--mettre-a-jour-client` pour mettre à jour le client et son URL en
+conservant le moteur installé.
 
 Pour le terminal SSH, installe les dépendances avec le Python du lanceur
 sur le **PC de régie** :

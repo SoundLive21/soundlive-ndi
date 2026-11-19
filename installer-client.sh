@@ -91,6 +91,30 @@ if [[ -z $kind ]]; then
         kind=ubuntu
     fi
 fi
+if [[ ${1:-} == --empreinte-regie ]]; then
+    if [[ ! ${2:-} =~ ^[a-f0-9]{64}$ ]]; then
+        echo "L’empreinte des clés doit être celle donnée par la régie." >&2
+        exit 2
+    fi
+    export SOUNDLIVE_INSTALL_FINGERPRINT=$2
+    shift 2
+    if [[ ${1:-} != --preparer ]]; then
+        if (( EUID == 0 )); then
+            echo "Lance l’installation sous le compte du bureau, sans sudo." >&2
+            exit 1
+        fi
+        export SOUNDLIVE_INSTALL_REGIE=${1:-}
+        if [[ $SOUNDLIVE_INSTALL_REGIE == --mettre-a-jour* ]]; then
+            export SOUNDLIVE_INSTALL_REGIE=${2:-}
+        fi
+        if [[ $SOUNDLIVE_INSTALL_REGIE != http://* ]]; then
+            echo "Indique l’adresse HTTP de la régie pour récupérer ses clés." >&2
+            exit 2
+        fi
+        bash "$base/installer-ssh-linux.sh" installer
+        bash "$base/installer-bureau-distant-linux.sh" "$kind"
+    fi
+fi
 if [[ ${1:-} == --preparer ]]; then
     case "$kind" in
         pi|ubuntu) exec bash "$base/preparer-lecteur-linux.sh" "$kind" "${@:2}" ;;

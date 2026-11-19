@@ -12,8 +12,10 @@ import platform
 import shutil
 import subprocess
 import sys
+from tempfile import TemporaryDirectory
 
-from mise_a_jour import FILES, PUBLIC_KEY
+from installation_lecteur import SSH_PUBLIC, fetch_keys
+from mise_a_jour import FILES, PUBLIC_KEY, ssh_keygen, ssh_keygen_path
 
 ROOT = Path(__file__).resolve().parent
 
@@ -93,18 +95,36 @@ def locate_dll(name, runtime=None):
     return next((path / name for path in locations if (path / name).is_file()), None)
 
 
+def install_regie_access(server, fingerprint, app, prepared):
+    if not ctypes.windll.shell32.IsUserAnAdmin():
+        raise OSError("Ouvre PowerShell en administrateur sous le compte du lecteur.")
+    powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    command = [str(powershell), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
+    with TemporaryDirectory() as folder:
+        keys = Path(folder)
+        fetch_keys(server, fingerprint, keys)
+        if not prepared:
+            subprocess.run([*command, str(ROOT / "installer-bureau-distant-windows.ps1"), "-ActiverRdp"], check=True)
+        subprocess.run([*command, str(ROOT / "installer-ssh-windows.ps1"), "-CleSsh", str(keys / SSH_PUBLIC)],
+                       check=True)
+        ssh_keygen("-lf", keys / PUBLIC_KEY)
+        shutil.copy2(keys / PUBLIC_KEY, app / PUBLIC_KEY)
+
+
 def main():
     cli = argparse.ArgumentParser()
     cli.add_argument("serveur", nargs="?")
     cli.add_argument("code", nargs="?")
     cli.add_argument("--mettre-a-jour", action="store_true")
     cli.add_argument("--reseau-auto", action="store_true")
+    cli.add_argument("--empreinte-regie")
+    cli.add_argument("--acces-deja-prepare", action="store_true", help=argparse.SUPPRESS)
     cli.add_argument("--lecteur", type=Path, default=ROOT / "lecteur-ndi-windows.exe")
     args = cli.parse_args()
     if sys.platform != "win32" or platform.machine().lower() not in ("amd64", "x86_64"):
         cli.error("L’installateur nécessite Windows x64.")
     if args.reseau_auto:
-        if args.serveur or args.code or args.mettre_a_jour:
+        if args.serveur or args.code or args.mettre_a_jour or args.empreinte_regie:
             cli.error("Utilise --reseau-auto seul.")
         install_network_priority()
         return
@@ -112,6 +132,8 @@ def main():
         cli.error("Indique l’adresse et le code affichés par le tableau.")
     if args.mettre_a_jour and args.code:
         cli.error("Une mise à jour conserve l’association.")
+    if args.empreinte_regie and not args.serveur:
+        cli.error("Indique l’adresse HTTP de la régie pour récupérer ses clés.")
     try:
         import tkinter
     except ImportError as error:
@@ -121,7 +143,7 @@ def main():
     app = WINDOWS_DATA / "client"
     if args.mettre_a_jour and not PAIRING.is_file():
         cli.error("Aucune association. Utilise la commande donnée par la régie.")
-    if (ROOT / PUBLIC_KEY).is_file() and not shutil.which("ssh-keygen"):
+    if not args.empreinte_regie and (ROOT / PUBLIC_KEY).is_file() and not ssh_keygen_path():
         cli.error("Active le client OpenSSH de Windows avant de configurer les mises à jour signées.")
     if not args.mettre_a_jour and PAIRING.is_file():
         cli.error("Ce lecteur est déjà associé. Utilise --mettre-a-jour.")
@@ -141,12 +163,14 @@ def main():
     if player != installed:
         shutil.copy2(player, installed)
     subprocess.run([str(installed), "--sources"], check=True, timeout=15)
+    if args.empreinte_regie:
+        install_regie_access(args.serveur, args.empreinte_regie, app, args.acces_deja_prepare)
     command = ["verifier"] if args.mettre_a_jour else ["associer"]
     command.extend(value for value in (args.serveur, args.code) if value)
     subprocess.run([sys.executable, "-B", str(ROOT / "ecran.py"), *command], check=True)
     for filename in (*FILES, "lancer-client.py"):
         shutil.copy2(ROOT / filename, app / filename)
-    if (ROOT / PUBLIC_KEY).is_file():
+    if not args.empreinte_regie and (ROOT / PUBLIC_KEY).is_file():
         shutil.copy2(ROOT / PUBLIC_KEY, app / PUBLIC_KEY)
     versions = app / ".versions"
     if versions.is_dir():
@@ -172,5 +196,5 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (OSError, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         sys.exit(str(error))

@@ -1,19 +1,23 @@
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$CleSsh)
+param([string]$CleSsh, [switch]$InstallerSeulement)
 $ErrorActionPreference = 'Stop'
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw 'Ouvre PowerShell en administrateur sous le compte du poste.'
 }
-$key = (Get-Content -Raw -LiteralPath $CleSsh).Trim()
-if ($key -notmatch '^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/=]+( [^\r\n]*)?$') {
-    throw 'Fournis une seule cle publique OpenSSH (.pub).'
+if (-not $InstallerSeulement) {
+    if (-not $CleSsh) { throw 'Indique le fichier avec -CleSsh.' }
+    $key = (Get-Content -Raw -LiteralPath $CleSsh).Trim()
+    if ($key -notmatch '^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/=]+( [^\r\n]*)?$') {
+        throw 'Fournis une seule cle publique OpenSSH (.pub).'
+    }
 }
 foreach ($name in @('OpenSSH.Client~~~~0.0.1.0', 'OpenSSH.Server~~~~0.0.1.0')) {
     if ((Get-WindowsCapability -Online -Name $name).State -ne 'Installed') {
         Add-WindowsCapability -Online -Name $name | Out-Null
     }
 }
+if ($InstallerSeulement) { return }
 $keygen = "$env:SystemRoot\System32\OpenSSH\ssh-keygen.exe"
 & $keygen -lf (Resolve-Path -LiteralPath $CleSsh).Path | Out-Host
 if ($LASTEXITCODE -ne 0) { throw 'Cle publique OpenSSH invalide.' }

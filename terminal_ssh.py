@@ -4,12 +4,12 @@ import base64
 from dataclasses import dataclass, field
 import hashlib
 import hmac
-import os
-from pathlib import Path
 import re
 import secrets
 import threading
 import time
+
+from installation_lecteur import ssh_identity
 
 
 MAX_SESSIONS = 6
@@ -89,7 +89,7 @@ class Terminals:
             phrase = data.get("passphrase", "")
             if not isinstance(phrase, str) or len(phrase) > 512:
                 raise ValueError("Phrase secrète invalide.")
-            identity = Path(os.environ.get("SOUNDLIVE_SSH_KEY") or Path.home() / ".ssh" / "id_soundlive")
+            identity = ssh_identity()
             if not identity.is_file():
                 raise RuntimeError("La clé privée id_soundlive est introuvable sur la régie (voir README.md).")
             auth = {"key_filename": str(identity), "passphrase": phrase or None}

@@ -33,7 +33,8 @@ FILES = frozenset((
     "demarrer-windows.bat", "demarrer-regie-ubuntu.sh", "SoundLive-NDI.c", "SoundLive-NDI.exe",
     "ecran.py", "diagnostic.py", "mise_a_jour.py", "lancer-client.py",
     "installer-client.sh", "installer-client.cmd", "installer-client-windows.py",
-    "preparer-lecteur-linux.sh", "preparer-lecteur-windows.ps1",
+    "preparer-lecteur-linux.sh", "preparer-lecteur-windows.ps1", "installation_lecteur.py",
+    "installer-ssh-linux.sh",
     "regie-internet.py", "regie-internet-windows.ps1",
     "terminal.html", "terminal_ssh.py", "installer-bureau-distant-linux.sh", "installer-bureau-distant-windows.ps1",
     "installer-ssh-windows.ps1",
@@ -51,6 +52,8 @@ WINDOWS_DEVICE = re.compile(r"(?:con|prn|aux|nul|com[0-9]|lpt[0-9])", re.IGNOREC
 
 
 def required_files(version):
+    if release_number(version) >= (1, 4, 58):
+        return REQUIRED | {"terminal.html", "terminal_ssh.py", "installation_lecteur.py", "installer-ssh-linux.sh"}
     if release_number(version) >= (1, 4, 50):
         return REQUIRED | {"terminal.html", "terminal_ssh.py"}
     return REQUIRED

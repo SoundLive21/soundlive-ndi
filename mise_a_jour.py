@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import platform
 import re
+import shutil
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -102,9 +103,21 @@ def manifest(device, job, nonce, version):
     return json.dumps([NAMESPACE, device, job, nonce, version], separators=(",", ":")).encode("ascii")
 
 
+def ssh_keygen_path():
+    if command := shutil.which("ssh-keygen"):
+        return command
+    if sys.platform == "win32":
+        folder = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+        for system in ("Sysnative", "System32"):
+            command = folder / system / "OpenSSH" / "ssh-keygen.exe"
+            if command.is_file():
+                return str(command)
+    return None
+
+
 def ssh_keygen(*args, data=None):
     try:
-        result = subprocess.run(["ssh-keygen", *map(str, args)], input=data,
+        result = subprocess.run([ssh_keygen_path() or "ssh-keygen", *map(str, args)], input=data,
                                 capture_output=True, timeout=8,
                                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
     except FileNotFoundError as error:
