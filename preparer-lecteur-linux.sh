@@ -193,17 +193,26 @@ fi
 export LC_ALL=C
 devices=$(nmcli -t -e no -f DEVICE,TYPE,STATE device status)
 choose_interface() {
-    local kind=$1 chosen=$2 item type state
+    local kind=$1 chosen=$2 item type state flag
+    flag=--interface-wifi
+    if [[ $kind == ethernet ]]; then flag=--ethernet; fi
     local -a matches=()
     while IFS=: read -r item type state; do
         [[ $type == "$kind" && $state != unmanaged && ( -z $chosen || $chosen == "$item" ) ]] || continue
         matches+=("$item")
     done <<< "$devices"
-    if (( ${#matches[@]} != 1 )); then
-        echo "Indique explicitement l'interface $kind (--ethernet ou --interface-wifi)." >&2
-        return 1
+    case "${#matches[@]}" in
+        1) printf '%s\n' "${matches[0]}"; return ;;
+        0) printf 'Aucune interface %s gérée par NetworkManager ne correspond à %s.\n' \
+            "$kind" "${chosen:-la détection automatique}" >&2 ;;
+        *) printf 'Plusieurs interfaces %s disponibles. Choisis avec %s : %s.\n' \
+            "$kind" "$flag" "${matches[*]}" >&2 ;;
+    esac
+    printf 'Interfaces visibles (nom:type:état) :\n%s\n' "$devices" >&2
+    if [[ -z $chosen && ${#matches[@]} == 0 ]]; then
+        printf 'Vérifie que NetworkManager gère cette interface avant de la sélectionner.\n' >&2
     fi
-    printf '%s\n' "${matches[0]}"
+    return 1
 }
 eth=$(choose_interface ethernet "$eth")
 wlan=$(choose_interface wifi "$wlan")

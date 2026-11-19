@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.58** et le client **1.4.31**.
+Ce kit contient la régie **1.4.59** et le client **1.4.31**.
 
 ## Installer et lancer la régie
 
@@ -136,6 +136,9 @@ sous-réseau, hors de la plage DHCP. Ethernet est prioritaire. Dans les exemples
 ta passerelle et tes DNS selon ton installation. Le deuxième DNS est facultatif.
 
 La commande créée par **Ajouter un écran** inclut `--empreinte-regie`.
+Si plusieurs interfaces sont détectées, renseigne **Interface Ethernet**
+ou **Interface Wi-Fi** avec les noms affichés sur le lecteur par
+`nmcli device status`. La commande ajoute ces options après `--preparer`.
 Elle récupère les deux clés publiques après la bascule réseau, vérifie
 leur empreinte et installe la clé SSH dans le compte du lecteur et la
 clé de vérification des mises à jour dans son dossier applicatif.

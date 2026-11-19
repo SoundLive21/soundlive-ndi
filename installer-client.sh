@@ -91,35 +91,54 @@ if [[ -z $kind ]]; then
         kind=ubuntu
     fi
 fi
-if [[ ${1:-} == --empreinte-regie ]]; then
-    if [[ ! ${2:-} =~ ^[a-f0-9]{64}$ ]]; then
-        echo "L’empreinte des clés doit être celle donnée par la régie." >&2
-        exit 2
-    fi
-    export SOUNDLIVE_INSTALL_FINGERPRINT=$2
+network_options=()
+fingerprint=
+while (( $# )); do
+    case "$1" in
+        --empreinte-regie)
+            if [[ ! ${2:-} =~ ^[a-f0-9]{64}$ ]]; then
+                echo "L’empreinte des clés doit être celle donnée par la régie." >&2
+                exit 2
+            fi
+            fingerprint=$2 ;;
+        --ethernet|--interface-wifi)
+            if [[ -z ${2:-} || $2 == --* ]]; then
+                echo "Indique le nom de l’interface après $1." >&2
+                exit 2
+            fi
+            network_options+=("$1" "$2") ;;
+        *) break ;;
+    esac
     shift 2
-    if [[ ${1:-} != --preparer ]]; then
-        if (( EUID == 0 )); then
-            echo "Lance l’installation sous le compte du bureau, sans sudo." >&2
-            exit 1
-        fi
-        export SOUNDLIVE_INSTALL_REGIE=${1:-}
-        if [[ $SOUNDLIVE_INSTALL_REGIE == --mettre-a-jour* ]]; then
-            export SOUNDLIVE_INSTALL_REGIE=${2:-}
-        fi
-        if [[ $SOUNDLIVE_INSTALL_REGIE != http://* ]]; then
-            echo "Indique l’adresse HTTP de la régie pour récupérer ses clés." >&2
-            exit 2
-        fi
-        bash "$base/installer-ssh-linux.sh" installer
-        bash "$base/installer-bureau-distant-linux.sh" "$kind"
-    fi
+done
+if [[ -n $fingerprint ]]; then
+    export SOUNDLIVE_INSTALL_FINGERPRINT="$fingerprint"
 fi
 if [[ ${1:-} == --preparer ]]; then
     case "$kind" in
-        pi|ubuntu) exec bash "$base/preparer-lecteur-linux.sh" "$kind" "${@:2}" ;;
+        pi|ubuntu) exec bash "$base/preparer-lecteur-linux.sh" "$kind" "${network_options[@]}" "${@:2}" ;;
         *) echo "Plateforme attendue : pi ou ubuntu."; exit 2 ;;
     esac
+fi
+if (( ${#network_options[@]} )); then
+    echo "Les options --ethernet et --interface-wifi nécessitent --preparer." >&2
+    exit 2
+fi
+if [[ -n $fingerprint ]]; then
+    if (( EUID == 0 )); then
+        echo "Lance l’installation sous le compte du bureau, sans sudo." >&2
+        exit 1
+    fi
+    export SOUNDLIVE_INSTALL_REGIE=${1:-}
+    if [[ $SOUNDLIVE_INSTALL_REGIE == --mettre-a-jour* ]]; then
+        export SOUNDLIVE_INSTALL_REGIE=${2:-}
+    fi
+    if [[ $SOUNDLIVE_INSTALL_REGIE != http://* ]]; then
+        echo "Indique l’adresse HTTP de la régie pour récupérer ses clés." >&2
+        exit 2
+    fi
+    bash "$base/installer-ssh-linux.sh" installer
+    bash "$base/installer-bureau-distant-linux.sh" "$kind"
 fi
 case "$kind" in
     pi)

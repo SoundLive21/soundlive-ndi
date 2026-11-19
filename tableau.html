@@ -329,6 +329,8 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
           <option value="saved">Réutiliser le profil enregistré</option>
           <option value="open">Réseau ouvert</option>
         </select></label>
+        <label>Interface Ethernet (facultative)<input name="ethernet" maxlength="15" placeholder="Automatique, ex. eth0" spellcheck="false"></label>
+        <label>Interface Wi-Fi (facultative)<input name="wifi_interface" maxlength="15" placeholder="Automatique, ex. wlan0" spellcheck="false"></label>
         <label>Passerelle IPv4 (facultative)<input name="gateway" maxlength="15" inputmode="decimal" placeholder="10.10.2.87"></label>
         <label>DNS principal (facultatif)<input name="dns" maxlength="15" inputmode="decimal" placeholder="8.8.8.8"></label>
         <label>DNS secondaire (facultatif)<input name="dns2" maxlength="15" inputmode="decimal" placeholder="8.8.4.4"></label>
@@ -2812,6 +2814,12 @@ function validatePairSettings(values) {
   if (values.ssid.startsWith("--")) {
     return pairError("ssid", "Le script de préparation interprète un SSID commençant par deux tirets comme une option.");
   }
+  for (const field of ["ethernet", "wifi_interface"]) {
+    const name = values[field];
+    if (name && (name.startsWith("--") || /[\s/:\u0000-\u001f]/.test(name) || new TextEncoder().encode(name).length > 15)) {
+      return pairError(field, "Indique le nom exact de l’interface affiché sur le lecteur par ip -br link.");
+    }
+  }
   if (values.gateway) {
     const gateway = isIPv4(values.gateway) ? number(values.gateway) : -1;
     if (gateway <= first || gateway >= last || gateway === player) {
@@ -2837,7 +2845,8 @@ function installationCommand(values, port, code, fingerprint) {
   args.push("--preparer", "--hote", values.hostname, "--ip", values.address, "--wifi", values.ssid);
   if (values.wifi === "prompt") args.push("--saisir-cle-wifi");
   if (values.wifi === "open") args.push("--wifi-ouvert");
-  for (const [field, flag] of [["gateway", "--passerelle"], ["dns", "--dns"], ["dns2", "--dns2"]]) {
+  for (const [field, flag] of [["ethernet", "--ethernet"], ["wifi_interface", "--interface-wifi"],
+      ["gateway", "--passerelle"], ["dns", "--dns"], ["dns2", "--dns2"]]) {
     if (values[field]) args.push(flag, values[field]);
   }
   args.push("--regie", address, "--code", code);
@@ -2857,7 +2866,7 @@ document.querySelector("#add").onclick = () => {
 document.querySelector("#close").onclick = () => dialog.close();
 pairForm.onsubmit = action(() => {
   const values = Object.fromEntries(new FormData(pairForm));
-  for (const field of ["name", "regie", "hostname", "address", "gateway", "dns", "dns2"]) {
+  for (const field of ["name", "regie", "hostname", "address", "ethernet", "wifi_interface", "gateway", "dns", "dns2"]) {
     if (values[field] !== undefined) values[field] = values[field].trim();
   }
   if (!validatePairSettings(values)) return;
