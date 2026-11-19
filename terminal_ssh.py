@@ -19,6 +19,17 @@ LINES = 28
 MAX_OUTPUT = 64 * 1024
 
 
+def key_fingerprint(key):
+    return "SHA256:" + base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode("ascii").rstrip("=")
+
+
+class HostKeyCheck(RuntimeError):
+    def __init__(self, key, expected=None):
+        self.presented = key_fingerprint(key)
+        self.expected = expected
+        super().__init__("Empreinte SSH différente." if expected else "Empreinte SSH inconnue.")
+
+
 @dataclass
 class Session:
     owner: tuple
@@ -90,9 +101,8 @@ class Terminals:
 
         class HostKeyPolicy(paramiko.MissingHostKeyPolicy):
             def missing_host_key(self, client, hostname, key):
-                digest = base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip("=")
-                if not fingerprint or not hmac.compare_digest(fingerprint, "SHA256:" + digest):
-                    raise paramiko.SSHException("Empreinte SSH inconnue ou différente. Utilise l’empreinte vérifiée du poste.")
+                if not hmac.compare_digest(fingerprint, key_fingerprint(key)):
+                    raise HostKeyCheck(key, fingerprint or None)
 
         identifier = secrets.token_urlsafe(24)
         session = Session(owner, client=paramiko.SSHClient())
@@ -102,7 +112,9 @@ class Terminals:
             self.sessions[identifier] = session
         try:
             client = session.client
-            client.load_system_host_keys()
+            # An explicit fingerprint pins this connection, even if known_hosts has an older key.
+            if not fingerprint:
+                client.load_system_host_keys()
             client.set_missing_host_key_policy(HostKeyPolicy())
             client.connect(host, username=user, allow_agent=False, look_for_keys=False,
                            timeout=5, auth_timeout=8, banner_timeout=6, **auth)
@@ -113,7 +125,7 @@ class Terminals:
         except BaseException as error:
             self.end(owner, identifier)
             if isinstance(error, paramiko.BadHostKeyException):
-                raise RuntimeError("La clé hôte a changé par rapport à known_hosts.") from error
+                raise HostKeyCheck(error.key, key_fingerprint(error.expected_key)) from error
             if isinstance(error, paramiko.PasswordRequiredException):
                 raise RuntimeError("La clé privée nécessite sa phrase secrète.") from error
             if isinstance(error, paramiko.AuthenticationException):
@@ -121,8 +133,6 @@ class Terminals:
                           if method == "password" else
                           "Clé refusée. Vérifie le compte, sa clé publique et la phrase secrète.")
                 raise RuntimeError(detail) from error
-            if isinstance(error, paramiko.SSHException) and str(error).startswith("Empreinte SSH"):
-                raise RuntimeError(str(error)) from error
             if isinstance(error, (paramiko.SSHException, OSError)):
                 raise RuntimeError("Connexion SSH impossible. Vérifie le service et l’adresse.") from error
             raise

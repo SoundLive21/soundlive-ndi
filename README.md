@@ -228,18 +228,17 @@ les réglages de routage des deux interfaces.
 
 ### Bureau distant et terminal SSH
 
-Dans **Informations** d’un lecteur ou de la régie, **SSH** ouvre le terminal
-dans une fenêtre séparée. **TigerVNC** lance le client depuis la console
-locale s’il est installé. Depuis l’interface HTTPS, le bouton télécharge un
-fichier `.tigervnc` à ouvrir dans TigerVNC Viewer sur le poste du navigateur.
-Les installations complètes Pi et Ubuntu ajoutent le paquet `tigervnc-viewer`.
-Sur un poste Linux déjà installé, utilise `sudo apt install tigervnc-viewer`.
+La fenêtre **Informations** propose **SSH** et **TigerVNC** pour un Pi ou un
+poste Ubuntu, et **MSRDP** et **TigerVNC** pour un poste Windows.
 
-Lorsqu’un poste annonce RDP, l’interface affiche **Bureau RDP**. Sur une régie
-Windows il lance le client Microsoft intégré `mstsc.exe`. L’interface HTTPS
-fournit un fichier `.rdp`. Sur un poste Windows compatible, active le serveur
-dans **Paramètres → Système → Bureau à distance** pour que le diagnostic
-SoundLive annonce RDP.
+Pour un lecteur, la console locale lance TigerVNC Viewer ou le client
+Microsoft `mstsc.exe` quand l’application est disponible. Depuis l’interface
+HTTPS ou la fiche de la régie, télécharge le fichier `.tigervnc` ou `.rdp`
+et ouvre-le dans le client correspondant sur ton poste de commande.
+Les installations complètes Pi et Ubuntu ajoutent `tigervnc-viewer`.
+Sur un poste Linux déjà installé, utilise `sudo apt install tigervnc-viewer`.
+Pour recevoir une connexion MSRDP, active le serveur Windows dans
+**Paramètres → Système → Bureau à distance** si ton édition le prend en charge.
 
 - Sur Raspberry Pi OS et Linux, ajoute `--bureau-distant` à la commande
   de préparation du lecteur. Sur une machine déjà installée, exécute
@@ -251,12 +250,10 @@ SoundLive annonce RDP.
   dans un PowerShell administrateur. Choisis **TightVNC Server** en mode
   service et définis un mot de passe dans l’assistant. Pour utiliser le
   MSI officiel déjà téléchargé, indique `-VncMsi C:\chemin\tightvnc.msi`.
-- Sous Ubuntu GNOME en Wayland, ouvre **Paramètres → Système → Bureau distant
-  → Partage du bureau**, active le partage et le contrôle et configure les
-  identifiants. Le bouton devient **Bureau RDP** et utilise le port 3389
-  avec la session affichée. Depuis HTTPS, il fournit un fichier de connexion
-  `.rdp`. Utilise le port affiché dans les paramètres si Ubuntu en choisit
-  un autre.
+- Sous Ubuntu, le bouton TigerVNC suppose qu’un serveur VNC écoute sur le
+  port 5900. Le partage intégré à GNOME Wayland utilise RDP. Pour accéder
+  à la session affichée dans TigerVNC, utilise une session X11 avec x11vnc
+  si cette session est disponible sur ton installation.
 
 Les scripts d’installation du bureau distant fonctionnent aussi sur le PC
 de régie. Les postes doivent être joignables depuis le client VNC ou RDP
@@ -279,20 +276,25 @@ Dans le terminal, sélectionne **Clé SSH** ou **Mot de passe**. Pour la
 connexion par mot de passe, le serveur SSH du poste cible doit accepter
 cette méthode. En mode clé, le terminal utilise `~/.ssh/id_soundlive`
 ou le chemin défini dans `SOUNDLIVE_SSH_KEY` au lancement de la régie. Le lecteur doit autoriser
-la clé publique correspondante. La phrase secrète de la clé privée est
-demandée uniquement si nécessaire. Dans les deux modes, une clé d’hôte déjà approuvée dans
-`known_hosts` est reconnue. Sinon, renseigne l’empreinte SHA256 affichée
-sur le poste cible après l’installation SSH. Pour la régie elle-même,
-OpenSSH Server doit être actif et sa clé publique autorisée sur le compte
-à utiliser. Sous Windows, la commande
-`powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\installer-ssh-windows.ps1 -CleSsh "$env:USERPROFILE\.ssh\id_soundlive.pub"`
-prépare OpenSSH depuis un PowerShell administrateur. L’empreinte hôte
-Windows s’obtient avec
-`ssh-keygen -lf "$env:ProgramData\ssh\ssh_host_ed25519_key.pub"`.
-Sous Linux, installe `openssh-server` et utilise
-`ssh-copy-id -i ~/.ssh/id_soundlive.pub "$USER@127.0.0.1"` si le compte
-accepte déjà une connexion SSH. L’empreinte s’obtient avec
-`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`.
+la clé publique correspondante. Renseigne sa phrase secrète si la clé en
+utilise une. Pour préparer un lecteur Linux, utilise le serveur
+`openssh-server` et autorise le compte SSH à utiliser.
+
+Le terminal reconnaît les clés d’hôte déjà approuvées dans `known_hosts`.
+S’il affiche une empreinte inconnue ou différente, vérifie depuis la console
+du poste cible :
+
+```bash
+for cle in /etc/ssh/ssh_host_*.pub; do ssh-keygen -lf "$cle"; done
+```
+
+Saisis l’empreinte correspondante dans **Empreinte SSH vérifiée** puis clique
+sur **Connecter**. Cette empreinte est utilisée pour la connexion en cours,
+y compris quand la clé d’hôte a changé depuis son enregistrement dans
+`known_hosts`.
+
+Clique dans le terminal pour coller avec **Ctrl+V**. Le bouton **Coller des
+commandes** ouvre une zone où tu peux relire le texte avant de l’envoyer.
 
 ### Durée de rotation des médias
 

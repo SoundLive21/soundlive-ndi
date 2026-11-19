@@ -12,13 +12,23 @@ header{display:flex;justify-content:space-between;gap:12px;align-items:center}h1
 p{color:#cfc1d0;line-height:1.4}
 form{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin-bottom:12px}
 label{display:grid;gap:5px;font-size:.84rem;flex:1 1 150px}
-input,select,button{padding:8px 10px;border:1px solid #5e4865;border-radius:8px;color:inherit;background:#211926;font:inherit}
+input,select,button,textarea{padding:8px 10px;border:1px solid #5e4865;border-radius:8px;color:inherit;background:#211926;font:inherit}
 button{cursor:pointer;font-weight:600}
 button[type=submit]{background:#a52742;border-color:#be3b54}
 button:disabled{opacity:.5;cursor:default}
 pre{background:#0a090d;color:#d9f3e0;border:1px solid #4b3a51;border-radius:10px;overflow:auto;
 padding:12px;font:14px/1.35 ui-monospace,Consolas,monospace;min-height:14em;position:relative;margin:0}
-pre:focus-visible{outline:2px solid #a9d6ff;outline-offset:3px}
+.terminal{position:relative}
+.terminal:focus-within{outline:2px solid #a9d6ff;outline-offset:3px;border-radius:10px}
+#terminal-input{position:absolute;top:12px;left:12px;width:1px;height:1px;resize:none;opacity:0;padding:0;border:0}
+#host-key{border-left:3px solid #d78a69;padding:4px 12px;margin-bottom:16px}
+#host-key p{margin:6px 0;overflow-wrap:anywhere}
+dialog{width:min(540px,calc(100% - 32px));border:1px solid #5e4865;border-radius:12px;background:#1a1420;color:inherit}
+dialog::backdrop{background:#000a}
+dialog h2{margin:0 0 12px;font-size:1.1rem}
+dialog form{display:grid}
+dialog textarea{width:100%;min-height:9em;resize:vertical;font-family:ui-monospace,Consolas,monospace}
+.actions{display:flex;gap:8px;justify-content:flex-end}
 #state[data-level=error]{color:#ffacba}
 kbd{font:inherit;color:#d9f3e0}
 </style>
@@ -34,19 +44,45 @@ kbd{font:inherit;color:#d9f3e0}
   <label>Empreinte SSH vérifiée<input name="fingerprint" maxlength="50" placeholder="SHA256:…"></label>
   <button type="submit">Connecter</button>
 </form>
-<pre id="screen" tabindex="0" aria-label="Terminal SSH interactif"></pre>
-<p>Clique dans la zone du terminal pour saisir du texte. <kbd>Ctrl</kbd> + <kbd>C</kbd> interrompt la commande.</p>
+<section id="host-key" hidden>
+  <p>Empreinte présentée par <span id="host-address"></span> · <code id="presented-key"></code></p>
+  <p id="expected-row" hidden>Empreinte attendue · <code id="expected-key"></code></p>
+  <p>Vérifie l’empreinte depuis le poste cible avec la commande ci-dessous, puis saisis celle qui correspond dans le formulaire.</p>
+  <code>for cle in /etc/ssh/ssh_host_*.pub; do ssh-keygen -lf "$cle"; done</code>
+</section>
+<div class="terminal">
+  <pre id="screen" aria-label="Affichage du terminal SSH"></pre>
+  <textarea id="terminal-input" aria-label="Saisie du terminal SSH" autocapitalize="off" autocomplete="off" spellcheck="false" disabled></textarea>
+</div>
+<p><button id="paste" type="button" disabled>Coller des commandes</button>
+  Clique dans le terminal pour utiliser <kbd>Ctrl</kbd> + <kbd>V</kbd>. <kbd>Ctrl</kbd> + <kbd>C</kbd> interrompt la commande.</p>
+<dialog id="paste-dialog" aria-labelledby="paste-title">
+  <form method="dialog">
+    <h2 id="paste-title">Coller des commandes</h2>
+    <label>Texte à envoyer au terminal<textarea id="paste-text" autofocus required spellcheck="false"></textarea></label>
+    <div class="actions">
+      <button type="submit" value="cancel" formnovalidate>Annuler</button>
+      <button type="submit" value="send">Envoyer</button>
+    </div>
+  </form>
+</dialog>
 <script>
 "use strict";
 const target = new URLSearchParams(location.search).get("id") || "regie";
 const form = document.querySelector("#connect");
 const terminal = document.querySelector("#screen");
+const terminalInput = document.querySelector("#terminal-input");
+const paste = document.querySelector("#paste");
+const pasteDialog = document.querySelector("#paste-dialog");
+const pasteText = document.querySelector("#paste-text");
+const hostKey = document.querySelector("#host-key");
 const status = document.querySelector("#state");
 const disconnect = document.querySelector("#disconnect");
 const sshMethod = form.elements.namedItem("auth");
 const sshPassphrase = form.elements.namedItem("passphrase");
 const sshPassword = form.elements.namedItem("password");
-let session = "", buffer = "", timer = 0, connecting = false;
+const sshFingerprint = form.elements.namedItem("fingerprint");
+let session = "", buffer = "", timer = 0, connecting = false, targetAddress = "";
 function authFields() {
   const password = sshMethod.value === "password";
   sshPassphrase.disabled = sshPassphrase.closest("label").hidden = password;
@@ -62,12 +98,17 @@ async function api(operation, data) {
   const reply = await fetch("/api/ssh/" + operation, {method:"POST", headers:{"Content-Type":"application/json"},
     body:JSON.stringify(data), cache:"no-store"});
   const payload = await reply.json();
-  if (!reply.ok) throw Error(payload.error || "Le terminal n’est pas disponible.");
+  if (!reply.ok) {
+    const error = Error(payload.error || "Le terminal n’est pas disponible.");
+    if (payload.code === "ssh_host_key") error.hostKey = payload;
+    throw error;
+  }
   return payload;
 }
 function controls() {
   form.hidden = !!session;
   disconnect.disabled = !session;
+  terminalInput.disabled = paste.disabled = !session;
   sshMethod.disabled = connecting;
   form.querySelector("button").disabled = connecting;
 }
@@ -75,6 +116,7 @@ async function finish(reason, failed = false) {
   const current = session;
   session = ""; buffer = "";
   clearTimeout(timer);
+  if (pasteDialog.open) pasteDialog.close();
   controls();
   message(reason, failed);
   if (current) await api("end", {session:current}).catch(() => {});
@@ -82,7 +124,10 @@ async function finish(reason, failed = false) {
 async function sync() {
   const current = session;
   if (!current) return;
-  const input = buffer.slice(0,4096);
+  // Keep each JSON request under the body limit and each surrogate pair intact.
+  let end = Math.min(buffer.length, 2048);
+  if (end < buffer.length && /[\uD800-\uDBFF]/.test(buffer[end - 1])) end--;
+  const input = buffer.slice(0, end);
   buffer = buffer.slice(input.length);
   try {
     const data = await api("sync", {session:current, input});
@@ -104,18 +149,30 @@ form.onsubmit = async event => {
   event.preventDefault();
   if (session || connecting) return;
   const data = Object.fromEntries(new FormData(form));
+  data.fingerprint = sshFingerprint.value.trim();
   connecting = true;
   controls();
   message("Connexion SSH en cours…");
   try {
     const opened = await api("start", {id:target, ...data});
     session = opened.session;
+    hostKey.hidden = true;
     terminal.textContent = "";
     message("Session SSH ouverte");
-    terminal.focus();
+    controls();
+    terminalInput.focus();
     sync();
   } catch (error) {
     message(error.message, true);
+    if (error.hostKey) {
+      const {presented, expected} = error.hostKey;
+      document.querySelector("#host-address").textContent = targetAddress;
+      document.querySelector("#presented-key").textContent = presented;
+      document.querySelector("#expected-key").textContent = expected || "";
+      document.querySelector("#expected-row").hidden = !expected;
+      hostKey.hidden = false;
+      sshFingerprint.select();
+    }
   } finally {
     sshPassphrase.value = sshPassword.value = "";
     connecting = false;
@@ -126,20 +183,50 @@ const special = {Enter:"\r", Backspace:"\x7f", Tab:"\t", Escape:"\x1b", ArrowUp:
   ArrowDown:"\x1b[B", ArrowRight:"\x1b[C", ArrowLeft:"\x1b[D", Home:"\x1b[H", End:"\x1b[F",
   Delete:"\x1b[3~", Insert:"\x1b[2~", PageUp:"\x1b[5~", PageDown:"\x1b[6~",
   F1:"\x1bOP", F2:"\x1bOQ", F3:"\x1bOR", F4:"\x1bOS"};
-terminal.addEventListener("keydown", event => {
+function enqueue(text) {
+  if (!session || !text) return;
+  if (buffer.length + text.length > 64000) {
+    message("Texte trop long pour le terminal. Envoie-le en plusieurs blocs.", true);
+    return;
+  }
+  buffer += text;
+}
+function enqueuePaste(text) {
+  enqueue(text.replace(/\r\n?|\n/g, "\r"));
+}
+terminal.addEventListener("click", () => {
+  if (session && window.getSelection()?.isCollapsed) terminalInput.focus();
+});
+terminalInput.addEventListener("keydown", event => {
   if (!session || event.metaKey || event.isComposing) return;
   const altGraph = event.getModifierState("AltGraph");
-  if (!altGraph && event.ctrlKey && (event.shiftKey || event.key.toLowerCase() === "v")) return;
+  if ((!altGraph && event.ctrlKey && (event.shiftKey || event.key.toLowerCase() === "v"))
+      || (event.shiftKey && event.key === "Insert")) return;
   let value = special[event.key] || (Array.from(event.key).length === 1 ? event.key : "");
   if (!altGraph && event.ctrlKey && /^[a-z@\[\]\\^_]$/i.test(value)) value = String.fromCharCode(value.toUpperCase().charCodeAt(0) & 31);
   if (!value) return;
   event.preventDefault();
-  if (buffer.length < 16000) buffer += (event.altKey && !altGraph ? "\x1b" : "") + value;
+  enqueue((event.altKey && !altGraph ? "\x1b" : "") + value);
 });
-terminal.addEventListener("paste", event => {
-  if (!session) return;
+terminalInput.addEventListener("input", event => {
+  if (event.isComposing) return;
+  enqueuePaste(terminalInput.value);
+  terminalInput.value = "";
+});
+terminalInput.addEventListener("paste", event => {
+  if (!session || !event.clipboardData) return;
   event.preventDefault();
-  buffer = (buffer + event.clipboardData.getData("text").replace(/\r?\n/g,"\r")).slice(0,16000);
+  enqueuePaste(event.clipboardData.getData("text/plain"));
+});
+paste.onclick = () => {
+  pasteText.value = "";
+  pasteDialog.returnValue = "";
+  pasteDialog.showModal();
+};
+pasteDialog.addEventListener("close", () => {
+  if (pasteDialog.returnValue === "send") enqueuePaste(pasteText.value);
+  pasteText.value = "";
+  if (session) terminalInput.focus();
 });
 disconnect.onclick = () => finish("Session SSH fermée.");
 window.addEventListener("pagehide", () => {
@@ -147,6 +234,7 @@ window.addEventListener("pagehide", () => {
     body:JSON.stringify({session})}).catch(() => {});
 });
 api("target", {id:target}).then(data => {
+  targetAddress = data.address;
   document.title = "SSH · " + data.name;
   document.querySelector("#title").textContent = data.name + " · SSH";
   form.elements.namedItem("user").value = data.user;

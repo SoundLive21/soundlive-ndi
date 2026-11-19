@@ -38,11 +38,11 @@ from commun import (APP_NAME, MEDIA_CHUNK, MEDIA_COUNT_LIMIT, MEDIA_DISK_PERCENT
 from diagnostic import Diagnostic, NetworkRates, desktop_protocol, network_info
 from mise_a_jour import ENGINE_ASSETS, SAFE_ID, contents, digest, engine_name, full_contents, package, prepare_key
 from qrencoder import QRCode, QRErrorCorrectLevel
-from terminal_ssh import Terminals
+from terminal_ssh import HostKeyCheck, Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.55"
+SOFTWARE_VERSION = "1.4.56"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -715,9 +715,13 @@ def local_addresses():
 
 
 def desktop_command(address, protocol):
-    if sys.platform == "win32":
-        if protocol == "rdp":
+    if protocol == "rdp":
+        if sys.platform == "win32":
             return ["mstsc.exe", f"/v:{address}:3389"]
+        return None
+    if protocol != "vnc":
+        return None
+    if sys.platform == "win32":
         for folder in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"):
             if programs := os.environ.get(folder):
                 viewer = Path(programs) / "TigerVNC" / "vncviewer.exe"
@@ -727,18 +731,26 @@ def desktop_command(address, protocol):
             if "tigervnc" in {part.casefold() for part in Path(viewer).parts}:
                 return [viewer, f"{address}::5900"]
         return None
-    if protocol == "rdp":
-        if program := shutil.which("remmina"):
-            return [program, "-c", f"rdp://{address}:3389"]
-    elif protocol == "vnc":
-        if program := shutil.which("xtigervncviewer") or shutil.which("tigervncviewer"):
-            return [program, f"{address}::5900"]
+    if program := shutil.which("xtigervncviewer") or shutil.which("tigervncviewer"):
+        return [program, f"{address}::5900"]
     return None
+
+
+def support_methods(kind):
+    if kind == "windows":
+        return ("rdp", "vnc")
+    if kind in ("pi", "ubuntu"):
+        return ("ssh", "vnc")
+    return ()
+
+
+def regie_support_methods():
+    return support_methods("windows" if sys.platform == "win32" else "ubuntu")
 
 
 def support_target(key):
     if key == "regie":
-        return dict(address="127.0.0.1", name="Régie", user=getuser(), desktop=desktop_protocol())
+        return dict(address="127.0.0.1", name="Régie", user=getuser(), support=regie_support_methods())
     with LOCK:
         row = SCREENS.get(key) if isinstance(key, str) else None
         report = row.get("report", {}) if row and row.get("token") else {}
@@ -747,10 +759,7 @@ def support_target(key):
         address = IPv4Address(report["ip"])
         if address.is_loopback or address.is_unspecified or address.is_multicast:
             raise ValueError("Adresse du lecteur invalide.")
-        diagnostic = report.get("diagnostic") or {}
-        protocol = diagnostic.get("desktop_protocol") or (
-            "rdp" if row.get("kind") == "ubuntu" and diagnostic.get("os", "").startswith("Ubuntu 26.") else "vnc")
-        return dict(address=str(address), name=row["name"], user="soundlive", desktop=protocol)
+        return dict(address=str(address), name=row["name"], user="soundlive", support=support_methods(row.get("kind")))
 
 
 class Request(BaseHTTPRequestHandler):
@@ -899,7 +908,7 @@ class Request(BaseHTTPRequestHandler):
         elif path == "/api/network":
             self.reply(200, {"addresses": local_addresses(),
                              "port": getattr(self.server, "receiver_port", self.server.server_port),
-                             "desktop_protocol": desktop_protocol()})
+                             "desktop_protocol": desktop_protocol(), "support": regie_support_methods()})
         elif path == "/api/interface-traffic":
             self.reply(200, self.server.interface_traffic.read())
         elif path == "/api/regie-latency":
@@ -942,6 +951,7 @@ class Request(BaseHTTPRequestHandler):
                         report=report, online=now - report.get("seen", 0) < ONLINE_AGE,
                         pairing=row.get("pairing") if now < row.get("pairing_until", 0) else None,
                         paired="token" in row, version=row.get("version", 0), kind=row.get("kind"),
+                        support=support_methods(row.get("kind")),
                         group=row.get("group"), resolution_limit=row.get("resolution_limit"),
                         group_order=group_order.get(group), screen_order=screen_order.get(group, {}).get(key),
                         resolution_sources=resolution_sources(row, now),
@@ -1009,12 +1019,15 @@ class Request(BaseHTTPRequestHandler):
                     return
                 key = value.get("id")
                 target = support_target(key)
+                protocol = value.get("protocol")
+                if protocol not in ("vnc", "rdp") or protocol not in target["support"]:
+                    raise ValueError("Ce type de bureau distant est indisponible pour ce poste.")
                 address = target["address"]
                 if key == "regie":
                     address = str(IPv4Address(value.get("address", "")))
                     if address not in {item["ip"] for item in local_addresses()}:
                         raise ValueError("Choisis une adresse du PC de régie.")
-                command = desktop_command(address, target["desktop"])
+                command = desktop_command(address, protocol)
                 if command:
                     subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 self.reply(200, {"opened": command is not None})
@@ -1050,6 +1063,8 @@ class Request(BaseHTTPRequestHandler):
         try:
             if operation in ("target", "start"):
                 target = support_target(value.get("id"))
+                if "ssh" not in target["support"]:
+                    raise ValueError("Le terminal web SSH est disponible pour les postes Linux.")
                 result = target if operation == "target" else terminals.start(owner, target["address"], value)
             elif operation == "sync":
                 result = terminals.sync(owner, value.get("session"), value.get("input"))
@@ -1059,6 +1074,10 @@ class Request(BaseHTTPRequestHandler):
             else:
                 self.reply(404, {"error": "Action terminal inconnue."})
                 return
+        except HostKeyCheck as error:
+            self.reply(409, {"error": str(error), "code": "ssh_host_key",
+                             "presented": error.presented, "expected": error.expected})
+            return
         except (ValueError, RuntimeError) as error:
             self.reply(400, {"error": str(error)})
             return
