@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.59** et le client **1.4.31**.
+Ce kit contient la régie **1.4.60** et le client **1.4.31**.
 
 ## Installer et lancer la régie
 
@@ -250,6 +250,35 @@ d'installation. Le réglage Ubuntu est valable jusqu'au redémarrage de la régi
 Sous Windows, utilise **Désactiver** pour retirer le NAT SoundLive et restaurer
 les réglages de routage des deux interfaces.
 
+### Serveur DHCP du réseau écrans
+
+Ouvre la console locale de la régie, puis **Serveur DHCP**. Sélectionne
+l’interface dédiée aux écrans, configurée avec une IPv4 fixe. Indique
+une plage libre hors des adresses fixes, la durée des baux et, si le
+réseau en utilise, une passerelle et jusqu’à deux DNS. Pour un réseau
+`10.10.2.0/24`, tu peux par exemple utiliser `10.10.2.150` à
+`10.10.2.199` si ces adresses sont libres.
+
+Confirme que ce réseau n’a pas d’autre DHCP, puis clique sur **Démarrer
+le DHCP**. Le panneau affiche l’IP, le nom éventuel, la MAC et l’expiration
+des baux. Le serveur utilise UDP 67 sur l’interface sélectionnée. La
+configuration et les baux sont conservés dans `.soundlive-dhcp/`. Le
+serveur actif redémarre avec la régie si l’interface est toujours valide.
+Le bouton **Arrêter le DHCP** enregistre l’arrêt.
+
+Sous Windows, si le pare-feu bloque les requêtes, ouvre PowerShell en
+administrateur et ajoute une règle pour UDP 67 sur la seule carte des
+écrans. Remplace `Ethernet` par le nom exact affiché dans le panneau :
+
+```powershell
+New-NetFirewallRule -Name 'SoundLive-NDI-DHCP' -DisplayName 'SoundLive-NDI DHCP' -Direction Inbound -Action Allow -Protocol UDP -LocalPort 67 -InterfaceAlias 'Ethernet'
+```
+
+Sous Linux, le compte qui lance la régie doit avoir le droit d’écouter
+sur UDP 67 et de lier le socket à cette carte. Pour répartir l’accès à
+Internet, configure aussi le partage Internet et renseigne dans le DHCP
+l’IPv4 de la passerelle réellement joignable sur ce réseau.
+
 ### Bureau distant et terminal SSH
 
 La fenêtre **Informations** propose **SSH** et **TigerVNC** pour un Pi ou un
@@ -309,6 +338,9 @@ privé avant le premier démarrage sur le nouveau PC :
   et des publications GitHub.
 - `source-publications.json` et `publication.pub` si tu utilises les
   mises à jour GitHub de la régie.
+- `.soundlive-dhcp/` si tu utilises le serveur DHCP. Sur le nouveau PC,
+  sélectionne sa carte réseau dans **Serveur DHCP** et vérifie la plage
+  avant de le redémarrer.
 
 Réattribue au nouveau PC la même IPv4 de diffusion et le même port. Si
 l’adresse change, utilise le mode `--mettre-a-jour` des lecteurs avec
