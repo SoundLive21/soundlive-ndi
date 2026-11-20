@@ -8,30 +8,44 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.66** et le client **1.4.31**.
+Ce kit contient la régie **1.4.67** et le client **1.4.32**.
 
 ## Installer et lancer la régie
 
 Décompresse tout le ZIP dans un dossier accessible en écriture sur le PC de
 régie. Branche-le au réseau des écrans.
 
-- **Windows x64** — Installe Python 3 x64 avec Tcl/Tk et ouvre
-  `SoundLive-NDI.exe`. Pour l’accès distant, si `cryptography` manque,
-  lance `py -3 -m pip install cryptography` dans PowerShell. Pour les mises
-  à jour signées, installe le client OpenSSH si `ssh-keygen` est absent.
-- **Ubuntu Desktop** — Ouvre un terminal dans le dossier extrait depuis ta
-  session graphique et exécute les commandes suivantes.
+- **Windows x64** — Double-clique sur `installer-regie-windows.cmd`.
+  Il installe la régie dans `%LOCALAPPDATA%\Programs\soundlive-ndi`, installe
+  Python et Tcl/Tk si nécessaire, crée les raccourcis et prépare les accès
+  distants après validation administrateur. Si TightVNC est nouveau, saisis
+  et confirme le mot de passe VNC dans le terminal d’installation. Pour
+  reprendre une régie portable, exécute l’installateur depuis un terminal avec
+  `installer-regie-windows.cmd -Depuis "C:\chemin\ancienne-regie"`.
+- **Ubuntu Desktop ou Raspberry Pi OS 64 bits** — Ouvre un terminal dans le
+  dossier extrait depuis ta session graphique, puis lance :
 
 ```bash
-sudo apt update
-sudo apt install python3-tk python3-cryptography openssh-client
-bash demarrer-regie-ubuntu.sh
+bash installer-regie-linux.sh
 ```
+
+Sous Linux, le menu **SoundLive-NDI Régie** démarre le lanceur installé dans
+`~/.local/lib/soundlive-ndi`. Pour reprendre une régie portable, ajoute
+`--depuis /chemin/vers/ancienne-regie` à la commande d’installation. Les
+associations, réglages et clés sont copiés si leur destination est vide.
+Ajoute `--cle-ssh /chemin/vers/cle.pub` pour autoriser une clé entrante
+sur la régie Linux. `demarrer-regie-ubuntu.sh` et `SoundLive-NDI.exe` restent
+les points d’entrée du lanceur pour un kit déjà préparé.
 
 Dans le lanceur, clique sur **Démarrer la régie**, puis **Ouvrir la console**.
 Sur ce PC, le tableau est aussi disponible à `http://127.0.0.1:8765`.
 Les lecteurs utilisent l’IPv4 locale de la régie sur le port TCP 8765. Si le
 pare-feu filtre ce port, autorise-le sur le réseau des écrans.
+
+Le lecteur s’installe dans `~/.local/share/soundlive-ndi` sous Linux et
+`%LOCALAPPDATA%\soundlive-ndi` sous Windows. Une mise à jour locale reprend
+l’ancien dossier si nécessaire et actualise le raccourci de démarrage. Les
+anciens fichiers sont conservés pour permettre un retour arrière.
 
 Le dossier de la régie contient les associations et les clés. Garde
 `ecrans.json`, `.soundlive-update` et `.soundlive-acces` dans ce dossier pour une
@@ -135,6 +149,13 @@ sous-réseau, hors de la plage DHCP. Ethernet est prioritaire. Dans les exemples
 `10.10.2.99` est la passerelle du réseau écrans et l'adresse de la régie. Choisis
 ta passerelle et tes DNS selon ton installation. Le deuxième DNS est facultatif.
 
+Après validation du réseau et de l’association, la préparation nettoie
+les anciens profils SoundLive inutilisés. Sous Linux, cela inclut les
+profils temporaires laissés par des installations précédentes. Sous
+Windows, le profil Wi-Fi SoundLive est remplacé et l’ancienne configuration
+SoundLive est retirée des cartes qui ne servent plus au lecteur. Les
+profils personnels et les profils actifs du lecteur sont conservés.
+
 La commande créée par **Ajouter un écran** inclut `--empreinte-regie`.
 Si plusieurs interfaces sont détectées, renseigne **Interface Ethernet**
 ou **Interface Wi-Fi** avec les noms affichés sur le lecteur par
@@ -145,16 +166,14 @@ clé de vérification des mises à jour dans son dossier applicatif.
 Les installateurs déclenchent aussi la préparation du bureau distant.
 Sous Windows, lance la commande en administrateur sous le compte du lecteur.
 
-Pour préparer la régie Windows après l’installation du kit, lance depuis
+Pour préparer séparément une régie Windows déjà installée, lance depuis
 un PowerShell administrateur sous le compte qui utilisera le lanceur :
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\installer-bureau-distant-windows.ps1 -Regie
 ```
 
-Sur une régie Linux, installe le client OpenSSH ainsi que `python3-paramiko`
-et `python3-pyte`, puis lance `python3 tableau.py --preparer-installations`.
-Le script prépare les clés sur le poste de régie. Une ancienne identité
+Les installateurs de régie préparent les clés sur le poste de régie. Une ancienne identité
 `~/.ssh/id_soundlive` déjà configurée continue d’être utilisée. Une nouvelle
 identité SSH est créée dans `.soundlive-update/ssh`.
 
@@ -306,21 +325,21 @@ Pour un lecteur, la console locale lance TigerVNC Viewer ou le client
 Microsoft `mstsc.exe` quand l’application est disponible. Depuis l’interface
 HTTPS ou la fiche de la régie, télécharge le fichier `.tigervnc` ou `.rdp`
 et ouvre-le dans le client correspondant sur ton poste de commande.
-Les installations complètes Pi et Ubuntu ajoutent `tigervnc-viewer`.
-Sur un poste Linux déjà installé, utilise `sudo apt install tigervnc-viewer`.
-Pour recevoir une connexion MSRDP, active le serveur Windows dans
-**Paramètres → Système → Bureau à distance** si ton édition le prend en charge.
+Les premières installations Pi et Ubuntu mettent en place OpenSSH et
+`tigervnc-viewer`. Les commandes générées par la régie ajoutent aussi sa
+clé publique SSH au compte du lecteur.
 
-- Sur Raspberry Pi OS et Linux, ajoute `--bureau-distant` à la commande
-  de préparation du lecteur. Sur une machine déjà installée, exécute
+- Sur une machine Linux déjà installée, exécute
   `bash installer-bureau-distant-linux.sh` depuis sa session graphique.
   Raspberry Pi OS Wayland utilise WayVNC. Sur une session X11, choisis un
   mot de passe VNC puis rouvre la session pour démarrer le serveur TigerVNC.
-- Sur Windows, ajoute `-Vnc` à la commande de préparation ou exécute
-  `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\installer-bureau-distant-windows.ps1`
-  dans un PowerShell administrateur. Choisis **TightVNC Server** en mode
-  service et définis un mot de passe dans l’assistant. Pour utiliser le
-  MSI officiel déjà téléchargé, indique `-VncMsi C:\chemin\tightvnc.msi`.
+- Sous Windows, l’installation configure **TightVNC Server** en service et
+  **MSRDP** si l’édition le permet. Le téléchargement WinGet accepte les
+  conditions de la source et du paquet. Le mot de passe VNC est saisi sans
+  affichage et transmis à Windows Installer en mémoire. Pour configurer
+  un poste existant, exécute en administrateur
+  `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\installer-bureau-distant-windows.ps1 -ActiverRdp`.
+  Pour utiliser un MSI officiel déjà téléchargé, indique `-VncMsi C:\chemin\tightvnc.msi`.
 - Sous Ubuntu, le bouton TigerVNC suppose qu’un serveur VNC écoute sur le
   port 5900. Le partage intégré à GNOME Wayland utilise RDP. Pour accéder
   à la session affichée dans TigerVNC, utilise une session X11 ou un
@@ -700,7 +719,7 @@ Linux, le journal `~/.local/state/soundlive-ndi/lancement.log` indique si
 le lanceur graphique a démarré et consigne les erreurs de démarrage.
 Si un ancien lecteur Linux journalise `cannot import name 'client_lock'`
 au redémarrage, copie le fichier `lancer-client.py` du kit **1.4.27** ou
-ultérieur dans `~/.local/share/soundlive-ecrans/` avec le compte du
+ultérieur dans `~/.local/share/soundlive-ndi/` avec le compte du
 lecteur, puis redémarre. Le lanceur corrigé fonctionne avec les anciens
 modules présents dans ce dossier et reprend la version active du client.
 
@@ -747,7 +766,7 @@ client OpenSSH doit être présent sur la régie et les lecteurs.
 
 La clé publique des mises à jour est distincte de la clé utilisée pour
 ouvrir une session SSH. Sur un lecteur déjà installé et associé, tu peux
-copier `regie-update.pub` dans `~/.local/share/soundlive-ecrans` sous Linux
+copier `regie-update.pub` dans `~/.local/share/soundlive-ndi` sous Linux
 ou dans `%LOCALAPPDATA%\SoundLive\client` sous Windows, puis rouvrir la
 session du lecteur pour qu’il la charge.
 
@@ -787,7 +806,7 @@ ce moteur système reste installé à part.
    Pour Linux, compile depuis ce kit sur un poste de l’architecture cible,
    avec `bash installer-ubuntu.sh --mettre-a-jour-rendu` sur un lecteur de
    préparation déjà associé, puis copie son fichier
-   `~/.local/share/soundlive-ecrans/lecteur-ndi-ubuntu` vers la régie.
+   `~/.local/share/soundlive-ndi/lecteur-ndi-ubuntu` vers la régie.
    Sous Windows, utilise la procédure de compilation Windows de ce guide.
 
    | Lecteur | Fichier à placer dans le dossier de la régie |

@@ -45,7 +45,12 @@ for file in ecran.py commun.py diagnostic.py mise_a_jour.py lancer-client.py; do
         exit 1
     fi
 done
-app="$HOME/.local/share/soundlive-ecrans"
+if $render_only && [[ ! -e "$HOME/.local/share/soundlive-ndi" && -d "$HOME/.local/share/soundlive-ecrans" ]]; then
+    app="$HOME/.local/share/soundlive-ecrans"
+else
+    source "$here/installation-lecteur-linux.sh"
+    app=$(player_directory "$HOME/.local/share")
+fi
 config_dir="${XDG_CONFIG_HOME:-$HOME/.config}"
 autostart="$config_dir/autostart"
 association="$config_dir/soundlive-ndi/association.json"
@@ -109,6 +114,9 @@ if $client_only; then
         exit 1
     fi
     if [[ -n ${SOUNDLIVE_INSTALL_FINGERPRINT:-} ]]; then
+        if [[ ${SOUNDLIVE_REMOTE_ACCESS_PREPARED:-} != 1 ]]; then
+            prepare_remote_access "$here" "$SOUNDLIVE_DEVICE_KIND"
+        fi
         bash "$here/installer-ssh-linux.sh" recuperer "$SOUNDLIVE_INSTALL_REGIE" "$SOUNDLIVE_INSTALL_FINGERPRINT" "$app"
     fi
     check_association "${@:2}"
@@ -185,7 +193,8 @@ if ! ndi_library=$(find_ndi_library "$sdk"); then
     (
         cd "$temp"
         tar -xzf ndi-sdk.tar.gz
-        bash ./Install_NDI_SDK_v6_Linux.sh
+        printf 'Acceptation des conditions du SDK NDI 6 pendant son installation.\n'
+        PAGER=cat bash ./Install_NDI_SDK_v6_Linux.sh <<< y
     )
     sdk="$temp/NDI SDK for Linux"
     if ! ndi_library=$(find_ndi_library "$sdk"); then
@@ -233,6 +242,9 @@ rule="$temp/sudoers"
 printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff\n' "$account" >"$rule"
 sudo visudo -cf "$rule"
 sudo -v
+if [[ ${SOUNDLIVE_REMOTE_ACCESS_PREPARED:-} != 1 ]] && { ! $update || [[ -n ${SOUNDLIVE_INSTALL_FINGERPRINT:-} ]]; }; then
+    prepare_remote_access "$here" "$SOUNDLIVE_DEVICE_KIND"
+fi
 if [[ -n ${SOUNDLIVE_NETWORK_PREPARATION:-} ]]; then
     bash "$here/preparer-lecteur-linux.sh" appliquer "$SOUNDLIVE_NETWORK_PREPARATION"
 fi
@@ -263,5 +275,5 @@ sudo install -o root -g root -m 0440 "$rule" /etc/sudoers.d/soundlive-ecrans
 install_autostart
 
 echo "Installation terminée. Pour tester depuis un terminal de la session Ubuntu :"
-echo "  ~/.local/share/soundlive-ecrans/demarrer-ubuntu"
+echo "  $app/demarrer-ubuntu"
 echo "Le lecteur se lancera automatiquement à la prochaine ouverture de cette session."

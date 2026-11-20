@@ -6,7 +6,7 @@ install_ssh() {
     if ! command -v ssh-keygen >/dev/null ||
         ! dpkg-query -W -f='${Status}' openssh-server 2>/dev/null | grep -Fxq 'install ok installed'; then
         sudo apt-get update
-        sudo apt-get install -y openssh-server openssh-client
+        sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server openssh-client
     fi
 }
 
@@ -40,6 +40,10 @@ PY
 
 case "$1" in
     installer) install_ssh ;;
+    configurer)
+        install_ssh
+        sudo systemctl enable --now ssh.service
+        ;;
     autoriser) authorize_key "$2" ;;
     recuperer)
         directory=$(mktemp -d)

@@ -137,8 +137,6 @@ if [[ -n $fingerprint ]]; then
         echo "Indique l’adresse HTTP de la régie pour récupérer ses clés." >&2
         exit 2
     fi
-    bash "$base/installer-ssh-linux.sh" installer
-    bash "$base/installer-bureau-distant-linux.sh" "$kind"
 fi
 case "$kind" in
     pi)

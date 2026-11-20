@@ -33,7 +33,13 @@ from mise_a_jour import ClientUpdate, FULL_LIMIT, RESTART, digest, engine_name, 
 
 HOME = Path.home()
 WINDOWS = sys.platform == "win32"
-WINDOWS_DATA = Path(os.environ.get("LOCALAPPDATA", HOME / "AppData/Local")) / "SoundLive"
+WINDOWS_LOCAL_DATA = Path(os.environ.get("LOCALAPPDATA", HOME / "AppData/Local"))
+WINDOWS_CURRENT_DATA = WINDOWS_LOCAL_DATA / "soundlive-ndi"
+WINDOWS_LEGACY_DATA = WINDOWS_LOCAL_DATA / "SoundLive"
+WINDOWS_DATA = WINDOWS_CURRENT_DATA
+if (WINDOWS and not (WINDOWS_CURRENT_DATA / "config/association.json").is_file()
+        and (WINDOWS_LEGACY_DATA / "config/association.json").is_file()):
+    WINDOWS_DATA = WINDOWS_LEGACY_DATA
 CONFIG = WINDOWS_DATA / "config" if WINDOWS else Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config")) / "soundlive-ndi"
 STATE = WINDOWS_DATA / "state" if WINDOWS else Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "soundlive-ndi"
 PAIRING = CONFIG / "association.json"

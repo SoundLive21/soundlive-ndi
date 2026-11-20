@@ -48,7 +48,8 @@ for file in ecran.py commun.py diagnostic.py mise_a_jour.py lancer-client.py; do
         exit 1
     fi
 done
-app="$HOME/.local/share/soundlive-ecrans"
+source "$here/installation-lecteur-linux.sh"
+app=$(player_directory "$HOME/.local/share")
 autostart="$config_dir/autostart"
 mkdir -p "$app" "$autostart"
 rule=$(mktemp)
@@ -56,6 +57,9 @@ trap 'rm -f -- "$rule"' EXIT
 printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff\n' "$(id -un)" > "$rule"
 sudo visudo -cf "$rule"
 sudo -v
+if [[ ${SOUNDLIVE_REMOTE_ACCESS_PREPARED:-} != 1 ]] && { ! $update || [[ -n ${SOUNDLIVE_INSTALL_FINGERPRINT:-} ]]; }; then
+    prepare_remote_access "$here" pi
+fi
 if [[ -n ${SOUNDLIVE_NETWORK_PREPARATION:-} ]]; then
     bash "$here/preparer-lecteur-linux.sh" appliquer "$SOUNDLIVE_NETWORK_PREPARATION"
 fi

@@ -22,7 +22,7 @@ sudo -v
 install_package() {
     if ! dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -Fxq 'install ok installed'; then
         sudo apt-get update
-        sudo apt-get install -y "$1"
+        sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y "$1"
     fi
 }
 

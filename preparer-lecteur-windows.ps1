@@ -102,8 +102,15 @@ $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.Wind
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw 'Ouvre PowerShell en administrateur sous le compte Windows du lecteur.'
 }
-$app = Join-Path $env:LOCALAPPDATA 'SoundLive\client'
-$paired = Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'SoundLive\config\association.json')
+$data = Join-Path $env:LOCALAPPDATA 'soundlive-ndi'
+$legacy = Join-Path $env:LOCALAPPDATA 'SoundLive'
+$app = Join-Path $data 'client'
+$paired = Test-Path -LiteralPath (Join-Path $data 'config\association.json')
+if (-not $paired -and (Test-Path -LiteralPath (Join-Path $legacy 'config\association.json'))) {
+    $paired = $true
+    $app = Join-Path $legacy 'client'
+}
+$prepareDesktop = (-not $paired) -or $Vnc -or $VncMsi -or $EmpreinteRegie
 if (-not $paired -and -not $Code) { throw 'Renseigne le code fourni par la regie avec -Code.' }
 $taskName = 'SoundLive-NDI Network'
 $oldTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
@@ -265,8 +272,8 @@ try {
     } elseif ($EmpreinteRegie) {
         & (Join-Path $PSScriptRoot 'installer-ssh-windows.ps1') -InstallerSeulement
     }
-    if ($Vnc -or $VncMsi -or $EmpreinteRegie) {
-        & (Join-Path $PSScriptRoot 'installer-bureau-distant-windows.ps1') -VncMsi $VncMsi -ActiverRdp:([bool]$EmpreinteRegie)
+    if ($prepareDesktop) {
+        & (Join-Path $PSScriptRoot 'installer-bureau-distant-windows.ps1') -VncMsi $VncMsi -ActiverRdp
     }
     $python = Find-DisplayPython
     if (-not $python) {
@@ -376,7 +383,7 @@ try {
     if ($AttendreReseauEcrans) {
         $null = Read-Host 'Branche le cable au reseau ecrans, puis appuie sur Entree'
     }
-    $profileFolder = Join-Path $env:ProgramFiles 'SoundLive-NDI\Network'
+    $profileFolder = Join-Path $env:ProgramFiles 'soundlive-ndi\Network'
     New-Item -ItemType Directory -Path $profileFolder -Force | Out-Null
     if ($oldTaskRunning -and -not $pausedTask) {
         Stop-ScheduledTask -TaskName $taskName
@@ -411,20 +418,6 @@ try {
             Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ResetServerAddresses
         }
     }
-    if ($previous) {
-        $otherAdapters = $physical | Where-Object {
-            [string]$_.InterfaceGuid -in @($previous.wired, $previous.wifi) -and
-            $_.ifIndex -notin @($wired.ifIndex, $wireless.ifIndex)
-        }
-        foreach ($adapter in $otherAdapters) {
-            Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -IPAddress $previous.address -PolicyStore ActiveStore -ErrorAction SilentlyContinue |
-                Remove-NetIPAddress -Confirm:$false
-            if ($previous.gateway) {
-                Get-NetRoute -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -NextHop $previous.gateway -PolicyStore ActiveStore -ErrorAction SilentlyContinue |
-                    Remove-NetRoute -Confirm:$false
-            }
-        }
-    }
     if ($wired.Status -eq 'Disabled') { $wired | Enable-NetAdapter -Confirm:$false }
     $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$networkScript`" -Configuration `"$configPath`""
     $trigger = New-ScheduledTaskTrigger -AtStartup
@@ -445,11 +438,42 @@ try {
     }
 
     $arguments = @('--lecteur', $player)
-    if ($EmpreinteRegie) { $arguments += @('--empreinte-regie', $EmpreinteRegie, '--acces-deja-prepare') }
+    if ($EmpreinteRegie) { $arguments += @('--empreinte-regie', $EmpreinteRegie) }
+    if ($prepareDesktop) { $arguments += '--acces-deja-prepare' }
     if ($paired) { $arguments += @('--mettre-a-jour', $Regie.AbsoluteUri) }
     else { $arguments += @($Regie.AbsoluteUri, $Code) }
     & $python (Join-Path $PSScriptRoot 'installer-client-windows.py') @arguments
     if ($LASTEXITCODE -ne 0) { throw 'Installation ou association du lecteur Windows impossible.' }
+    if ($previous) {
+        try {
+            $otherAdapters = Get-NetAdapter -IncludeHidden | Where-Object {
+                [string]$_.InterfaceGuid -in @($previous.wired, $previous.wifi) -and
+                $_.ifIndex -notin @($wired.ifIndex, $wireless.ifIndex)
+            }
+            foreach ($adapter in $otherAdapters) {
+                foreach ($store in @('PersistentStore', 'ActiveStore')) {
+                    if ($previous.address) {
+                        Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -IPAddress $previous.address -PolicyStore $store -ErrorAction SilentlyContinue |
+                            Where-Object PrefixOrigin -eq 'Manual' | Remove-NetIPAddress -Confirm:$false
+                    }
+                    if ($previous.gateway) {
+                        Get-NetRoute -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -NextHop $previous.gateway -PolicyStore $store -ErrorAction SilentlyContinue |
+                            Where-Object Protocol -eq 'NetMgmt' | Remove-NetRoute -Confirm:$false
+                    }
+                }
+            }
+            if ($previous.profile -match '^SOUNDLIVE[- ]WIFI$') {
+                $previousWifi = Get-NetAdapter -IncludeHidden | Where-Object { [string]$_.InterfaceGuid -eq $previous.wifi }
+                if ($previousWifi -and $previousWifi.Name -notmatch '[*?]' -and
+                    ($previousWifi.ifIndex -ne $wireless.ifIndex -or $previous.profile -ine $wifiName)) {
+                    & netsh.exe wlan delete profile "name=$($previous.profile)" "interface=$($previousWifi.Name)" | Out-Null
+                    if ($LASTEXITCODE -ne 0) { Write-Warning 'La suppression de l ancien profil Wi-Fi SoundLive a echoue.' }
+                }
+            }
+        } catch {
+            Write-Warning "Nettoyage de l ancienne configuration SoundLive incomplet : $($_.Exception.Message)"
+        }
+    }
     if ($CleSsh -or $EmpreinteRegie) {
         Write-Host "Cible SSH : $env:USERNAME@$address"
         Write-Host 'Empreinte de ce lecteur :'

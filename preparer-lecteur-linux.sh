@@ -47,7 +47,7 @@ if [[ ${1:-} == appliquer ]]; then
     trap cleanup EXIT
     profiles=$(mktemp)
     trap 'rm -f -- "$profiles"; cleanup' EXIT
-    old_uuid=$(sudo cat /etc/soundlive-ndi-network.conf 2>/dev/null | tail -n 2 || true)
+    sudo cat /etc/soundlive-ndi-network.conf 2>/dev/null | tail -n 2 > "$2.anciens" || true
     eth_name="SOUNDLIVE-ETHERNET"
     wifi_name="SOUNDLIVE-WIFI"
     "${nm[@]}" connection add type ethernet ifname "$eth" con-name "$eth_name" \
@@ -82,12 +82,7 @@ if [[ ${1:-} == appliquer ]]; then
     sudo systemctl daemon-reload
     sudo systemctl enable --now soundlive-ndi-network.timer
     sudo systemctl start soundlive-ndi-network.service
-    # Only delete the profiles previously created by this provisioner.
-    while IFS= read -r profile; do
-        if [[ $profile =~ ^[a-f0-9-]{36}$ ]]; then
-            "${nm[@]}" connection delete uuid "$profile" >/dev/null 2>&1 || true
-        fi
-    done <<< "$old_uuid"
+    cp -- "$profiles" "$2.actifs"
     sudo hostnamectl set-hostname "$hote"
     if grep -Eq '^127\.0\.1\.1[[:space:]]' /etc/hosts; then
         sudo sed -i -E "s/^(127\.0\.1\.1[[:space:]]+)[^[:space:]]+/\\1$hote/" /etc/hosts
@@ -328,14 +323,15 @@ if $dhcp; then
     fi
 fi
 
-if [[ -n ${SOUNDLIVE_INSTALL_FINGERPRINT:-} || -n $ssh_public ]]; then
+if [[ -n $code || -n ${SOUNDLIVE_INSTALL_FINGERPRINT:-} ]] || $desktop_remote; then
+    source "$base/installation-lecteur-linux.sh"
+    prepare_remote_access "$base" "$kind"
+    export SOUNDLIVE_REMOTE_ACCESS_PREPARED=1
+elif [[ -n $ssh_public ]]; then
     bash "$base/installer-ssh-linux.sh" installer
 fi
 if [[ -n $ssh_public ]]; then
     bash "$base/installer-ssh-linux.sh" autoriser "$ssh_public"
-fi
-if $desktop_remote || [[ -n ${SOUNDLIVE_INSTALL_FINGERPRINT:-} ]]; then
-    bash "$base/installer-bureau-distant-linux.sh" "$kind"
 fi
 export SOUNDLIVE_INSTALL_REGIE="$regie"
 
@@ -346,6 +342,11 @@ if [[ -n $code ]]; then
     bash "$base/installer-client.sh" --plateforme "$kind" "$regie" "$code"
 else
     bash "$base/installer-client.sh" --plateforme "$kind" --mettre-a-jour "$regie"
+fi
+source "$base/installation-lecteur-linux.sh"
+mapfile -t network < "$SOUNDLIVE_NETWORK_PREPARATION.actifs"
+if ! clean_reader_profiles "$(cat "$SOUNDLIVE_NETWORK_PREPARATION.anciens")" "${network[2]}" "${network[3]}"; then
+    printf 'Impossible de vérifier les profils réseau à nettoyer.\n' >&2
 fi
 if [[ -n $ssh_public ]]; then
     printf 'Cible SSH : %s@%s\nEmpreinte de ce lecteur :\n' "$(id -un)" "${ip%/*}"

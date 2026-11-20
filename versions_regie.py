@@ -37,7 +37,8 @@ FILES = frozenset((
     "installer-ssh-linux.sh",
     "regie-internet.py", "regie-internet-windows.ps1", "regie_dhcp.py", "regie_reseau.py",
     "terminal.html", "terminal_ssh.py", "installer-bureau-distant-linux.sh", "installer-bureau-distant-windows.ps1",
-    "installer-ssh-windows.ps1",
+    "installer-ssh-windows.ps1", "installation-lecteur-linux.sh", "installer-regie-linux.sh",
+    "installer-regie-windows.cmd", "installer-regie-windows.ps1",
     "soundlive-ndi-network-static.sh", "soundlive-ndi-network-windows.ps1",
     "soundlive-ndi-network.service", "soundlive-ndi-network.timer",
     "installer-pi.sh", "installer-ubuntu.sh", "lecteur-ndi-ubuntu.c", "compiler-lecteur-windows.ps1",
@@ -62,6 +63,10 @@ def required_files(version):
         files.add("regie_dhcp.py")
     if version >= (1, 4, 66):
         files.update(("regie_reseau.py", "regie-internet.py", "regie-internet-windows.ps1"))
+    if version >= (1, 4, 67):
+        files.update(("installation-lecteur-linux.sh", "installer-regie-linux.sh", "installer-regie-windows.cmd",
+                      "installer-regie-windows.ps1", "installer-bureau-distant-linux.sh",
+                      "installer-bureau-distant-windows.ps1", "installer-ssh-windows.ps1"))
     return files
 
 

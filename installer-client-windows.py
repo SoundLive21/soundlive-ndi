@@ -67,7 +67,7 @@ while ($true) {
     register = rf"""
 $ErrorActionPreference = 'Stop'
 $name = 'SoundLive-NDI Network'
-$static = Join-Path $env:ProgramFiles 'SoundLive-NDI\Network\configuration.json'
+$static = Join-Path $env:ProgramFiles 'soundlive-ndi\Network\configuration.json'
 if (Test-Path -LiteralPath $static) {{ throw 'La bascule IPv4 fixe est deja configuree.' }}
 $existing = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
 if ($existing -and $existing.State -eq 'Running') {{ Stop-ScheduledTask -TaskName $name }}
@@ -95,16 +95,33 @@ def locate_dll(name, runtime=None):
     return next((path / name for path in locations if (path / name).is_file()), None)
 
 
-def install_regie_access(server, fingerprint, app, prepared):
+def migrate_reader_data(current, legacy):
+    pairing = "config/association.json"
+    if (current / pairing).is_file() or not (legacy / pairing).is_file():
+        return
+    if current.exists():
+        raise OSError(f"Le dossier {current} existe sans association. Sauvegarde-le et déplace-le avant de reprendre l’ancien lecteur.")
+    with TemporaryDirectory(dir=current.parent, prefix="soundlive-ndi-migration-") as folder:
+        staging = Path(folder) / "soundlive-ndi"
+        staging.mkdir()
+        for name in ("client", "config", "state"):
+            if (legacy / name).is_dir():
+                shutil.copytree(legacy / name, staging / name)
+        staging.rename(current)
+
+
+def remote_access_command():
     if not ctypes.windll.shell32.IsUserAnAdmin():
         raise OSError("Ouvre PowerShell en administrateur sous le compte du lecteur.")
     powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
-    command = [str(powershell), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
+    return [str(powershell), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
+
+
+def install_regie_access(server, fingerprint, app):
+    command = remote_access_command()
     with TemporaryDirectory() as folder:
         keys = Path(folder)
         fetch_keys(server, fingerprint, keys)
-        if not prepared:
-            subprocess.run([*command, str(ROOT / "installer-bureau-distant-windows.ps1"), "-ActiverRdp"], check=True)
         subprocess.run([*command, str(ROOT / "installer-ssh-windows.ps1"), "-CleSsh", str(keys / SSH_PUBLIC)],
                        check=True)
         ssh_keygen("-lf", keys / PUBLIC_KEY)
@@ -138,14 +155,16 @@ def main():
         import tkinter
     except ImportError as error:
         cli.error(f"Installe Python pour Windows avec Tcl/Tk. {error}")
-    from ecran import PAIRING, WINDOWS_DATA
+    from ecran import WINDOWS_CURRENT_DATA, WINDOWS_LEGACY_DATA
 
-    app = WINDOWS_DATA / "client"
-    if args.mettre_a_jour and not PAIRING.is_file():
+    migrate_reader_data(WINDOWS_CURRENT_DATA, WINDOWS_LEGACY_DATA)
+    pairing = WINDOWS_CURRENT_DATA / "config/association.json"
+    app = WINDOWS_CURRENT_DATA / "client"
+    if args.mettre_a_jour and not pairing.is_file():
         cli.error("Aucune association. Utilise la commande donnée par la régie.")
     if not args.empreinte_regie and (ROOT / PUBLIC_KEY).is_file() and not ssh_keygen_path():
         cli.error("Active le client OpenSSH de Windows avant de configurer les mises à jour signées.")
-    if not args.mettre_a_jour and PAIRING.is_file():
+    if not args.mettre_a_jour and pairing.is_file():
         cli.error("Ce lecteur est déjà associé. Utilise --mettre-a-jour.")
     installed = app / "lecteur-ndi-windows.exe"
     player = args.lecteur if args.lecteur.is_file() else installed
@@ -163,8 +182,11 @@ def main():
     if player != installed:
         shutil.copy2(player, installed)
     subprocess.run([str(installed), "--sources"], check=True, timeout=15)
+    if not args.acces_deja_prepare and (not args.mettre_a_jour or args.empreinte_regie):
+        command = remote_access_command()
+        subprocess.run([*command, str(ROOT / "installer-bureau-distant-windows.ps1"), "-ActiverRdp"], check=True)
     if args.empreinte_regie:
-        install_regie_access(args.serveur, args.empreinte_regie, app, args.acces_deja_prepare)
+        install_regie_access(args.serveur, args.empreinte_regie, app)
     command = ["verifier"] if args.mettre_a_jour else ["associer"]
     command.extend(value for value in (args.serveur, args.code) if value)
     subprocess.run([sys.executable, "-B", str(ROOT / "ecran.py"), *command], check=True)

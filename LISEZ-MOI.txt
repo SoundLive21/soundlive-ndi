@@ -3,15 +3,13 @@ SoundLive-NDI
 Auteur : DUVERNOY Matthieu & ChatGPT
 contact@soundlive.fr
 Société SoundLive
-Régie 1.4.55 · Lecteurs 1.4.28
+Régie 1.4.67 · Lecteurs 1.4.32
 
 1. SUR LE PC WINDOWS QUI DIFFUSE AVEC OBS
-   Ferme l’ancien tableau et décompresse tout le ZIP dans le dossier de
-   la régie. Garde ecrans.json, .soundlive-update et .soundlive-acces.
-   Double-clique sur SoundLive-NDI.exe (Windows 64 bits). Le lanceur
-   utilise Python 3 déjà installé, avec le composant Tcl/Tk. Il permet
-   de démarrer et d’arrêter la régie, puis d’ouvrir le tableau local.
-   Pour le lancer depuis PowerShell : py -3 regie-windows.py
+   Ferme l’ancienne régie, décompresse le kit et double-clique sur
+   installer-regie-windows.cmd. L’installateur prépare Python, les raccourcis
+   et les accès distants. Le dossier s’appelle soundlive-ndi. Pour reprendre
+   les données d’une régie portable, voir l’option -Depuis dans README.md.
 
    Démarrage en console :
    Décompresse le ZIP. Installe Python 3 si nécessaire (https://www.python.org/downloads/windows/).
@@ -21,13 +19,12 @@ Régie 1.4.55 · Lecteurs 1.4.28
    le PC, vérifie que le port TCP 8765 est autorisé sur ce réseau.
    L'adresse des Pi et la source apparaîtront après leur association.
 
-RÉGIE SOUS UBUNTU DESKTOP
+RÉGIE SOUS UBUNTU DESKTOP OU RASPBERRY PI OS 64 BITS
 
    Depuis la session graphique, décompresse le même ZIP, ouvre un terminal
-   dans le dossier SoundLive-NDI et lance ces commandes.
+   dans le dossier soundlive-ndi et lance :
 
-     sudo apt install python3-tk python3-cryptography openssh-client
-     bash demarrer-regie-ubuntu.sh
+     bash installer-regie-linux.sh
 
    Le lanceur utilise le port TCP 8765 pour les récepteurs et le tableau
    local, et le port 8766 pour l’accès HTTPS. Si tu changes de PC de régie,
@@ -113,7 +110,7 @@ RÉGIE SOUS UBUNTU DESKTOP
    Utilise le réseau local de la prestation : le lien entre le PC et les Pi
    est en HTTP. Ne redirige pas le port 8765 sur Internet.
    Sur le Pi, pour vérifier la connexion et l’association depuis le compte soundlive :
-     python3 ~/.local/share/soundlive-ecrans/ecran.py verifier
+     python3 ~/.local/share/soundlive-ndi/ecran.py verifier
    HTTP 404 « Écran inconnu » ou HTTP 403 « Réassocie le récepteur » : cherche le
    fichier ecrans.json du tableau d’origine et redémarre le tableau avec ce fichier.
    Si la vérification réussit et que le Pi reste hors ligne après redémarrage,
@@ -146,7 +143,7 @@ RÉGIE SOUS UBUNTU DESKTOP
      NDI_SDK_ARCHIVE="$HOME/Téléchargements/Install_NDI_SDK_v6_Linux.tar.gz" bash installer-ubuntu.sh http://192.168.10.20:8765 CODE
 
    Pour lancer tout de suite, depuis le bureau du portable :
-     ~/.local/share/soundlive-ecrans/demarrer-ubuntu
+     ~/.local/share/soundlive-ndi/demarrer-ubuntu
    Pour démarrer avec le PC, active « Connexion automatique » pour ce compte
    dans Paramètres > Système > Utilisateurs. Le kit lance le lecteur à
    l’ouverture de sa session graphique.
@@ -249,7 +246,7 @@ RÉGIE SOUS UBUNTU DESKTOP
    revenir en ligne avec « v1.4.14 · Dernière version » en vert.
    Si la fiche indique « Installation locale requise » et que le lecteur
    utilise déjà lancer-client.py, vérifie la présence de ssh-keygen, copie
-   regie-update.pub dans ~/.local/share/soundlive-ecrans/ et rouvre la session.
+   regie-update.pub dans ~/.local/share/soundlive-ndi/ et rouvre la session.
    Pour un lecteur sans lanceur, amorce la mise à jour distante avec l’ancien
    kit et la clé publique via les instructions d’installation ci-dessus.
    Installer directement le nouveau client en local le met déjà à jour.
