@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.68** et le client **1.4.33**.
+Ce kit contient la régie **1.4.69** et le client **1.4.34**.
 
 ## Installer et lancer la régie
 
@@ -60,12 +60,13 @@ lecteurs associés, y compris ceux qui se reconnectent plus tard. Utilise le
 bouton **Masquer** correspondant pour retirer l’encadré. L’identification est
 distincte des réglages de lecture.
 
-Mets à jour les lecteurs en **1.4.33**. Sur Ubuntu Wayland, si la fiche indique
-que le moteur NDI ne prend pas en charge l’identification, mets aussi à jour le
-rendu avec `bash installer-ubuntu.sh --mettre-a-jour-rendu`. Sur Raspberry Pi OS
-Wayland, le paquet `gir1.2-gtklayershell-0.1` permet l’affichage par le
-compositeur compatible. FFplay peut afficher l’encadré avec le filtre
-`drawtext` quand le compositeur ne prend pas en charge la surcouche.
+Mets à jour les lecteurs en **1.4.34**. Pour réparer un lecteur qui signale
+un problème d’identification, utilise `bash installer-client.sh --plateforme pi --reparer-identification`
+sur un Raspberry Pi. Sur Ubuntu, remplace `pi` par `ubuntu`. La commande
+détecte le moteur utilisé au démarrage, installe la surcouche GTK pour un Pi
+en FFplay ou met à jour le client et le moteur SDL. Rouvre ensuite la session
+graphique ou redémarre le lecteur. FFplay peut afficher l’encadré avec le
+filtre `drawtext` quand le compositeur ne prend pas en charge la surcouche.
 
 ### Piloter depuis un autre PC, une tablette ou un téléphone
 

@@ -91,6 +91,33 @@ if [[ -z $kind ]]; then
         kind=ubuntu
     fi
 fi
+desktop="${XDG_CONFIG_HOME:-$HOME/.config}/autostart/ndi-ecran.desktop"
+if [[ ${1:-} == --reparer-identification && $# -eq 1 ]]; then
+    if (( EUID == 0 )); then
+        echo 'Lance cette réparation depuis le compte du lecteur, sans sudo.' >&2
+        exit 1
+    fi
+    case "$kind" in
+        pi|ubuntu) ;;
+        *) echo "Plateforme attendue : pi ou ubuntu." >&2; exit 2 ;;
+    esac
+    if [[ ! -r ${XDG_CONFIG_HOME:-$HOME/.config}/soundlive-ndi/association.json ]]; then
+        echo 'Ce compte ne possède pas d’association de lecteur.' >&2
+        exit 1
+    fi
+    source "$base/installation-lecteur-linux.sh"
+    if ! installed_sdl_directory "$HOME/.local/share" "$desktop" >/dev/null && [[ $kind == pi ]]; then
+        echo 'Moteur FFplay : installation de la surcouche GTK pour Raspberry Pi OS Wayland.'
+        sudo apt-get update
+        sudo apt-get install -y gir1.2-gtklayershell-0.1
+        exec bash "$base/installer-pi.sh" --mettre-a-jour
+    fi
+    echo 'Moteur SDL : mise à jour du client et du moteur d’affichage.'
+    export SOUNDLIVE_DEVICE_KIND="$kind"
+    export SOUNDLIVE_REPAIR_IDENTIFICATION=1
+    bash "$base/installer-ubuntu.sh" --mettre-a-jour-client
+    exec bash "$base/installer-ubuntu.sh" --mettre-a-jour-rendu
+fi
 network_options=()
 fingerprint=
 while (( $# )); do
@@ -140,6 +167,17 @@ if [[ -n $fingerprint ]]; then
 fi
 case "$kind" in
     pi)
+        if [[ ${1:-} == --mettre-a-jour* ]]; then
+            source "$base/installation-lecteur-linux.sh"
+            if installed_sdl_directory "$HOME/.local/share" "$desktop" >/dev/null; then
+                export SOUNDLIVE_DEVICE_KIND=pi
+                exec bash "$base/installer-ubuntu.sh" "$@"
+            fi
+        fi
+        if [[ ${1:-} == --mettre-a-jour-rendu ]]; then
+            echo 'Pour un Pi sous FFplay, utilise --reparer-identification.' >&2
+            exit 2
+        fi
         if [[ -x /opt/ndi-pi/bin/ffplay && -r /opt/ndi-pi/lib/libndi.so.6 ]]; then
             exec bash "$base/installer-pi.sh" "$@"
         fi

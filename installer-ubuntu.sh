@@ -45,14 +45,17 @@ for file in ecran.py commun.py diagnostic.py mise_a_jour.py lancer-client.py; do
         exit 1
     fi
 done
-if $render_only && [[ ! -e "$HOME/.local/share/soundlive-ndi" && -d "$HOME/.local/share/soundlive-ecrans" ]]; then
-    app="$HOME/.local/share/soundlive-ecrans"
-else
-    source "$here/installation-lecteur-linux.sh"
-    app=$(player_directory "$HOME/.local/share")
-fi
+source "$here/installation-lecteur-linux.sh"
 config_dir="${XDG_CONFIG_HOME:-$HOME/.config}"
 autostart="$config_dir/autostart"
+if $render_only || { $client_only && [[ ${SOUNDLIVE_REPAIR_IDENTIFICATION:-} == 1 ]]; }; then
+    if ! app=$(installed_sdl_directory "$HOME/.local/share" "$autostart/ndi-ecran.desktop"); then
+        echo 'Moteur SDL introuvable sur ce compte. Pour un lecteur Pi sous FFplay, utilise --reparer-identification.' >&2
+        exit 1
+    fi
+else
+    app=$(player_directory "$HOME/.local/share")
+fi
 association="$config_dir/soundlive-ndi/association.json"
 if $update && [[ ! -r "$association" ]]; then
     echo "Ce compte n’a pas encore d’association. Utilise le code du tableau SoundLive-NDI."
@@ -220,13 +223,17 @@ if $render_only; then
     fi
     install -m 755 "$temp/lecteur-ndi-ubuntu" "$app/.lecteur-ndi-ubuntu.new"
     if ! preview_check=$("$app/.lecteur-ndi-ubuntu.new" --apercu-interne) ||
-        [[ $preview_check != apercu-interne ]]; then
+        [[ $preview_check != apercu-interne ]] ||
+        ! identification_check=$("$app/.lecteur-ndi-ubuntu.new" --identification) ||
+        [[ $identification_check != identification ]]; then
         rm -f -- "$app/.lecteur-ndi-ubuntu.new"
         echo "Le nouveau moteur ne démarre pas avec le runtime NDI installé. Lance la mise à jour complète avec --mettre-a-jour."
         exit 1
     fi
     mv -fT "$app/.lecteur-ndi-ubuntu.new" "$app/lecteur-ndi-ubuntu"
-    echo "Moteur d’affichage mis à jour. Pousse ensuite le nouveau client depuis la régie."
+    mkdir -p "$app/.versions"
+    touch "$app/.versions/moteur-local"
+    echo "Moteur d’affichage mis à jour dans $app. Rouvre la session graphique ou redémarre le lecteur."
     exit 0
 fi
 "$temp/lecteur-ndi-ubuntu" --sources >/dev/null || {

@@ -33,6 +33,22 @@ from commun import (APP_NAME, COPYRIGHT, DEFAULT_SOURCE, MEDIA_CHUNK, MEDIA_DISK
 from diagnostic import Diagnostic
 from mise_a_jour import ClientUpdate, FULL_LIMIT, RESTART, digest, engine_name, ssh_keygen_path, update_target
 
+
+def native_player_path(app, client_dir, filename, linux_sdl=False):
+    local = app / filename
+    signed = client_dir / filename
+    if not signed.is_file():
+        return local
+    if linux_sdl and signed != local and local.is_file():
+        try:
+            rebuilt = (app / ".versions/moteur-local").stat().st_mtime_ns
+            if rebuilt >= signed.stat().st_mtime_ns:
+                return local
+        except OSError:
+            pass
+    return signed
+
+
 HOME = Path.home()
 WINDOWS = sys.platform == "win32"
 WINDOWS_LOCAL_DATA = Path(os.environ.get("LOCALAPPDATA", HOME / "AppData/Local"))
@@ -55,8 +71,7 @@ DEVICE_KIND = "windows" if WINDOWS else os.environ.get("SOUNDLIVE_DEVICE_KIND", 
 PLAYER = NDI / "bin/ffplay"
 if WINDOWS or UBUNTU:
     filename = "lecteur-ndi-windows.exe" if WINDOWS else "lecteur-ndi-ubuntu"
-    staged_player = CLIENT_DIR / filename
-    PLAYER = staged_player if staged_player.is_file() else APP / filename
+    PLAYER = native_player_path(APP, CLIENT_DIR, filename, linux_sdl=UBUNTU)
 PLAYER = str(PLAYER)
 if UBUNTU:
     os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(filter(None, (str(APP / "lib"), os.environ.get("LD_LIBRARY_PATH"))))
@@ -1462,6 +1477,7 @@ def desktop():
             self.identification_files = (None, None)
             self.identification_probes = {}
             self.identification_monitor = None
+            self.identification_reason = ""
             self.identification_badge = self.make_identification_badge()
             badge, _, _ = self.identification_badge
             badge.set_halign(Gtk.Align.END)
@@ -1672,12 +1688,13 @@ def desktop():
                 elif labels and not waiting:
                     visible = bool(route)
                     if not visible:
-                        error = "Le moteur de lecture actif ne prend pas en charge l’identification."
+                        error = self.identification_reason or "Identification indisponible avec ce moteur de lecture."
             except (OSError, RuntimeError, ImportError, AttributeError, ValueError, GLib.Error) as failure:
                 error = str(failure)
             self.identification_state = {"visible": visible, "error": error}
 
         def identification_video(self, command, native):
+            self.identification_reason = ""
             if self.identification_popup:
                 return None
             program = command[0]
@@ -1687,11 +1704,14 @@ def desktop():
                     probe = subprocess.run([program, "--identification"] if native else [program, "-filters"],
                                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=3)
                     supported = not probe.returncode and (probe.stdout.strip() == b"identification" if native
-                                                          else re.search(rb"\bdrawtext\s+V->V\b", probe.stdout))
+                        else re.search(rb"(?m)^\s*(?:[.A-Z]+\s+)?drawtext(?:\s|$)", probe.stdout))
                 except (OSError, subprocess.SubprocessError):
                     supported = False
                 self.identification_probes[signature] = supported
             if not self.identification_probes[signature]:
+                self.identification_reason = ("Le moteur SDL actif doit être mis à jour pour l’identification." if native else
+                    "FFplay ne fournit pas drawtext et la surcouche du bureau est indisponible.")
+                print(f"Identification : {self.identification_reason} Moteur : {program}", file=self.log)
                 return None
             if native:
                 return "texture"

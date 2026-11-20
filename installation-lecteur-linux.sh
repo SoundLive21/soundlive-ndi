@@ -17,6 +17,26 @@ player_directory() {
     printf '%s\n' "$current"
 }
 
+installed_sdl_directory() {
+    local parent=$1 autostart=$2 app
+    for app in "$parent/soundlive-ndi" "$parent/soundlive-ecrans"; do
+        if [[ -r $autostart ]] && grep -Fxq -e "Exec=\"$app/demarrer-ubuntu\"" -e "Exec=$app/demarrer-ubuntu" "$autostart"; then
+            printf '%s\n' "$app"
+            return
+        fi
+    done
+    if [[ -r $autostart ]] && grep -Eq '^Exec=.*[/]lancer-client\.py(["[:space:]]|$)' "$autostart"; then
+        return 1
+    fi
+    for app in "$parent/soundlive-ndi" "$parent/soundlive-ecrans"; do
+        if [[ -x $app/lecteur-ndi-ubuntu && -r $app/lib/libndi.so.6 ]]; then
+            printf '%s\n' "$app"
+            return
+        fi
+    done
+    return 1
+}
+
 prepare_remote_access() {
     local kit=$1 platform=$2
     bash "$kit/installer-ssh-linux.sh" configurer
