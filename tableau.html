@@ -183,7 +183,9 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .regie-system .metric.disk{grid-column:auto;display:grid}
 .regie-system .metric.disk strong{margin-inline-start:0}
 .regie-system .disk-free{grid-column:1/-1}
-.regie-details{grid-column:1/-1}
+.regie-details{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px}
+button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-color:#ed7788;background:#571f2b;color:#fff}
+.identify-feedback{margin:0}
 @media(max-width:460px){
   .regie-system .metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
   #regie-latency{grid-column:1/-1;display:flex}
@@ -278,6 +280,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
     <div class="regie-details">
       <button type="button" id="regie-system-open">Informations système de la régie</button>
       <button type="button" id="network-open">Gestion réseau</button>
+      <button type="button" id="identify-all" aria-pressed="false" disabled>Identifier tous les écrans</button>
     </div>
   </section>
   <details class="preview-section" id="source-previews">
@@ -630,6 +633,8 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
   <article>
     <div class="card-heading"><h2></h2><span class="badge"></span></div>
     <div class="device-meta"><span class="device-kind"></span><span class="address"></span><span class="client-release"></span></div>
+    <div class="actions"><button type="button" class="identify" aria-pressed="false" hidden>Identifier</button></div>
+    <p class="small identify-feedback" hidden></p>
     <div class="metrics" hidden>
       <button type="button" class="metric connection" aria-label="Informations réseau et test de latence">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9a15 15 0 0 1 18 0M6 13a10 10 0 0 1 12 0m-9 4a5 5 0 0 1 6 0m-3 3h.01"/></svg>
@@ -716,6 +721,33 @@ const connectionsButton = document.querySelector("#open-connections");
 const connectionsDialog = document.querySelector("#remote-connections");
 const dialog = document.querySelector("#pair");
 const cards = new Map();
+const identifyAll = document.querySelector("#identify-all");
+let identifyBusy = false;
+let identifyRows = [];
+function identifyControls() {
+  const active = identifyRows.filter(row => row.identify).length;
+  const all = identifyRows.length > 0 && active === identifyRows.length;
+  identifyAll.disabled = identifyBusy || !identifyRows.length;
+  identifyAll.setAttribute("aria-pressed", all ? "true" : active ? "mixed" : "false");
+  identifyAll.textContent = all ? "Masquer toutes les identifications" : "Identifier tous les écrans";
+  for (const card of cards.values()) {
+    if (card.data) card.ui.identify.disabled = identifyBusy || !card.data.paired;
+  }
+  return all;
+}
+async function changeIdentification(enabled, id) {
+  if (identifyBusy) return;
+  identifyBusy = true;
+  identifyControls();
+  try {
+    await call("/api/identify", {enabled,id});
+    await refresh(true);
+  } finally {
+    identifyBusy = false;
+    identifyControls();
+  }
+}
+identifyAll.onclick = action(() => changeIdentification(!identifyControls()));
 const previewGrid = document.querySelector("#preview-grid");
 const previewCards = new Map();
 const previewAuto = document.querySelector("#preview-auto");
@@ -2454,7 +2486,7 @@ function cardFor(id) {
   const el = document.querySelector("#card").content.firstElementChild.cloneNode(true);
   const form = select(el, ".config");
   const fields = ["ndi-sources","source","bandwidth","volume","orientation","orientation-status","muted","toggle","reboot","poweroff",
-                  "return-ndi","pending","badge","address","error","remove","info","metrics","connection","cpu","ram","disk",
+                  "return-ndi","pending","badge","address","error","remove","info","identify","metrics","connection","cpu","ram","disk",
                   "screen-traffic","rate-rx","rate-tx","traffic-interface-label"];
   const ui = Object.fromEntries(fields.map(key => [key, select(el, "."+key)]));
   ui["orientation-status"].id = "orientation-status-" + id;
@@ -2474,6 +2506,7 @@ function cardFor(id) {
   const mediaButton = select(el, ".manage-media");
   mediaButton.onclick = () => openMediaManager([id]);
   ui["return-ndi"].onclick = action(() => confirmReturnToNdi([{row:card.data}]));
+  ui.identify.onclick = action(() => changeIdentification(!card.data.identify, id));
   card.preview = createPreview(select(el, ".screen-preview"), "Capture de l’écran", id, true);
   const controls = select(el, "details");
   try { controls.open = localStorage.getItem("soundlive-controls-" + id) === "open"; }
@@ -2649,6 +2682,16 @@ function render(row) {
   handle.title = "Déplacer " + row.name + " · Glisser ou utiliser les flèches";
   handle.setAttribute("aria-label",handle.title);
   ui["return-ndi"].hidden = !row.paired || !row.media?.enabled;
+  ui.identify.hidden = !row.paired;
+  ui.identify.setAttribute("aria-pressed", String(row.identify));
+  ui.identify.setAttribute("aria-label", (row.identify ? "Masquer l’identification de " : "Identifier ") + row.name);
+  ui.identify.textContent = row.identify ? "Masquer l’identification" : "Identifier";
+  const identification = select(el, ".identify-feedback");
+  const displayed = row.report.identification;
+  identification.textContent = !row.identify ? "" : !row.online ? "Identification à la reconnexion." :
+    !displayed ? "Mets à jour le lecteur pour afficher l’identification." : displayed.error ||
+    (displayed.visible ? "Identification affichée." : "Identification en cours…");
+  identification.hidden = !identification.textContent;
   select(el, ".manage-media").hidden = !row.paired;
   select(el,"h2").textContent = row.name;
   ui.badge.textContent = row.online ? row.report.state : row.paired ? "Hors ligne" : "À associer";
@@ -2850,6 +2893,8 @@ async function refreshScreens() {
     const ids = new Set(rows.map(row => row.id));
     for (const [id,card] of cards) if (!ids.has(id)) {card.el.remove();cards.delete(id);}
     for (const row of rows) render(row);
+    identifyRows = rows.filter(row => row.paired);
+    identifyControls();
     renderMediaManager();
     positionScreens(rows);
     renderSourceGallery(rows);

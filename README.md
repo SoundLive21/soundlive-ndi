@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.67** et le client **1.4.32**.
+Ce kit contient la régie **1.4.68** et le client **1.4.33**.
 
 ## Installer et lancer la régie
 
@@ -50,6 +50,22 @@ anciens fichiers sont conservés pour permettre un retour arrière.
 Le dossier de la régie contient les associations et les clés. Garde
 `ecrans.json`, `.soundlive-update` et `.soundlive-acces` dans ce dossier pour une
 mise à jour ou un transfert vers un autre PC de régie.
+
+### Identifier les écrans pendant la diffusion
+
+Clique sur **Identifier** dans la fiche d’un écran pour afficher son nom et
+son groupe dans un encadré translucide en bas à droite. Dans l’encadré
+**Régie**, **Identifier tous les écrans** applique la demande à tous les
+lecteurs associés, y compris ceux qui se reconnectent plus tard. Utilise le
+bouton **Masquer** correspondant pour retirer l’encadré. L’identification est
+distincte des réglages de lecture.
+
+Mets à jour les lecteurs en **1.4.33**. Sur Ubuntu Wayland, si la fiche indique
+que le moteur NDI ne prend pas en charge l’identification, mets aussi à jour le
+rendu avec `bash installer-ubuntu.sh --mettre-a-jour-rendu`. Sur Raspberry Pi OS
+Wayland, le paquet `gir1.2-gtklayershell-0.1` permet l’affichage par le
+compositeur compatible. FFplay peut afficher l’encadré avec le filtre
+`drawtext` quand le compositeur ne prend pas en charge la surcouche.
 
 ### Piloter depuis un autre PC, une tablette ou un téléphone
 

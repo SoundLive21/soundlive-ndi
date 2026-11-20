@@ -150,6 +150,9 @@ else
     sudo apt update
     sudo apt install -y gcc binutils pkg-config libsdl2-dev python3 python3-gi python3-gi-cairo gir1.2-gtk-3.0 \
         avahi-daemon libavahi-client3 curl ca-certificates x11-xserver-utils ffmpeg tigervnc-viewer
+    if [[ $SOUNDLIVE_DEVICE_KIND == pi ]] && apt-cache show gir1.2-gtklayershell-0.1 >/dev/null 2>&1; then
+        sudo apt install -y gir1.2-gtklayershell-0.1
+    fi
     sudo systemctl enable --now avahi-daemon
 fi
 

@@ -16,8 +16,10 @@ import shutil
 from pathlib import Path
 import signal
 import socket
+import struct
 import subprocess
 import sys
+import textwrap
 import threading
 import time
 import warnings
@@ -59,6 +61,8 @@ PLAYER = str(PLAYER)
 if UBUNTU:
     os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(filter(None, (str(APP / "lib"), os.environ.get("LD_LIBRARY_PATH"))))
 READY = STATE / "video.prete"
+IDENTIFICATION_TEXT = STATE / "identification.txt"
+IDENTIFICATION_TEXTURE = STATE / "identification.rgba"
 RENDER_PREVIEW = STATE / "apercu-interne"
 BOOT = "windows-" + secrets.token_hex(16) if WINDOWS else Path("/proc/sys/kernel/random/boot_id").read_text().strip()
 REGIE_UNPAIRED = ("Lecteur non associé à la régie", "#ffacb8")
@@ -764,7 +768,8 @@ def display_snapshot_windows(player_pid, capture):
             identifier = device.id.split("\\")
             if len(identifier) > 1 and identifier[0] == "MONITOR" and identifier[1] != "Default_Monitor":
                 model = f"{model} · {identifier[1]}" if model else identifier[1]
-        return dict(width=width, height=height, model=model, connector=monitor.name, capture=True)
+        return dict(width=width, height=height, model=model, connector=monitor.name, capture=True,
+                    bounds=(rect.left, rect.top, width, height))
     w_out, h_out = preview_size(width, height)
     header = c.create_string_buffer(struct.pack("<IiiHHIIiiII", 40, w_out, -h_out, 1, 32, 0, 0, 0, 0, 0, 0))
     dc = user.GetDC(None)
@@ -828,6 +833,29 @@ def waiting_group(details):
     if isinstance(group, str) and 0 < len(group) <= 80 and group.strip() and group.isprintable():
         return f"Groupe · {group.strip()}"
     return ""
+
+
+def identification_labels(reply):
+    details = reply.get("waiting")
+    if reply.get("identify") is not True or not isinstance(details, dict):
+        return None
+    name = details.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    name = "".join(char if char.isprintable() else " " for char in name[:80]).strip()
+    return (name, waiting_group(details) or "Sans groupe") if name else None
+
+
+def replace_overlay_file(path, data):
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_bytes(data)
+    temporary.replace(path)
+
+
+def identification_filter():
+    return (f"drawtext=textfile={IDENTIFICATION_TEXT.name}:reload=1:expansion=none:fontcolor=white:"
+            "fontsize=max(11\\,min(h/32\\,w/34)):box=1:boxcolor=black@0.72:boxborderw=8:"
+            "x=max(8\\,w-tw-20):y=max(8\\,h-th-20)")
 
 
 def waiting_key(identity):
@@ -1411,6 +1439,10 @@ def desktop():
                 .qr-caption {color:#f0dce2;font-size:16px;}
                 .reader-version {color:#dfcbd1;font-size:16px;}
                 .reader-update {color:#ffc78a;font-size:18px;}
+                window.identification-window {background:transparent;}
+                .screen-identification {background:rgba(18,15,19,.80);border-radius:9px;padding:9px 13px;}
+                .screen-identification .name {font-size:18px;font-weight:bold;}
+                .screen-identification .group {font-size:14px;color:#ffd4dc;}
             """)
             Gtk.StyleContext.add_provider_for_screen(self.window.get_screen(), css,
                                                      Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
@@ -1421,7 +1453,26 @@ def desktop():
             self.pages = Gtk.Stack()
             self.waiting_box = box
             self.pages.add_named(box, "waiting")
-            self.window.add(self.pages)
+            layer = Gtk.Overlay()
+            layer.add(self.pages)
+            self.window.add(layer)
+            self.identification = None
+            self.identification_state = {"visible": False, "error": ""}
+            self.identification_output = None
+            self.identification_files = (None, None)
+            self.identification_probes = {}
+            self.identification_monitor = None
+            self.identification_badge = self.make_identification_badge()
+            badge, _, _ = self.identification_badge
+            badge.set_halign(Gtk.Align.END)
+            badge.set_valign(Gtk.Align.END)
+            badge.set_margin_end(18)
+            badge.set_margin_bottom(18)
+            layer.add_overlay(badge)
+            layer.set_overlay_pass_through(badge, True)
+            self.identification_popup = self.make_identification_popup(wayland)
+            replace_overlay_file(IDENTIFICATION_TEXT, b"")
+            IDENTIFICATION_TEXTURE.unlink(missing_ok=True)
             self.image_page = Gtk.Layout()
             self.image_page.get_style_context().add_class("local-image")
             self.local_image = Gtk.Image()
@@ -1493,6 +1544,159 @@ def desktop():
                 Gtk.main_quit()
                 return True
             return False
+
+        def make_identification_badge(self):
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, no_show_all=True)
+            box.get_style_context().add_class("screen-identification")
+            labels = []
+            for role in ("name", "group"):
+                label = Gtk.Label(xalign=0)
+                label.get_style_context().add_class(role)
+                label.set_max_width_chars(35)
+                label.set_ellipsize(Pango.EllipsizeMode.END)
+                box.pack_start(label, False, False, 0)
+                label.show()
+                labels.append(label)
+            return box, *labels
+
+        def make_identification_popup(self, wayland):
+            layer_shell = None
+            if wayland:
+                try:
+                    gi.require_version("GtkLayerShell", "0.1")
+                    from gi.repository import GtkLayerShell
+                    if GtkLayerShell.is_supported():
+                        layer_shell = GtkLayerShell
+                except (ImportError, ValueError):
+                    pass
+                if layer_shell is None:
+                    return None
+            popup = Gtk.Window(type=Gtk.WindowType.TOPLEVEL if wayland else Gtk.WindowType.POPUP,
+                               decorated=False, accept_focus=False, focus_on_map=False)
+            popup.get_style_context().add_class("identification-window")
+            visual = popup.get_screen().get_rgba_visual()
+            if visual:
+                popup.set_visual(visual)
+            popup.connect("realize", lambda widget: widget.get_window().set_pass_through(True))
+            if layer_shell:
+                layer_shell.init_for_window(popup)
+                layer_shell.set_layer(popup, layer_shell.Layer.OVERLAY)
+                for edge in (layer_shell.Edge.BOTTOM, layer_shell.Edge.RIGHT):
+                    layer_shell.set_anchor(popup, edge, True)
+                    layer_shell.set_margin(popup, edge, 18)
+            badge = self.make_identification_badge()
+            popup.add(badge[0])
+            return popup, badge, layer_shell
+
+        def render_identification_texture(self, labels):
+            import cairo
+            gi.require_foreign("cairo")
+            gi.require_version("PangoCairo", "1.0")
+            from gi.repository import PangoCairo
+            layouts = [self.window.create_pango_layout(value) for value in labels]
+            for layout, font in zip(layouts, ("Sans Bold 18", "Sans 14")):
+                layout.set_font_description(Pango.FontDescription(font))
+                if layout.get_pixel_size()[0] > 450:
+                    layout.set_width(450 * Pango.SCALE)
+                    layout.set_ellipsize(Pango.EllipsizeMode.END)
+            dimensions = [layout.get_pixel_size() for layout in layouts]
+            width = max(item[0] for item in dimensions) + 26
+            height = sum(item[1] for item in dimensions) + 20
+            surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
+            context = cairo.Context(surface)
+            context.set_source_rgba(.07, .06, .075, .80)
+            context.paint()
+            top = 9
+            for index, layout in enumerate(layouts):
+                context.move_to(13, top)
+                colour = (1, 1, 1) if index == 0 else (1, .83, .87)
+                context.set_source_rgb(*colour)
+                PangoCairo.show_layout(context, layout)
+                top += dimensions[index][1] + 2
+            pixels = Gdk.pixbuf_get_from_surface(surface, 0, 0, width, height)
+            if pixels is None or not pixels.get_has_alpha():
+                raise RuntimeError("Impossible de préparer l’incrustation du lecteur.")
+            stride = pixels.get_rowstride()
+            rows = pixels.get_pixels()
+            bitmap = b"".join(rows[start:start + width * 4] for start in range(0, stride * height, stride))
+            header = struct.pack("<III", width, height, secrets.randbits(32))
+            replace_overlay_file(IDENTIFICATION_TEXTURE, header + bitmap)
+
+        def refresh_identification(self):
+            labels = self.identification
+            waiting = self.window.get_visible()
+            route = self.identification_output
+            popup = self.identification_popup
+            visible = False
+            error = ""
+            try:
+                text = labels if route == "text" else None
+                texture = labels if route == "texture" else None
+                old_text, old_texture = self.identification_files
+                if text != old_text:
+                    message = "\n".join(textwrap.fill(line, 32) for line in text) if text else ""
+                    replace_overlay_file(IDENTIFICATION_TEXT, message.encode("utf-8"))
+                if texture != old_texture:
+                    if texture:
+                        self.render_identification_texture(texture)
+                    else:
+                        IDENTIFICATION_TEXTURE.unlink(missing_ok=True)
+                self.identification_files = text, texture
+                badge, name, group = self.identification_badge
+                badge.set_visible(bool(labels and waiting))
+                if labels and waiting:
+                    name.set_text(labels[0])
+                    group.set_text(labels[1])
+                    visible = True
+                if popup:
+                    window, (box, name, group), layer_shell = popup
+                    if labels and not waiting:
+                        name.set_text(labels[0])
+                        group.set_text(labels[1])
+                        box.show()
+                        display = self.window.get_display()
+                        monitor = display.get_monitor_at_window(self.window.get_window()) if self.window.get_window() else None
+                        if monitor is None:
+                            monitor = display.get_primary_monitor()
+                        if monitor and layer_shell and monitor != self.identification_monitor:
+                            layer_shell.set_monitor(window, monitor)
+                            self.identification_monitor = monitor
+                        elif monitor and not layer_shell:
+                            area = monitor.get_geometry()
+                            size = box.get_preferred_size()[1]
+                            window.move(area.x + area.width - size.width - 18, area.y + area.height - size.height - 18)
+                        window.show()
+                        visible = True
+                    else:
+                        window.hide()
+                elif labels and not waiting:
+                    visible = bool(route)
+                    if not visible:
+                        error = "Le moteur de lecture actif ne prend pas en charge l’identification."
+            except (OSError, RuntimeError, ImportError, AttributeError, ValueError, GLib.Error) as failure:
+                error = str(failure)
+            self.identification_state = {"visible": visible, "error": error}
+
+        def identification_video(self, command, native):
+            if self.identification_popup:
+                return None
+            program = command[0]
+            signature = (program, native)
+            if signature not in self.identification_probes:
+                try:
+                    probe = subprocess.run([program, "--identification"] if native else [program, "-filters"],
+                                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=3)
+                    supported = not probe.returncode and (probe.stdout.strip() == b"identification" if native
+                                                          else re.search(rb"\bdrawtext\s+V->V\b", probe.stdout))
+                except (OSError, subprocess.SubprocessError):
+                    supported = False
+                self.identification_probes[signature] = supported
+            if not self.identification_probes[signature]:
+                return None
+            if native:
+                return "texture"
+            command[1:1] = ["-vf", identification_filter()]
+            return "text"
 
         def waiting(self):
             text = ("En attente d’un média local" if self.media.enabled else "En attente du flux vidéo")
@@ -1691,10 +1895,14 @@ def desktop():
                     READY.unlink(missing_ok=True)
                     command = [PLAYER, self.settings["source"], self.settings["bandwidth"],
                                str(volume), str(READY)]
+                self.identification_output = self.identification_video(command, UBUNTU and not local)
                 env = None
+                if self.identification_output == "texture":
+                    env = {**os.environ, "SOUNDLIVE_IDENTIFICATION_TEXTURE": str(IDENTIFICATION_TEXTURE)}
                 if not local and self.dashboard and self.dashboard.internal_preview is not None:
-                    env = {**os.environ, "SOUNDLIVE_RENDER_PREVIEW": str(RENDER_PREVIEW)}
-                self.player = subprocess.Popen(command, stdout=self.log, stderr=subprocess.STDOUT, env=env)
+                    env = {**(env or os.environ), "SOUNDLIVE_RENDER_PREVIEW": str(RENDER_PREVIEW)}
+                self.player = subprocess.Popen(command, stdout=self.log, stderr=subprocess.STDOUT, env=env,
+                                               cwd=STATE if self.identification_output == "text" else None)
                 self.active_source = source
                 self.playing_local = local
                 self.video_ready = local or not UBUNTU
@@ -1735,7 +1943,7 @@ def desktop():
                         self.media.finished(status)
                     elif not self.playing_local and UBUNTU and status > 0 and self.stop_at is None:
                         self.error = "Le lecteur NDI a quitté avec une erreur. Consulte gestion.log."
-                    self.player = self.stop_at = None
+                    self.player = self.stop_at = self.identification_output = None
                     self.active_source = None
                     self.playing_local = False
                     self.video_ready = False
@@ -1772,6 +1980,7 @@ def desktop():
             if (self.media.enabled and self.settings["enabled"] and self.player is None and self.local_pixbuf is None
                     and GLib.get_monotonic_time() >= self.retry_at):
                 self.start()
+            self.refresh_identification()
             return GLib.SOURCE_CONTINUE
 
         def poll(self):
@@ -1801,7 +2010,7 @@ def desktop():
             data = dict(id=self.identity["id"], boot=BOOT, state=state, sources=self.sources,
                         active_source=self.active_source if state == "Lecture" else None,
                         error=self.error, can_poweroff=True, media_status=self.media.report(),
-                        local_video=self.playing_local)
+                        local_video=self.playing_local, identification=self.identification_state)
             display_pid = self.player.pid if state == "Lecture" and self.player else 0
             display = self.window.get_display()
             if DEVICE_KIND == "pi" and not self.dashboard.internal_preview_required:
@@ -1834,6 +2043,8 @@ def desktop():
             self.update_label.set_visible(bool(message))
             if self.show_waiting_details(result.get("waiting")):
                 save_waiting_details(self.identity, self.waiting_data, self.log)
+            self.identification = identification_labels(result)
+            self.refresh_identification()
             if new != self.settings:
                 write_json(LAST_SETTINGS, new)
                 playback_changed = new != {**self.settings, "orientation": new["orientation"]}
@@ -1886,6 +2097,8 @@ def desktop():
                 if screen.dashboard:
                     screen.dashboard.close()
                 screen.media.close()
+                IDENTIFICATION_TEXTURE.unlink(missing_ok=True)
+                IDENTIFICATION_TEXT.unlink(missing_ok=True)
             return RESTART if screen.restart_client else 0
 
 
@@ -1901,6 +2114,9 @@ def windows_desktop():
 
 
 def run_windows_screen(tk, log):
+    import ctypes as c
+    from ctypes import wintypes as w
+
     try:
         identity = association()
     except (OSError, ValueError) as error:
@@ -1909,6 +2125,9 @@ def run_windows_screen(tk, log):
     settings = initial_settings()
     client = DashboardClient(identity, settings["orientation"]) if identity else None
     media = LocalMedia(identity)
+    user = c.windll.user32
+    if not hasattr(user, "SetProcessDpiAwarenessContext") or not user.SetProcessDpiAwarenessContext(c.c_void_p(-4)):
+        user.SetProcessDPIAware()
     root = tk.Tk()
     root.title(APP_NAME)
     root.configure(background="#100e11")
@@ -1947,6 +2166,64 @@ def run_windows_screen(tk, log):
     work = ThreadPoolExecutor(max_workers=2)
     flags = subprocess.CREATE_NO_WINDOW
     retry_at = 0
+
+    badge = tk.Toplevel(root, background="#17141a")
+    badge.withdraw()
+    badge.overrideredirect(True)
+    badge.attributes("-topmost", True)
+    badge.attributes("-alpha", .83)
+    badge_labels = tuple(tk.Label(badge, justify="left", background="#17141a", fg=colour,
+                                  font=font, wraplength=420) for colour, font in
+                         (("white", ("Segoe UI", 16, "bold")), ("#ffd4dc", ("Segoe UI", 12))))
+    for label, padding in zip(badge_labels, ((8, 1), (1, 8))):
+        label.pack(anchor="w", padx=13, pady=padding)
+    for function, result, args in (
+        ("GetAncestor", w.HWND, (w.HWND, w.UINT)),
+        ("GetWindowLongW", w.LONG, (w.HWND, c.c_int)),
+        ("SetWindowLongW", w.LONG, (w.HWND, c.c_int, w.LONG)),
+        ("SetWindowPos", w.BOOL, (w.HWND, w.HWND, c.c_int, c.c_int, c.c_int, c.c_int, w.UINT)),
+    ):
+        getattr(user, function).restype, getattr(user, function).argtypes = result, args
+    identification = None
+    identification_state = {"visible": False, "error": ""}
+    badge_target = None
+    next_badge_check = 0
+
+    def refresh_identification(now):
+        nonlocal badge_target, next_badge_check, identification_state
+        if not identification:
+            badge.withdraw()
+            badge_target = None
+            identification_state = {"visible": False, "error": ""}
+            return
+        pid = player.pid if player and ready else 0
+        target = identification, pid
+        if badge_target == target and now < next_badge_check:
+            return
+        badge_target, next_badge_check = target, now + 1
+        try:
+            for label, text in zip(badge_labels, identification):
+                label.configure(text=text)
+            badge.update_idletasks()
+            hwnd = user.GetAncestor(badge.winfo_id(), 2) or badge.winfo_id()
+            style = user.GetWindowLongW(hwnd, -20)
+            # Allow clicks to reach the player and keep the current keyboard focus.
+            user.SetWindowLongW(hwnd, -20, style | 0x080000A0)
+            try:
+                left, top, width, height = display_snapshot_windows(pid, False)["bounds"]
+            except RuntimeError:
+                left, top, width, height = display_snapshot_windows(0, False)["bounds"]
+            badge.deiconify()
+            badge.update_idletasks()
+            x = left + max(0, width - badge.winfo_width() - 18)
+            y = top + max(0, height - badge.winfo_height() - 18)
+            if not user.SetWindowPos(hwnd, w.HWND(-1), x, y, 0, 0, 0x0011):
+                raise RuntimeError("Impossible de placer l’identification sur le moniteur.")
+        except (OSError, RuntimeError, ValueError, tk.TclError) as error:
+            badge.withdraw()
+            identification_state = {"visible": False, "error": str(error)}
+        else:
+            identification_state = {"visible": True, "error": ""}
 
     def show_regie_state(state):
         text, color = state
@@ -2003,7 +2280,7 @@ def run_windows_screen(tk, log):
     def update():
         nonlocal request, discovery, next_poll, next_probe, player, settings, sources
         nonlocal failure, restart, ready, power_id, retry_at
-        nonlocal playing_local, local_name
+        nonlocal playing_local, local_name, identification
         now = time.monotonic()
         try:
             if media.tick():
@@ -2023,6 +2300,7 @@ def run_windows_screen(tk, log):
                             stop_player()
                     if show_waiting_details(answer.get("waiting")):
                         save_waiting_details(identity, waiting_data, log)
+                    identification = identification_labels(answer)
                     show_regie_state(REGIE_CONNECTED)
                     notice.configure(text=waiting_update_message(answer.get("reader_update")))
                     if client.can_update:
@@ -2087,6 +2365,7 @@ def run_windows_screen(tk, log):
                                               stdout=log, stderr=subprocess.STDOUT, creationflags=flags)
             if not ready:
                 show_waiting()
+            refresh_identification(now)
             if not media.enabled and not discovery and now >= next_probe:
                 discovery = work.submit(discover)
                 next_probe = now + 5
@@ -2096,7 +2375,7 @@ def run_windows_screen(tk, log):
                 request = work.submit(client.poll, dict(id=identity["id"], boot=BOOT, state=state,
                     sources=sources, active_source=source if ready else None,
                     error=failure, can_poweroff=True, can_reboot=True,
-                    local_video=playing_local, media_status=media.report()),
+                    local_video=playing_local, media_status=media.report(), identification=identification_state),
                     player.pid if state == "Lecture" and player else os.getpid())
                 next_poll = now + 2
         except (OSError, ValueError, subprocess.SubprocessError) as error:

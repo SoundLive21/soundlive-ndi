@@ -3,7 +3,7 @@ SoundLive-NDI
 Auteur : DUVERNOY Matthieu & ChatGPT
 contact@soundlive.fr
 Société SoundLive
-Régie 1.4.67 · Lecteurs 1.4.32
+Régie 1.4.68 · Lecteurs 1.4.33
 
 1. SUR LE PC WINDOWS QUI DIFFUSE AVEC OBS
    Ferme l’ancienne régie, décompresse le kit et double-clique sur

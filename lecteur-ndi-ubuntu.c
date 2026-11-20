@@ -83,7 +83,47 @@ static SDL_Rect fitted_frame(int width, int height, const NDIlib_video_frame_v2_
     return rect;
 }
 
+struct identification_badge {
+    SDL_Texture *texture;
+    Uint32 revision;
+    int width;
+    int height;
+};
+
+static void load_identification(SDL_Renderer *renderer, const char *path,
+                                struct identification_badge *badge)
+{
+    SDL_RWops *file = SDL_RWFromFile(path, "rb");
+    if (!file) {
+        SDL_DestroyTexture(badge->texture);
+        badge->texture = NULL;
+        return;
+    }
+    const Uint32 width = SDL_ReadLE32(file);
+    const Uint32 height = SDL_ReadLE32(file);
+    const Uint32 revision = SDL_ReadLE32(file);
+    if (width && width <= 600 && height && height <= 140 &&
+        (!badge->texture || revision != badge->revision)) {
+        const size_t length = width * height * 4;
+        void *pixels = SDL_malloc(length);
+        if (pixels && SDL_RWread(file, pixels, 1, length) == length) {
+            SDL_Texture *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
+                                                     SDL_TEXTUREACCESS_STATIC, width, height);
+            if (texture && SDL_UpdateTexture(texture, NULL, pixels, width * 4) == 0 &&
+                SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND) == 0) {
+                SDL_DestroyTexture(badge->texture);
+                *badge = (struct identification_badge){texture, revision, width, height};
+            } else {
+                SDL_DestroyTexture(texture);
+            }
+        }
+        SDL_free(pixels);
+    }
+    SDL_RWclose(file);
+}
+
 static int display_frame(SDL_Renderer *renderer, SDL_Texture **texture,
+                         const struct identification_badge *badge,
                          const NDIlib_video_frame_v2_t *frame)
 {
     int width = 0, height = 0;
@@ -111,6 +151,15 @@ static int display_frame(SDL_Renderer *renderer, SDL_Texture **texture,
     const SDL_Rect dst = fitted_frame(output_width, output_height, frame);
     if (SDL_RenderClear(renderer) < 0 || SDL_RenderCopy(renderer, *texture, NULL, &dst) < 0)
         return -1;
+    if (badge->texture) {
+        const int margin = SDL_max(8, output_height / 60);
+        const double scale = SDL_min(output_height / 900.0,
+                                     (output_width - 2 * margin) / (double)badge->width);
+        const int width = SDL_max(1, (int)(badge->width * scale));
+        const int height = SDL_max(1, (int)(badge->height * scale));
+        const SDL_Rect corner = {output_width - width - margin, output_height - height - margin, width, height};
+        SDL_RenderCopy(renderer, badge->texture, NULL, &corner);
+    }
     SDL_RenderPresent(renderer);
     return 0;
 }
@@ -236,6 +285,9 @@ static int play(const char *source, bool low, float volume, const char *ready_fi
     Uint64 last_frame = SDL_GetTicks64();
     Uint64 next_draw = 0;
     int refresh_rate = 60;
+    const char *identification = getenv("SOUNDLIVE_IDENTIFICATION_TEXTURE");
+    struct identification_badge badge = {0};
+    Uint64 next_identification = 0;
 #ifndef _WIN32
     const char *preview = getenv("SOUNDLIVE_RENDER_PREVIEW");
     Uint64 next_preview = 0;
@@ -277,6 +329,10 @@ static int play(const char *source, bool low, float volume, const char *ready_fi
         }
 
         const Uint64 now = SDL_GetTicks64();
+        if (identification && now >= next_identification) {
+            load_identification(renderer, identification, &badge);
+            next_identification = now + 250;
+        }
         NDIlib_recv_performance_t performance = {0}, dropped = {0};
         NDIlib_recv_get_performance(receiver, &performance, &dropped);
         if (performance.video_frames != received) {
@@ -310,7 +366,7 @@ static int play(const char *source, bool low, float volume, const char *ready_fi
                     }
                     SDL_ShowCursor(SDL_DISABLE);
                 }
-                const int displayed = display_frame(renderer, &texture, &frame);
+                const int displayed = display_frame(renderer, &texture, &badge, &frame);
 #ifndef _WIN32
                 if (displayed == 0 && preview && now >= next_preview) {
                     int width, height;
@@ -349,6 +405,7 @@ cleanup:
     if (audio)
         SDL_CloseAudioDevice(audio);
     SDL_DestroyTexture(texture);
+    SDL_DestroyTexture(badge.texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     NDIlib_framesync_destroy(sync);
@@ -358,6 +415,10 @@ cleanup:
 
 static int run(int argc, char **argv)
 {
+    if (argc == 2 && strcmp(argv[1], "--identification") == 0) {
+        puts("identification");
+        return 0;
+    }
 #ifndef _WIN32
     if (argc == 2 && strcmp(argv[1], "--apercu-interne") == 0) {
         puts("apercu-interne");

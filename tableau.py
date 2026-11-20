@@ -44,7 +44,7 @@ from terminal_ssh import HostKeyCheck, Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.67"
+SOFTWARE_VERSION = "1.4.68"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -981,7 +981,8 @@ class Request(BaseHTTPRequestHandler):
                         installation_fingerprint=row.get("installation_fingerprint"),
                         paired="token" in row, version=row.get("version", 0), kind=row.get("kind"),
                         support=support_methods(row.get("kind")),
-                        group=row.get("group"), resolution_limit=row.get("resolution_limit"),
+                        group=row.get("group"), identify=row.get("identify") is True,
+                        resolution_limit=row.get("resolution_limit"),
                         group_order=group_order.get(group), screen_order=screen_order.get(group, {}).get(key),
                         resolution_sources=resolution_sources(row, now),
                         source_resolutions={source: resolution for source in report.get("sources", [])
@@ -1425,6 +1426,26 @@ class Request(BaseHTTPRequestHandler):
 
     def apply(self, path, data):
         now = time.time()
+        if path == "/api/identify":
+            enabled = data.get("enabled")
+            if type(enabled) is not bool:
+                raise ValueError("Indique si l’identification doit être affichée.")
+            if "id" in data:
+                key = data["id"]
+                row = SCREENS.get(key) if isinstance(key, str) else None
+                if not row or not row.get("token"):
+                    return 404, {"error": "Écran associé introuvable."}
+                targets = [row]
+            else:
+                targets = [row for row in SCREENS.values() if row.get("token")]
+            for row in targets:
+                if enabled:
+                    row["identify"] = True
+                else:
+                    row.pop("identify", None)
+            if targets:
+                save()
+            return 200, {"count": len(targets)}
         if path == "/api/screen-order":
             return order_screens(data)
         if path == "/api/media-export":
@@ -1568,7 +1589,14 @@ class Request(BaseHTTPRequestHandler):
                 )
             else:
                 cached_media = None
+            identification = data.get("identification")
+            if isinstance(identification, dict):
+                identification = dict(visible=identification.get("visible") is True,
+                                      error=str(identification.get("error") or "")[:240])
+            else:
+                identification = None
             row["report"] = dict(seen=now, ip=self.client_address[0], state=state, boot=boot,
+                                 identification=identification,
                                  active_source=active_source,
                                  active_media=active_media,
                                  sources=[s[:256] for s in sources[:32] if isinstance(s, str)],
@@ -1598,7 +1626,7 @@ class Request(BaseHTTPRequestHandler):
             preview = next((dict(id=item["id"], source=item["source"], screen=item["screen"],
                                  automatic=item["automatic"]) for item in PREVIEWS.values()
                             if item["reader"] == key and item["state"] == "pending"), None)
-            return 200, dict(options=row["options"],
+            return 200, dict(options=row["options"], identify=row.get("identify") is True,
                              media=screen_media(row),
                              media_catalog=catalog_items(row),
                              preview_request=preview,

@@ -32,6 +32,10 @@ fi
 packages=()
 command -v ffplay >/dev/null || packages+=(ffmpeg)
 command -v xtigervncviewer >/dev/null || packages+=(tigervnc-viewer)
+if apt-cache show gir1.2-gtklayershell-0.1 >/dev/null 2>&1 &&
+    ! dpkg-query -W -f='\${Status}' gir1.2-gtklayershell-0.1 2>/dev/null | grep -Fxq 'install ok installed'; then
+    packages+=(gir1.2-gtklayershell-0.1)
+fi
 if (( ${#packages[@]} )); then
     sudo apt update
     sudo apt install -y "${packages[@]}"
