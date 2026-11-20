@@ -8,6 +8,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from base64 import b64decode, b64encode
 import gzip
 from hashlib import sha256
+from hmac import compare_digest
 from http.client import HTTPException
 import json
 import os
@@ -32,9 +33,10 @@ from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from commun import (APP_NAME, COPYRIGHT, DEFAULT_SOURCE, MEDIA_CHUNK, MEDIA_DISK_PERCENT, MEDIA_EXTENSIONS, MEDIA_LIBRARY_LIMIT,
-                    ORIENTATIONS, PREVIEW_LIMIT, SOFTWARE_VERSION, client_lock,
-                    media_available, media_config, media_disk, media_items, media_revision, options, release_number)
-from diagnostic import Diagnostic
+                    ORIENTATIONS, PREVIEW_LIMIT, SOFTWARE_VERSION, SSH_PAIRING_PREFIX, client_lock,
+                    media_available, media_config, media_disk, media_items, media_revision, options, release_number,
+                    ssh_fingerprints, ssh_pairing_proof)
+from diagnostic import Diagnostic, OsUpdateCheck
 from mise_a_jour import (ClientUpdate, FULL_LIMIT, IDENTIFICATION_RENDER_SOURCE, IDENTIFICATION_RUNTIME,
                          MAINTENANCE_FILES, MAINTENANCE_KIT, OS_JOB_ID, OS_NAMESPACE, RESTART, SSH_ACCESS_KEY,
                          authorize_ssh_key, digest, engine_name, maintenance_manifest,
@@ -1078,10 +1080,47 @@ def check_connection(address=None):
         write_json(PAIRING, {**identity, "server": server})
     print(f"Connexion et association vérifiées avec {server}.")
 
+def local_ssh_fingerprints(directory=Path("/etc/ssh")):
+    fingerprints = []
+    for path in sorted(directory.glob("ssh_host_*_key.pub")):
+        try:
+            algorithm, encoded, *_ = path.read_text(encoding="utf-8").split()
+            if not re.fullmatch(r"ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)", algorithm):
+                continue
+            key = b64decode(encoded, validate=True)
+            name_length = int.from_bytes(key[:4], "big")
+            if key[4:4 + name_length] != algorithm.encode("ascii") or len(key) <= 4 + name_length:
+                continue
+        except (OSError, ValueError):
+            continue
+        fingerprint = "SHA256:" + b64encode(sha256(key).digest()).decode("ascii").rstrip("=")
+        if fingerprint not in fingerprints:
+            fingerprints.append(fingerprint)
+    if not fingerprints:
+        raise ValueError("Aucune clé d’hôte SSH lisible dans /etc/ssh. Vérifie l’installation d’OpenSSH sur le lecteur.")
+    return ssh_fingerprints(fingerprints)
+
+
 def pair(server, code):
     server = server_address(server)
     board = serial()
-    result = post(server, "/api/enroll", dict(code=code, serial=board, kind=DEVICE_KIND, options=initial_settings()))
+    data = dict(serial=board, kind=DEVICE_KIND, options=initial_settings())
+    if not WINDOWS and code.startswith(SSH_PAIRING_PREFIX):
+        if not os.environ.get("SOUNDLIVE_INSTALL_FINGERPRINT"):
+            raise ValueError("Utilise la commande complète d’installation affichée par la régie.")
+        import pwd
+        nonce = secrets.token_hex(32)
+        data.update(nonce=nonce, ssh_user=pwd.getpwuid(os.getuid()).pw_name,
+                    ssh_host_fingerprints=local_ssh_fingerprints())
+        proof = ssh_pairing_proof(code, "request", data)
+        result = post(server, "/api/enroll", {**data, "proof": proof})
+        signed = result.pop("proof", None)
+        if (not isinstance(signed, str) or not re.fullmatch(r"[a-f0-9]{64}", signed)
+                or not compare_digest(signed, ssh_pairing_proof(code, "response", {**result, "nonce": nonce}))):
+            raise ValueError("Impossible de vérifier la réponse d’association de la régie.")
+        print("Les empreintes SSH du lecteur ont été enregistrées sur la régie.")
+    else:
+        result = post(server, "/api/enroll", {**data, "code": code})
     write_json(PAIRING, dict(server=server, serial=board, **result))
     print("Écran associé. Ouvre une nouvelle session pour lancer le lecteur.")
 
@@ -1412,6 +1451,7 @@ class DashboardClient:
     def __init__(self, identity, orientation):
         self.identity = identity
         self.diagnostic = Diagnostic()
+        self.os_update_check = OsUpdateCheck()
         self.latency_ms = None
         self.latency_test = None
         self.updater = ClientUpdate(APP, CLIENT_DIR)
@@ -1500,6 +1540,8 @@ class DashboardClient:
                                              if local_video and self.internal_preview_required else
                                              self.internal_preview_error if self.internal_preview_required else monitor_error),
                       capture_needs_consent=uses_portal and self.portal.stream is None)
+        if (report.get("os_result") or {}).get("state") not in OsMaintenance.pending:
+            report["os_health"] = self.os_update_check.report()
         if self.can_update:
             report["update_result"] = self.updater.report()
         nonce = secrets.token_hex(32) if report.get("os_capability") == "ready" else None

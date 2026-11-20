@@ -2,16 +2,19 @@
 # Auteur : DUVERNOY Matthieu & ChatGPT
 # contact@soundlive.fr
 # Société SoundLive
-"""Mesures locales des récepteurs Linux, relevées dans le thread réseau."""
+"""Mesures locales et vérification des mises à jour système."""
 from ipaddress import ip_address
 import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import socket
 import subprocess
 import sys
+from tempfile import TemporaryDirectory
+import threading
 import time
 from urllib.parse import urlsplit
 
@@ -21,6 +24,102 @@ ARM_CORES = {
     "0xd08": "ARM Cortex-A72",
     "0xd0b": "ARM Cortex-A76",
 }
+
+
+WINDOWS_UPDATE_QUERY = """
+$ErrorActionPreference = 'Stop'
+$searcher = (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher()
+$searcher.Online = $true
+$result = $searcher.Search("IsInstalled=0 and IsHidden=0 and Type='Software' and BrowseOnly=0")
+if ($result.ResultCode -ne 2) { exit 1 }
+[Console]::WriteLine($result.Updates.Count)
+"""
+
+
+def apt_update_count(apt):
+    # Read the host's sources and installed package database in a separate user cache.
+    with TemporaryDirectory(prefix="soundlive-apt-") as directory:
+        root = Path(directory)
+        for name in ("lists/partial", "archives/partial", "conf.d"):
+            (root / name).mkdir(parents=True)
+        config = root / "check.conf"
+        config.write_text(
+            f'Dir::Etc::Parts {json.dumps(str(root / "conf.d"))};\n'
+            'Dir::Etc::main "/dev/null";\n'
+            f'Dir::State::lists {json.dumps(str(root / "lists"))};\n'
+            f'Dir::Cache {json.dumps(str(root))};\n'
+            'Dir::Cache::pkgcache "";\nDir::Cache::srcpkgcache "";\n'
+            'APT::Update::Error-Mode "any";\nAcquire::Retries "0";\n'
+            'Acquire::Languages "none";\nAcquire::http::Timeout "15";\nAcquire::https::Timeout "15";\n',
+            encoding="utf-8",
+        )
+        env = {**os.environ, "APT_CONFIG": str(config), "LC_ALL": "C"}
+        subprocess.run([apt, "update"], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, check=True, timeout=150)
+        if not any((root / "lists").glob("*_Packages*")):
+            raise ValueError("Aucun index de paquets APT disponible.")
+        simulated = subprocess.check_output([apt, "--simulate", "--no-remove", "--with-new-pkgs", "upgrade"],
+                                            env=env, stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=40)
+        return len(re.findall(rb"^Inst ", simulated, re.MULTILINE))
+
+
+def count_os_updates():
+    if sys.platform == "win32":
+        output = subprocess.check_output(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_UPDATE_QUERY],
+            stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=180,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        return int(output.strip())
+    if sys.platform.startswith("linux") and (apt := shutil.which("apt-get")):
+        return apt_update_count(apt)
+    return None
+
+
+def os_update_report(value):
+    if not isinstance(value, dict):
+        return None
+    state = value.get("state")
+    if state not in ("checking", "current", "available", "unavailable", "unsupported"):
+        return None
+    count, checked = value.get("count"), value.get("checked")
+    if state in ("current", "available"):
+        if type(count) is not int or not 0 <= count <= 100000 or (state == "available") != bool(count):
+            return None
+        if type(checked) is not int or not 0 < checked <= 4102444800:
+            return None
+        return {"state": state, "count": count, "checked": checked}
+    return {"state": state}
+
+
+class OsUpdateCheck:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.result = {"state": "checking"}
+        self.next_check = 0.0
+        self.running = False
+
+    def report(self):
+        with self.lock:
+            if not self.running and time.monotonic() >= self.next_check:
+                self.running = True
+                self.result = {"state": "checking"}
+                threading.Thread(target=self.run, name="verification-systeme", daemon=True).start()
+            return self.result.copy()
+
+    def run(self):
+        try:
+            count = count_os_updates()
+            if count is None:
+                result = {"state": "unsupported"}
+            else:
+                result = {"state": "available" if count else "current", "count": count, "checked": int(time.time())}
+        except (OSError, ValueError, subprocess.SubprocessError):
+            result = {"state": "unavailable"}
+        with self.lock:
+            self.result = result
+            self.next_check = time.monotonic() + (3600 if result["state"] == "unavailable" else 12 * 3600)
+            self.running = False
 
 def desktop_protocol():
     if sys.platform == "win32":

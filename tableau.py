@@ -32,19 +32,19 @@ from acces_regie import (PORT as REMOTE_PORT, SESSION_COOKIE, SESSION_WARNING, U
                          RemoteConnections, RemoteDashboard, prepare_access)
 from commun import (APP_NAME, MEDIA_CHUNK, MEDIA_COUNT_LIMIT, MEDIA_DISK_PERCENT, MEDIA_FILE_LIMIT, MEDIA_FOLDER_LIMIT,
                     MEDIA_LIBRARY_LIMIT, MEDIA_TOTAL_LIMIT,
-                    ORIENTATIONS, PREVIEW_LIMIT, SOFTWARE_VERSION as CLIENT_VERSION,
+                    ORIENTATIONS, PREVIEW_LIMIT, SOFTWARE_VERSION as CLIENT_VERSION, SSH_PAIRING_PREFIX,
                     media_available, media_config, media_disk, media_name, media_revision, media_timing,
-                    options, release_number)
-from diagnostic import Diagnostic, NetworkRates, desktop_protocol, network_info
+                    options, release_number, ssh_fingerprints, ssh_pairing_proof)
+from diagnostic import Diagnostic, NetworkRates, OsUpdateCheck, desktop_protocol, network_info, os_update_report
 from installation_lecteur import KEYS_PATH, installation_keys, prepare_installations, ssh_access_public
 from mise_a_jour import (CLIENT_UPDATE_ISSUES, ENGINE_ASSETS, OS_NAMESPACE, SAFE_ID, OpenSSHError, contents,
                          digest, engine_name, full_contents, maintenance_manifest, package, prepare_key, sign_manifest)
 from qrencoder import QRCode, QRErrorCorrectLevel
-from terminal_ssh import GROUP_LIMIT, HostKeyCheck, Terminals
+from terminal_ssh import GROUP_LIMIT, USER as SSH_USER, HostKeyCheck, Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.76"
+SOFTWARE_VERSION = "1.4.77"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -512,6 +512,68 @@ def batch(path, data, now):
                                 job=job["id"] if state == "queued" else None))
     return 200, {"results": results}
 
+def enroll_reader(data, now):
+    code = data.get("code")
+    proof = data.get("proof")
+    nonce = data.get("nonce")
+    request = {name: value for name, value in data.items() if name != "proof"}
+    protected_request = (code is None and isinstance(proof, str) and SAFE_ID.fullmatch(proof)
+                         and isinstance(nonce, str) and SAFE_ID.fullmatch(nonce))
+    for key, row in SCREENS.items():
+        if now >= row.get("pairing_until", 0):
+            continue
+        secret = row["pairing"]
+        protected_code = row.get("exchange_ssh") is True
+        if protected_code:
+            if token_matches(code, secret):
+                # An older kit sent the protected code itself. Invalidate it immediately.
+                updated = row.copy()
+                updated["pairing_until"] = 0
+                SCREENS[key] = updated
+                try:
+                    save()
+                except OSError:
+                    SCREENS[key] = row
+                    raise
+                return 409, {"error": "Utilise le kit 1.4.77 puis génère un nouveau code d’association."}
+            if not protected_request or not hmac.compare_digest(proof, ssh_pairing_proof(secret, "request", request)):
+                continue
+            fingerprints = ssh_fingerprints(data.get("ssh_host_fingerprints"))
+            ssh_user = data.get("ssh_user")
+            if not isinstance(ssh_user, str) or not SSH_USER.fullmatch(ssh_user):
+                raise ValueError("Nom du compte SSH du lecteur invalide.")
+        else:
+            if not token_matches(code, secret):
+                continue
+            fingerprints = None
+        settings = options(data["options"])
+        serial = safe_text(data["serial"])
+        kind = data.get("kind")
+        if kind is None:
+            kind = "ubuntu" if serial.startswith("pc-") else "pi"
+        if kind not in DEVICE_KINDS or row.get("kind") not in (None, kind):
+            return 409, {"error": "Le type de récepteur ne correspond pas au code créé."}
+        if any(existing.get("serial") == serial for existing in SCREENS.values()):
+            return 409, {"error": "Ce récepteur est déjà associé. Retire d’abord son ancienne fiche."}
+        token = secrets.token_urlsafe(32)
+        updated = {**row, "options": settings, "token": token, "serial": serial, "version": 1, "kind": kind}
+        for field in ("pairing", "pairing_until", "installation_fingerprint", "exchange_ssh"):
+            updated.pop(field, None)
+        if fingerprints:
+            updated.update(ssh_host_fingerprints=fingerprints, ssh_user=ssh_user)
+        result = dict(id=key, token=token, name=row["name"])
+        if protected_code:
+            result["proof"] = ssh_pairing_proof(secret, "response", {**result, "nonce": nonce})
+        SCREENS[key] = updated
+        try:
+            save()
+        except OSError:
+            SCREENS[key] = row
+            raise
+        return 200, result
+    return 403, {"error": "Code expiré ou inconnu."}
+
+
 def save():
     temporary = DATA.with_suffix(".tmp")
     temporary.write_text(json.dumps(SCREENS, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -864,7 +926,9 @@ def support_target(key):
         address = IPv4Address(report["ip"])
         if address.is_loopback or address.is_unspecified or address.is_multicast:
             raise ValueError("Adresse du lecteur invalide.")
-        return dict(address=str(address), name=row["name"], user="soundlive", support=support_methods(row.get("kind")))
+        return dict(address=str(address), name=row["name"], user=row.get("ssh_user", "soundlive"),
+                    support=support_methods(row.get("kind")),
+                    ssh_host_fingerprints=row.get("ssh_host_fingerprints", []))
 
 
 class Request(BaseHTTPRequestHandler):
@@ -1031,6 +1095,10 @@ class Request(BaseHTTPRequestHandler):
             self.reply(200, network.status() if network else {"available": False})
         elif path == "/api/regie-latency":
             self.reply(200, {"ok": True})
+        elif path == "/api/os-health":
+            manager = "windows" if sys.platform == "win32" else "linux"
+            can_open = not remote and (manager == "windows" or bool(shutil.which("update-manager")))
+            self.reply(200, {**self.server.os_update_check.report(), "manager": manager, "can_open": can_open})
         elif path == "/api/regie-version":
             self.reply(200, self.server.publication_status.read())
         elif path == "/api/preview":
@@ -1145,6 +1213,20 @@ class Request(BaseHTTPRequestHandler):
                         return
             if path.startswith("/api/ssh/"):
                 self.terminal_action(path.removeprefix("/api/ssh/"), value)
+                return
+            if path == "/api/os-health/open":
+                if remote:
+                    self.reply(403, {"error": "Ouvre le gestionnaire de mises à jour depuis le PC de régie."})
+                    return
+                if sys.platform == "win32":
+                    os.startfile("ms-settings:windowsupdate")
+                elif manager := shutil.which("update-manager"):
+                    subprocess.Popen([manager], stdin=subprocess.DEVNULL,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else:
+                    self.reply(409, {"error": "Utilise le gestionnaire de paquets sur le PC de régie."})
+                    return
+                self.reply(200, {"ok": True})
                 return
             if path == "/api/desktop/open":
                 if remote:
@@ -1261,7 +1343,8 @@ class Request(BaseHTTPRequestHandler):
                 target = support_target(key)
                 if "ssh" not in target["support"]:
                     raise ValueError("Le terminal web SSH est disponible pour les postes Linux.")
-                result = target if operation == "target" else terminals.start(owner, key, target["address"], value)
+                result = target if operation == "target" else terminals.start(
+                    owner, key, target["address"], value, target.get("ssh_host_fingerprints", ()))
             elif operation in ("group-start", "group-prepare"):
                 ids = value.get("ids")
                 if (not isinstance(ids, list) or not ids or len(ids) > GROUP_LIMIT
@@ -1614,32 +1697,18 @@ class Request(BaseHTTPRequestHandler):
             kind = data.get("kind")
             if kind is not None and kind not in DEVICE_KINDS:
                 raise ValueError("Choisis Raspberry Pi, Ubuntu ou Windows.")
-            SCREENS[key] = dict(name=safe_text(data["name"]), kind=kind, pairing=code, pairing_until=now + 900)
             fingerprint = data.get("installation_fingerprint")
+            exchange_ssh = bool(fingerprint and kind in ("pi", "ubuntu") and data.get("exchange_ssh") is True)
+            if exchange_ssh:
+                code = SSH_PAIRING_PREFIX + code
+            SCREENS[key] = dict(name=safe_text(data["name"]), kind=kind, pairing=code,
+                                pairing_until=now + 900, exchange_ssh=exchange_ssh)
             if fingerprint:
                 SCREENS[key]["installation_fingerprint"] = fingerprint
             save()
             return 200, {"code": code, "installation_fingerprint": fingerprint}
         if path == "/api/enroll":
-            for key, row in SCREENS.items():
-                if now < row.get("pairing_until", 0) and token_matches(data.get("code"), row["pairing"]):
-                    settings = options(data["options"])
-                    serial = safe_text(data["serial"])
-                    kind = data.get("kind")
-                    if kind is None:
-                        kind = "ubuntu" if serial.startswith("pc-") else "pi"
-                    if kind not in DEVICE_KINDS or row.get("kind") not in (None, kind):
-                        return 409, {"error": "Le type de récepteur ne correspond pas au code créé."}
-                    if any(existing.get("serial") == serial for existing in SCREENS.values()):
-                        return 409, {"error": "Ce récepteur est déjà associé. Retire d’abord son ancienne fiche."}
-                    token = secrets.token_urlsafe(32)
-                    row.update(options=settings, token=token, serial=serial, version=1, kind=kind)
-                    del row["pairing"]
-                    del row["pairing_until"]
-                    row.pop("installation_fingerprint", None)
-                    save()
-                    return 200, dict(id=key, token=token, name=row["name"])
-            return 403, {"error": "Code expiré ou inconnu."}
+            return enroll_reader(data, now)
 
         key = data.get("id")
         if not isinstance(key, str) or key not in SCREENS:
@@ -1751,6 +1820,7 @@ class Request(BaseHTTPRequestHandler):
                 os_capability = "unsupported"
             row["report"] = dict(seen=now, ip=self.client_address[0], state=state, boot=boot,
                                  os_capability=os_capability,
+                                 os_health=os_update_report(data.get("os_health")),
                                  identification=identification,
                                  active_source=active_source,
                                  active_media=active_media,
@@ -1861,6 +1931,7 @@ class Regie:
         self.connections = None
         self.server = ThreadingHTTPServer(("0.0.0.0", port), Request)
         self.server.terminals = Terminals()
+        self.server.os_update_check = OsUpdateCheck()
         self.server.network_control = network_control
         self.server.interface_traffic = InterfaceTraffic()
         self.server.publication_status = publication_status or PublicationStatus(
@@ -1889,6 +1960,7 @@ class Regie:
                 self.remote = RemoteDashboard(REMOTE_ACCESS, Request, self.server.server_port)
                 self.remote.interface_traffic = self.server.interface_traffic
                 self.remote.terminals = self.server.terminals
+                self.remote.os_update_check = self.server.os_update_check
                 self.remote.network_control = self.server.network_control
                 self.server.waiting_qr = waiting_access(*self.remote.server_address)
                 self.remote_url = f"https://{self.remote.server_address[0]}:{self.remote.server_port}"

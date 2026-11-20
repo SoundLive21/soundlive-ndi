@@ -11,6 +11,7 @@ import secrets
 import threading
 import time
 
+from commun import SSH_FINGERPRINT
 from installation_lecteur import ROOT, ssh_identity
 
 
@@ -23,7 +24,6 @@ GROUP_LIMIT = 32
 GROUP_OUTPUT = 16384
 GROUP_TIMEOUT = 45
 USER = re.compile(r"[A-Za-z0-9_.-]{1,64}")
-FINGERPRINT = re.compile(r"SHA256:[A-Za-z0-9+/]{43}")
 
 
 def key_fingerprint(key):
@@ -37,18 +37,20 @@ class HostKeyCheck(RuntimeError):
         super().__init__("Empreinte SSH différente." if expected else "Empreinte SSH inconnue.")
 
 
-def connect_client(paramiko, client, host, user, auth, fingerprint, on_verified=None):
+def connect_client(paramiko, client, host, user, auth, fingerprints, on_verified=None):
     warning = ""
+    expected = (fingerprints,) if isinstance(fingerprints, str) and fingerprints else fingerprints
 
     class HostKeyPolicy(paramiko.MissingHostKeyPolicy):
         def missing_host_key(self, _client, _hostname, key):
             nonlocal warning
-            if not hmac.compare_digest(fingerprint, key_fingerprint(key)):
-                raise HostKeyCheck(key, fingerprint or None)
+            presented = key_fingerprint(key)
+            if not any(hmac.compare_digest(fingerprint, presented) for fingerprint in expected):
+                raise HostKeyCheck(key, ", ".join(expected) or None)
             if on_verified:
                 warning = on_verified()
 
-    if not fingerprint:
+    if not expected:
         client.load_system_host_keys()
     client.set_missing_host_key_policy(HostKeyPolicy())
     try:
@@ -133,7 +135,7 @@ class Terminals:
         except (OSError, ValueError):
             pins = {}
         self.pins = {key: value for key, value in pins.items()
-                     if isinstance(value, str) and FINGERPRINT.fullmatch(value)} if isinstance(pins, dict) else {}
+                     if isinstance(value, str) and SSH_FINGERPRINT.fullmatch(value)} if isinstance(pins, dict) else {}
         self.lock = threading.Lock()
         self.ended = threading.Event()
         threading.Thread(target=self.reap, daemon=True).start()
@@ -159,13 +161,13 @@ class Terminals:
         for session in active:
             session.close()
 
-    def connect_reader(self, paramiko, client, key, address, user, auth, entered):
+    def connect_reader(self, paramiko, client, key, address, user, auth, entered, enrolled=()):
         with self.lock:
-            fingerprint = entered or self.pins.get(key, "")
+            expected = entered or self.pins.get(key) or enrolled
         callback = (lambda: self.save_pin(key, entered)) if entered else None
-        return connect_client(paramiko, client, address, user, auth, fingerprint, callback)
+        return connect_client(paramiko, client, address, user, auth, expected, callback)
 
-    def start(self, owner, key, host, data):
+    def start(self, owner, key, host, data, enrolled=()):
         user = data.get("user", "")
         method = data.get("auth", "key")
         fingerprint = data.get("fingerprint", "")
@@ -174,7 +176,7 @@ class Terminals:
         if method not in ("key", "password"):
             raise ValueError("Choisis la clé SSH ou le mot de passe.")
         if not isinstance(fingerprint, str) or (fingerprint and
-                not FINGERPRINT.fullmatch(fingerprint)):
+                not SSH_FINGERPRINT.fullmatch(fingerprint)):
             raise ValueError("Saisis une empreinte SSH SHA256 complète.")
         if method == "password":
             password = data.get("password", "")
@@ -203,7 +205,7 @@ class Terminals:
             self.sessions[identifier] = session
         try:
             client = session.client
-            warning = self.connect_reader(paramiko, client, key, host, user, auth, fingerprint)
+            warning = self.connect_reader(paramiko, client, key, host, user, auth, fingerprint, enrolled)
             session.screen = pyte.Screen(COLUMNS, LINES)
             session.stream = pyte.ByteStream(session.screen)
             session.channel = client.invoke_shell(term="xterm", width=COLUMNS, height=LINES)
@@ -222,7 +224,7 @@ class Terminals:
             raise ValueError("Indique le nom du compte SSH.")
         if not isinstance(command, str) or not command.strip() or len(command.encode("utf-8")) > 4096 or "\0" in command:
             raise ValueError("Saisis une commande SSH de 4 Kio maximum.")
-        if not isinstance(pins, dict) or not all(key in targets and isinstance(value, str) and FINGERPRINT.fullmatch(value)
+        if not isinstance(pins, dict) or not all(key in targets and isinstance(value, str) and SSH_FINGERPRINT.fullmatch(value)
                                                 for key, value in pins.items()):
             raise ValueError("Saisis uniquement les empreintes SSH SHA256 vérifiées des lecteurs sélectionnés.")
         identity = ssh_identity()
@@ -244,16 +246,18 @@ class Terminals:
             for key, target in targets.items():
                 if "address" in target:
                     pin = pins.get(key, "")
-                    self.executor.submit(self.run_target, paramiko, job, key, target["address"], user, command, identity, pin)
+                    self.executor.submit(self.run_target, paramiko, job, key, target, user, command, identity, pin)
             if not any(row["state"] == "pending" for row in rows.values()):
                 job["finished"] = time.monotonic()
         return {"job": identifier}
 
-    def run_target(self, paramiko, job, key, address, user, command, identity, pin):
+    def run_target(self, paramiko, job, key, target, user, command, identity, pin):
         client = None
         try:
             client = paramiko.SSHClient()
-            message = self.connect_reader(paramiko, client, key, address, user, {"key_filename": str(identity)}, pin)
+            message = self.connect_reader(paramiko, client, key, target["address"], user,
+                                          {"key_filename": str(identity)}, pin,
+                                          target.get("ssh_host_fingerprints", ()))
             result = group_command(client, command, paramiko.SSHException)
             if message:
                 result["message"] = " ".join(filter(None, (result["message"], message)))

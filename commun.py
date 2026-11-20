@@ -4,6 +4,7 @@
 # Société SoundLive
 from contextlib import contextmanager
 from hashlib import sha256
+from hmac import digest as hmac_digest
 import json
 from pathlib import Path
 import re
@@ -13,7 +14,7 @@ import sys
 DEFAULT_SOURCE = "OBS (Programme)"
 APP_NAME = "SoundLive-NDI"
 COPYRIGHT = "© 2026 Société SoundLive"
-SOFTWARE_VERSION = "1.4.39"
+SOFTWARE_VERSION = "1.4.40"
 PREVIEW_LIMIT = 160 * 1024
 ORIENTATIONS = ("landscape", "portrait-left", "portrait-right")
 MEDIA_FILE_LIMIT = 256 * 1024 * 1024
@@ -27,6 +28,24 @@ MEDIA_EXTENSIONS = {
     ".jpg": "image2", ".jpeg": "image2", ".png": "image2",
     ".mp4": "mov", ".m4v": "mov", ".mov": "mov", ".webm": "matroska", ".mkv": "matroska",
 }
+
+
+SSH_PAIRING_PREFIX = "sl77_"
+SSH_FINGERPRINT = re.compile(r"SHA256:[A-Za-z0-9+/]{43}")
+
+
+def ssh_pairing_proof(code, direction, payload):
+    data = json.dumps(["soundlive-ssh-enrollment", direction, payload],
+                      sort_keys=True, separators=(",", ":")).encode("ascii")
+    return hmac_digest(code.encode("ascii"), data, "sha256").hex()
+
+
+def ssh_fingerprints(values):
+    if (not isinstance(values, list) or not 1 <= len(values) <= 8
+            or any(not isinstance(value, str) or not SSH_FINGERPRINT.fullmatch(value) for value in values)
+            or len(set(values)) != len(values)):
+        raise ValueError("Liste d’empreintes SSH du lecteur invalide.")
+    return values
 
 
 def media_name(name):

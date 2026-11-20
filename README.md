@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.76** et le client **1.4.39**.
+Ce kit contient la régie **1.4.77** et le client **1.4.40**.
 
 ## Installer et lancer la régie
 
@@ -71,6 +71,23 @@ redémarrage de la mise à jour si le compilateur, les en-têtes NDI et le
 runtime sont déjà présents. L’ancien moteur reste utilisable si la compilation
 échoue. Si tu fournis un moteur compilé compatible avec l’archive de publication,
 il est livré par le mécanisme de mise à jour des moteurs déjà en place.
+
+### Vérifier les mises à jour système
+
+Le tableau affiche le résultat près de l’état de la régie et sur les
+fiches des lecteurs. La vérification se fait en arrière-plan au démarrage
+de l’application, puis toutes les douze heures après un contrôle réussi.
+Sur Pi et Ubuntu, le tableau interroge les dépôts APT dans un cache
+temporaire et simule la mise à jour. Sur Windows, il interroge Windows
+Update pour les mises à jour logicielles proposées. La vérification
+n’installe aucun paquet et ne coupe pas le flux.
+
+Si des mises à jour sont disponibles, **Mettre à jour le système** utilise
+le service de maintenance des lecteurs Pi et Ubuntu. Sur la régie, ouvre
+le gestionnaire de mises à jour depuis le tableau local s’il est disponible.
+Sur un lecteur Windows, ouvre ses informations pour y accéder à distance
+et lance Windows Update sur ce lecteur. Les dépôts ou le service Windows
+Update doivent être joignables pour que le résultat soit confirmé.
 
 ### Mettre à jour le système des lecteurs Pi et Ubuntu
 
@@ -213,6 +230,11 @@ ou **Interface Wi-Fi** avec les noms affichés sur le lecteur par
 Elle récupère les deux clés publiques après la bascule réseau, vérifie
 leur empreinte et installe la clé SSH dans le compte du lecteur et la
 clé de vérification des mises à jour dans son dossier applicatif.
+Avec le kit 1.4.77 ou plus récent, une nouvelle association Pi ou Ubuntu
+transmet aussi à la régie les empreintes des clés d’hôte d’OpenSSH.
+Le code d’association authentifie cet échange et sert une seule fois.
+Les connexions SSH individuelles et groupées peuvent ensuite utiliser ces
+empreintes. Si la clé d’hôte a changé, la régie demande sa vérification.
 Les installateurs déclenchent aussi la préparation du bureau distant.
 Sous Windows, lance la commande en administrateur sous le compte du lecteur.
 
@@ -370,7 +392,8 @@ tant que le lanceur reste ouvert.
 
 Dans le panneau Régie, clique sur **SSH groupé**, à côté de **Identifier
 tous les écrans**. Sélectionne les Raspberry Pi ou Ubuntu en ligne et
-clique sur **Préparer l’accès par clé**. La régie crée une identité dédiée
+clique sur **Préparer l’accès par clé** si ces lecteurs n’ont pas été
+installés avec la clé de la régie. La régie crée une identité dédiée
 si nécessaire et envoie la clé publique dans la mise à jour signée du
 lecteur. Le client l’ajoute à `~/.ssh/authorized_keys` du compte qui lance
 le lecteur. La clé privée reste sur la régie.

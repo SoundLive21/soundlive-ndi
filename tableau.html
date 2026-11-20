@@ -167,6 +167,9 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .update-status[data-state="current"]{color:var(--green)}
 .update-status[data-state="failed"],.update-status[data-state="expired"]{color:#ff8fa0}
 .update-status[data-state="available"]{color:#ffc078}
+.os-health{margin:10px 0 8px}
+.os-health[data-state="available"]{color:#ffc078}
+.os-health[data-state="current"]{color:var(--green)}
 .current-stream{display:grid;gap:4px;margin:0 0 14px;overflow-wrap:anywhere}
 .current-stream[hidden]{display:none}
 .current-stream strong{color:var(--text);font-weight:600}
@@ -268,6 +271,9 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
           <span>Réseau</span><strong>—</strong>
         </div>
       </div>
+      <p class="small os-health" id="regie-os-health" role="status"></p>
+      <button type="button" id="regie-os-open" hidden>Ouvrir les mises à jour système</button>
+      <p class="small" id="regie-os-instructions" hidden></p>
     </div>
     <label>Interface à mesurer
       <select id="traffic-interface" aria-describedby="traffic-help" disabled>
@@ -715,6 +721,8 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
     <div class="screen-preview" hidden></div>
     <p class="small update-status" hidden></p>
     <p class="small update-status os-update-status" hidden></p>
+    <p class="small os-health" hidden></p>
+    <button class="os-upgrade" type="button" hidden>Mettre à jour le système</button>
     <details class="screen-controls">
       <summary>Commandes et réglages</summary>
       <section class="pending"></section>
@@ -2676,6 +2684,23 @@ function cardFor(id) {
       };
     }
   }));
+  select(el, ".os-upgrade").onclick = action(() => {
+    if (card.data.kind === "windows") {
+      showDiagnostics(id);
+      return;
+    }
+    showAction({
+      title:"Mettre à jour le système de " + card.data.name,
+      detail:"Le flux s’interrompra pendant la mise à jour. Le lecteur redémarrera après réussite.",
+      label:"Mettre à jour et redémarrer", successTitle:"Mise à jour système demandée",
+      async perform() {
+        const {results} = await call("/api/os-updates", {ids:[id]});
+        if (results[0].state !== "queued") throw Error(osUpdateStates[results[0].state] || "Lecteur indisponible.");
+        await refresh(true);
+        return card.data.name;
+      }
+    });
+  });
   ui.info.onclick = () => showDiagnostics(id);
   ui.connection.onclick = () => showDiagnostics(id);
   ui["rate-rx"].onclick = ui["rate-tx"].onclick = () => showDiagnostics(id);
@@ -2783,6 +2808,20 @@ function render(row) {
     [osUpdateStates[maintenance.state], maintenance.message].filter(Boolean).join(" · ") : "";
   osStatus.dataset.state = maintenance?.state || "";
   osStatus.hidden = !osStatus.textContent;
+  const health = row.report.os_health;
+  const osHealth = select(el, ".os-health");
+  const osUpgrade = select(el, ".os-upgrade");
+  const osAvailable = row.online && !row.os_busy && health?.state === "available";
+  const hasMaintenance = row.report.os_capability === "ready";
+  const windowsReader = row.kind === "windows";
+  osHealth.hidden = !row.online || !health || row.os_busy;
+  renderOsHealth(osHealth, health);
+  if (osAvailable && !windowsReader && !hasMaintenance) {
+    osHealth.textContent += row.report.os_capability === "key_required" ?
+      " · Clé de régie requise" : " · Active la maintenance système sur le lecteur";
+  }
+  osUpgrade.hidden = !osAvailable || (!windowsReader && !hasMaintenance);
+  osUpgrade.textContent = windowsReader ? "Accéder au lecteur pour Windows Update" : "Mettre à jour le système";
   const updateStatus = select(el, ".update-status");
   const update = row.client_update?.state === "updated" ? null : row.client_update;
   const availability = row.update_availability;
@@ -3333,7 +3372,7 @@ pairForm.onsubmit = action(() => {
     label:"Créer le code",
     async perform() {
       const {code, installation_fingerprint: fingerprint} = await call("/api/pair",
-        {name, kind, prepare_installation:true});
+        {name, kind, prepare_installation:true, exchange_ssh:kind !== "windows"});
       pairForm.reset();
       dialog.close();
       await refresh(true);
@@ -3341,7 +3380,7 @@ pairForm.onsubmit = action(() => {
         title:"Code créé pour « " + name + " »",
         detail:kind === "windows"
           ? "Lance la commande depuis le kit dans PowerShell en administrateur sous le compte du lecteur. Le code est valable 15 minutes."
-          : "Lance la commande depuis le dossier du kit sur le lecteur. Le code est valable 15 minutes.",
+          : "Lance la commande depuis le kit 1.4.77 ou plus récent sur le lecteur. Le code est valable 15 minutes.",
         command:installationCommand(values, port, code, fingerprint)
       };
     }
@@ -3590,6 +3629,41 @@ connectionsButton.onclick = () => {
   connectionsDialog.showModal();
   refreshConnections();
 };
+function renderOsHealth(element, health) {
+  const state = health?.state;
+  const count = health?.count;
+  element.dataset.state = state || "";
+  element.textContent = ({
+    checking:"Système · Vérification en cours…",
+    available:"Système · " + count + " mise" + (count === 1 ? "" : "s") + " à jour disponible" + (count === 1 ? "" : "s"),
+    current:"Système · Aucune mise à jour proposée",
+    unavailable:"Système · Vérification indisponible",
+    unsupported:"Système · Gestionnaire de mises à jour non reconnu"
+  })[state] || "";
+  element.title = health?.checked ?
+    "Dernier contrôle le " + new Date(health.checked * 1000).toLocaleString("fr-FR") : "";
+}
+const regieOsOpen = document.querySelector("#regie-os-open");
+regieOsOpen.onclick = action(() => call("/api/os-health/open", {}));
+
+async function refreshRegieOsHealth() {
+  if (remoteSessionEnded) return;
+  const label = document.querySelector("#regie-os-health");
+  const instructions = document.querySelector("#regie-os-instructions");
+  try {
+    const report = await call("/api/os-health");
+    renderOsHealth(label, report);
+    const available = report.state === "available";
+    regieOsOpen.hidden = !available || !report.can_open;
+    regieOsOpen.textContent = report.manager === "windows" ? "Ouvrir Windows Update" : "Ouvrir le gestionnaire de mises à jour";
+    instructions.hidden = !available || report.can_open;
+    instructions.textContent = report.manager === "windows" ?
+      "Ouvre Windows Update sur le PC de régie." : "Sur le PC de régie, lance sudo apt update puis sudo apt upgrade.";
+  } catch {
+    renderOsHealth(label, {state:"unavailable"});
+    regieOsOpen.hidden = instructions.hidden = true;
+  }
+}
 async function refreshRegieVersion() {
   if (remoteSessionEnded) return;
   const badge = document.querySelector("#regie-version");
@@ -3615,6 +3689,7 @@ refresh();
 loadNetwork();
 refreshConnections();
 refreshRegieVersion();
+refreshRegieOsHealth();
 refreshTraffic();
 refreshRegieLatency();
 setInterval(refresh,2000);
@@ -3623,6 +3698,7 @@ setInterval(refreshRegieLatency,5000);
 setInterval(refreshVisiblePreviews,2000);
 setInterval(refreshConnections,5000);
 setInterval(refreshRegieVersion,10000);
+setInterval(refreshRegieOsHealth,10000);
 </script>
 </body>
 </html>
