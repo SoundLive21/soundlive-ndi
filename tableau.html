@@ -145,11 +145,12 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .group-targets{border:1px solid var(--edge);border-radius:9px;margin:16px 0;padding:10px 12px}
 .group-controls{display:flex;gap:8px;flex-wrap:wrap}
 .group-controls button{font-size:.8rem}
-#group-screens{max-height:220px;overflow:auto}
-#group-screens label{overflow-wrap:anywhere}
+.group-choices{max-height:220px;overflow:auto}
+.group-choices label{overflow-wrap:anywhere}
 .group-section{min-width:0;margin:10px 0 0;padding:0 8px 2px;border:1px solid var(--edge);border-radius:7px}
 .group-section legend{padding:0 5px;color:#ffd0dc;font-size:.88rem;font-weight:650;overflow-wrap:anywhere}
-#group-screens .group-section label{margin:7px 0}
+.group-choices .group-section>label{margin:7px 0;padding-left:12px}
+.group-choices .group-section legend label{margin:0}
 #confirm-detail{white-space:pre-wrap}
 #pair,#confirm-action:has(#confirm-command:not([hidden])){width:min(650px,94vw)}
 .pair-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:14px}
@@ -171,8 +172,6 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .screen-controls{border-top:1px solid var(--edge);margin-top:12px;padding-top:10px}
 .screen-controls summary{cursor:pointer;color:#ffd0dc;font-size:.9rem;font-weight:600}
 .screen-controls summary:focus-visible{outline:2px solid #ff91a5;outline-offset:3px}
-.manage-screens-list{max-height:240px;overflow:auto}
-.manage-screens-list label{overflow-wrap:anywhere}
 #logout{font-size:.85rem}
 #count + #logout{margin-left:auto}
 #count:not([hidden]) + #logout{margin-left:0}
@@ -373,7 +372,11 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
     <h2 id="screen-groups-title">Organiser les écrans</h2>
     <fieldset class="group-targets">
       <legend>Écrans à déplacer</legend>
-      <div class="manage-screens-list"></div>
+      <div class="group-controls">
+        <button type="button" data-select-screens="all">Tout sélectionner</button>
+        <button type="button" data-select-screens="none">Tout désélectionner</button>
+      </div>
+      <div class="manage-screens-list group-choices"></div>
     </fieldset>
     <label>Groupe
       <select name="target"></select>
@@ -394,10 +397,10 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
     <fieldset class="group-targets">
       <legend>Écrans</legend>
       <div class="group-controls">
-        <button type="button" id="select-all">Tout sélectionner</button>
-        <button type="button" id="select-none">Tout désélectionner</button>
+        <button type="button" data-select-screens="all">Tout sélectionner</button>
+        <button type="button" data-select-screens="none">Tout désélectionner</button>
       </div>
-      <div id="group-screens"></div>
+      <div class="group-choices" id="group-screens"></div>
     </fieldset>
     <label>Action<select name="operation">
       <option value="source">Changer la source NDI</option>
@@ -2811,11 +2814,69 @@ async function refreshScreens() {
     }
   } catch (error) { noticeError(error); }
 }
+function selectedScreenIds(list) {
+  return Array.from(list.querySelectorAll(".screen-choice:checked"), input => input.value);
+}
+function syncGroupChoice(section) {
+  const checkbox = select(section, ".group-choice");
+  const checked = section.querySelectorAll(".screen-choice:checked").length;
+  const total = section.querySelectorAll(".screen-choice").length;
+  checkbox.checked = checked > 0 && checked === total;
+  checkbox.indeterminate = checked > 0 && checked < total;
+}
+function renderScreenChoices(list, rows, checked) {
+  const sections = [];
+  for (const [name, members] of orderedScreenGroups(rows)) {
+    const section = document.createElement("fieldset");
+    section.className = "group-section";
+    const legend = document.createElement("legend");
+    const groupLabel = document.createElement("label");
+    groupLabel.className = "check";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "group-choice";
+    checkbox.setAttribute("aria-label", name ? "Sélectionner le groupe " + name : "Sélectionner les écrans sans groupe");
+    groupLabel.append(checkbox, name || "Sans groupe");
+    legend.append(groupLabel);
+    section.append(legend);
+    for (const row of members) {
+      const label = document.createElement("label");
+      label.className = "check";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.className = "screen-choice";
+      input.value = row.id;
+      input.checked = checked;
+      const status = row.online ? "En ligne" : row.paired ? "Hors ligne" : "À associer";
+      label.append(input, row.name + " · " + status);
+      section.append(label);
+    }
+    section.addEventListener("change", event => {
+      if (event.target === checkbox) {
+        for (const input of section.querySelectorAll(".screen-choice")) input.checked = checkbox.checked;
+      }
+      syncGroupChoice(section);
+    });
+    syncGroupChoice(section);
+    sections.push(section);
+  }
+  list.replaceChildren(...sections);
+}
+function bindScreenSelectionControls(dialog, list, changed) {
+  for (const button of dialog.querySelectorAll("[data-select-screens]")) {
+    button.onclick = () => {
+      const checked = button.dataset.selectScreens === "all";
+      for (const input of list.querySelectorAll(".screen-choice")) input.checked = checked;
+      for (const section of list.querySelectorAll(".group-section")) syncGroupChoice(section);
+      changed();
+    };
+  }
+}
 function organizerFields() {
   const isNew = organizerTarget.value === "new";
   organizerName.required = isNew;
   organizerName.closest("label").hidden = !isNew;
-  select(organizerForm, '[type="submit"]').disabled = organizing || !organizerList.querySelector("input:checked");
+  select(organizerForm, '[type="submit"]').disabled = organizing || !selectedScreenIds(organizerList).length;
 }
 organizerButton.onclick = () => {
   const rows = [...cards.values()].map(card => card.data);
@@ -2824,23 +2885,16 @@ organizerButton.onclick = () => {
   for (const name of names) organizerTarget.add(new Option(name, "group:" + name));
   organizerName.value = "";
   organizerError.hidden = true;
-  organizerList.replaceChildren(...rows.map(row => {
-    const label = document.createElement("label");
-    label.className = "check";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.value = row.id;
-    label.append(input, row.name + (row.group ? " · " + row.group : ""));
-    return label;
-  }));
+  renderScreenChoices(organizerList, rows, false);
   organizerFields();
   organizer.showModal();
 };
 organizerForm.addEventListener("change", organizerFields);
+bindScreenSelectionControls(organizer, organizerList, organizerFields);
 select(organizer, ".close-organizer").onclick = () => organizer.close();
 organizerForm.onsubmit = action(() => {
   if (organizing) return;
-  const ids = [...organizerList.querySelectorAll("input:checked")].map(input => input.value);
+  const ids = selectedScreenIds(organizerList);
   if (!ids.length) return;
   organizerError.hidden = true;
   const value = organizerTarget.value;
@@ -3092,9 +3146,7 @@ const updateStates = {
   package_missing:"Moteur de cette plateforme absent sur la régie",
   newer:"Version du lecteur plus récente que la régie",
 };
-function groupSelection() {
-  return Array.from(groupScreens.querySelectorAll('input:checked'), input => input.value);
-}
+function groupSelection() { return selectedScreenIds(groupScreens); }
 const groupVolume = groupForm.elements.namedItem("volume");
 const groupVolumeValue = select(group, "#group-volume-value");
 function renderGroupVolume() {
@@ -3139,34 +3191,11 @@ groupOpen.onclick = () => {
   groupResolutionSource.dataset.choices = "";
   renderGroupVolume();
   const rows = Array.from(cards.values(), card => card.data).filter(row => row.paired);
-  groupScreens.replaceChildren(...Array.from(orderedScreenGroups(rows), ([name, members]) => {
-    const section = document.createElement("fieldset");
-    section.className = "group-section";
-    const title = document.createElement("legend");
-    title.textContent = name || "Sans groupe";
-    section.append(title);
-    for (const row of members) {
-      const label = document.createElement("label");
-      label.className = "check";
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.value = row.id;
-      input.checked = true;
-      const status = row.online ? "En ligne" : "Hors ligne";
-      label.append(input, row.name + " · " + status);
-      section.append(label);
-    }
-    return section;
-  }));
+  renderScreenChoices(groupScreens, rows, true);
   groupFields();
   group.showModal();
 };
-for (const [id, checked] of [["select-all", true], ["select-none", false]]) {
-  select(group, "#" + id).onclick = () => {
-    for (const input of groupScreens.querySelectorAll("input")) input.checked = checked;
-    groupFields();
-  };
-}
+bindScreenSelectionControls(group, groupScreens, groupFields);
 select(group, "#group-close").onclick = () => group.close();
 groupForm.addEventListener("change", groupFields);
 groupForm.onsubmit = action(() => {
