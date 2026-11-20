@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.62** et le client **1.4.31**.
+Ce kit contient la régie **1.4.63** et le client **1.4.31**.
 
 ## Installer et lancer la régie
 
@@ -253,9 +253,9 @@ les réglages de routage des deux interfaces.
 ### Serveur DHCP du réseau écrans
 
 Démarre la régie, puis clique sur **Serveur DHCP** à côté de **Partage
-Internet** dans le lanceur. Le bouton ouvre directement le panneau
-dans la console locale. Sélectionne
-l’interface dédiée aux écrans, configurée avec une IPv4 fixe. Indique
+Internet** dans le lanceur Windows. Le bouton ouvre directement le panneau
+dans le navigateur sur le PC de régie. Sélectionne l’interface dédiée aux
+écrans, configurée avec une IPv4 fixe. Indique
 une plage libre hors des adresses fixes, la durée des baux et, si le
 réseau en utilise, une passerelle et jusqu’à deux DNS. Pour un réseau
 `10.10.2.0/24`, tu peux par exemple utiliser `10.10.2.150` à

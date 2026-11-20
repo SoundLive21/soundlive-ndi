@@ -275,9 +275,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       </div>
     </div>
     <p class="small" id="traffic-help">Trafic total de l’interface sélectionnée, NDI compris lorsque ce PC diffuse.</p>
-    <div class="regie-details"><button type="button" id="regie-system-open">Informations système de la régie</button>
-      <button type="button" id="dhcp-open" __LOCAL_ONLY__>Serveur DHCP</button>
-    </div>
+    <div class="regie-details"><button type="button" id="regie-system-open">Informations système de la régie</button></div>
   </section>
   <details class="preview-section" id="source-previews">
     <summary>Aperçu des sources NDI disponibles</summary>
@@ -297,7 +295,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
     <div class="actions"><button type="submit">Fermer</button></div>
   </form>
 </dialog>
-<dialog id="dhcp-dialog" aria-labelledby="dhcp-title">
+<dialog id="dhcp-dialog" aria-labelledby="dhcp-title" __LOCAL_ONLY__>
   <form class="dialog-body" id="dhcp-form">
     <h2 id="dhcp-title">Serveur DHCP des écrans</h2>
     <p id="dhcp-state" role="status"></p>
@@ -917,7 +915,6 @@ async function call(path, data) {
 }
 
 const dhcpDialog = document.querySelector("#dhcp-dialog");
-const dhcpOpen = document.querySelector("#dhcp-open");
 const dhcpForm = document.querySelector("#dhcp-form");
 const dhcpAdapter = dhcpForm.elements.namedItem("adapter");
 const dhcpFields = document.querySelector("#dhcp-fields");
@@ -953,7 +950,7 @@ async function refreshDhcp() {
     if (dhcpDialog.open) dhcpTimer = setTimeout(refreshDhcp, 2000);
   }
 }
-dhcpOpen.onclick = action(async () => {
+async function openDhcp() {
   dhcpForm.reset();
   const status = await call("/api/dhcp?interfaces");
   dhcpAdapter.replaceChildren(...status.interfaces.map(row =>
@@ -968,7 +965,7 @@ dhcpOpen.onclick = action(async () => {
   renderDhcp(status);
   dhcpDialog.showModal();
   dhcpTimer = setTimeout(refreshDhcp, 2000);
-});
+}
 document.querySelector("#dhcp-close").onclick = () => dhcpDialog.close();
 dhcpDialog.addEventListener("close", () => clearTimeout(dhcpTimer));
 async function changeDhcp(data) {
@@ -3319,7 +3316,7 @@ refreshConnections();
 refreshRegieVersion();
 refreshTraffic();
 refreshRegieLatency();
-if (!dhcpOpen.hidden && location.hash === "#dhcp") dhcpOpen.click();
+if (!dhcpDialog.hidden && location.hash === "#dhcp") openDhcp().catch(noticeError);
 setInterval(refresh,2000);
 setInterval(refreshTraffic,2000);
 setInterval(refreshRegieLatency,5000);
