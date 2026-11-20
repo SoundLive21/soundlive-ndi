@@ -36,15 +36,15 @@ from commun import (APP_NAME, MEDIA_CHUNK, MEDIA_COUNT_LIMIT, MEDIA_DISK_PERCENT
                     media_available, media_config, media_disk, media_name, media_revision, media_timing,
                     options, release_number)
 from diagnostic import Diagnostic, NetworkRates, desktop_protocol, network_info
-from installation_lecteur import KEYS_PATH, installation_keys, prepare_installations
+from installation_lecteur import KEYS_PATH, installation_keys, prepare_installations, ssh_access_public
 from mise_a_jour import (CLIENT_UPDATE_ISSUES, ENGINE_ASSETS, OS_NAMESPACE, SAFE_ID, OpenSSHError, contents,
                          digest, engine_name, full_contents, maintenance_manifest, package, prepare_key, sign_manifest)
 from qrencoder import QRCode, QRErrorCorrectLevel
-from terminal_ssh import HostKeyCheck, Terminals
+from terminal_ssh import GROUP_LIMIT, HostKeyCheck, Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.74"
+SOFTWARE_VERSION = "1.4.75"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -89,14 +89,24 @@ OS_STATES = ("queued", "waiting", "starting", "running", "rebooting", "updated",
 UPDATE_KEY = ROOT / ".soundlive-update" / "regie"
 UPDATE_FILES = contents(ROOT)
 UPDATE_DIGEST = digest(UPDATE_FILES)
-FULL_UPDATES = {}
-for target in ENGINE_ASSETS:
-    try:
-        files = full_contents(ROOT, target, release=True)
-    except (OSError, ValueError) as error:
-        print(f"Paquet client {target} : {error}", file=sys.stderr)
-        continue
-    FULL_UPDATES[target] = (files, digest(files))
+def build_full_updates(ssh_public=""):
+    updates = {}
+    for target in ENGINE_ASSETS:
+        try:
+            files = full_contents(ROOT, target, release=True, ssh_public=ssh_public)
+        except (OSError, ValueError) as error:
+            print(f"Paquet client {target} : {error}", file=sys.stderr)
+            continue
+        updates[target] = (files, digest(files))
+    return updates
+
+
+try:
+    FULL_UPDATES = build_full_updates(ssh_access_public(ROOT))
+except (OSError, ValueError) as error:
+    print(f"Clé publique SSH de la régie : {error}", file=sys.stderr)
+    FULL_UPDATES = build_full_updates()
+
 RECEIVER_PATHS = {"/api/enroll", "/api/poll", "/api/client-package", "/api/preview-result"}
 PREVIEWS = {}
 PREVIEW_WAIT = 16
@@ -1224,6 +1234,24 @@ class Request(BaseHTTPRequestHandler):
         else:
             self.reply(200, {"report": report or ""})
 
+    def prepare_ssh_readers(self, ids):
+        with INSTALLATION_KEYS_LOCK:
+            prepare_installations(ROOT)
+            packages = build_full_updates(ssh_access_public(ROOT))
+            with LOCK:
+                FULL_UPDATES.clear()
+                FULL_UPDATES.update(packages)
+                now = time.time()
+                for key in ids:
+                    report = SCREENS.get(key, {}).get("report", {})
+                    current = CLIENT_UPDATES.get(key)
+                    pending = update_view(key, report, now) or {}
+                    desired = update_payload(report)
+                    if (current and desired and current["version"] != desired[1]
+                            and pending.get("state") in ("queued", "installing")):
+                        return 409, {"error": "Attends la fin de la mise à jour client en cours, puis prépare l’accès par clé."}
+                return batch("/api/client-updates", {"ids": ids}, now)
+
     def terminal_action(self, operation, value):
         owner = (self.client_address[0], getattr(self, "remote_session", None))
         terminals = self.server.terminals
@@ -1233,6 +1261,28 @@ class Request(BaseHTTPRequestHandler):
                 if "ssh" not in target["support"]:
                     raise ValueError("Le terminal web SSH est disponible pour les postes Linux.")
                 result = target if operation == "target" else terminals.start(owner, target["address"], value)
+            elif operation in ("group-start", "group-prepare"):
+                ids = value.get("ids")
+                if (not isinstance(ids, list) or not ids or len(ids) > GROUP_LIMIT
+                        or any(not isinstance(key, str) or key == "regie" for key in ids)):
+                    raise ValueError(f"Sélectionne entre 1 et {GROUP_LIMIT} lecteurs Raspberry Pi ou Ubuntu.")
+                with LOCK:
+                    if any(key not in SCREENS or not SCREENS[key].get("token")
+                           or SCREENS[key].get("kind") not in ("pi", "ubuntu") for key in ids):
+                        raise ValueError("Sélectionne uniquement des lecteurs Linux associés.")
+                    names = {key: SCREENS[key]["name"] for key in ids}
+                if operation == "group-prepare":
+                    self.reply(*self.prepare_ssh_readers(list(names)))
+                    return
+                targets = {}
+                for key, name in names.items():
+                    try:
+                        targets[key] = support_target(key)
+                    except ValueError as error:
+                        targets[key] = dict(name=name, error=str(error))
+                result = terminals.start_group(owner, targets, value)
+            elif operation == "group-status":
+                result = terminals.group_status(owner, value.get("job"))
             elif operation == "sync":
                 result = terminals.sync(owner, value.get("session"), value.get("input"))
             elif operation == "end":

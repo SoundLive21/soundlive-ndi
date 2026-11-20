@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.74** et le client **1.4.38**.
+Ce kit contient la régie **1.4.75** et le client **1.4.39**.
 
 ## Installer et lancer la régie
 
@@ -74,8 +74,8 @@ il est livré par le mécanisme de mise à jour des moteurs déjà en place.
 
 ### Mettre à jour le système des lecteurs Pi et Ubuntu
 
-Installe la régie **1.4.74**, puis utilise **Actions de groupe → Pousser la
-mise à jour client** pour livrer le client **1.4.38** et son script
+Mets à jour la régie, puis utilise **Actions de groupe → Pousser la
+mise à jour client** pour livrer le client et son script
 d’activation. Après confirmation de la mise à jour, lance une fois cette
 commande sur chaque lecteur déjà installé, sous son compte habituel.
 Le script peut demander le mot de passe `sudo`.
@@ -365,6 +365,26 @@ Les commandes modifient les mêmes réglages que le lanceur. Tu peux retirer
 l’autorisation depuis le lanceur. Elle expire à sa fermeture. L’arrêt de la régie coupe
 l’accès à la console web. Le DHCP déjà démarré continue de servir les écrans
 tant que le lanceur reste ouvert.
+
+### Lancer une commande SSH sur plusieurs lecteurs
+
+Dans le panneau Régie, clique sur **SSH groupé**, à côté de **Identifier
+tous les écrans**. Sélectionne les Raspberry Pi ou Ubuntu en ligne et
+clique sur **Préparer l’accès par clé**. La régie crée une identité dédiée
+si nécessaire et envoie la clé publique dans la mise à jour signée du
+lecteur. Le client l’ajoute à `~/.ssh/authorized_keys` du compte qui lance
+le lecteur. La clé privée reste sur la régie.
+
+Après confirmation de la mise à jour, saisis ce compte SSH (généralement
+`soundlive`) et une commande, par exemple `hostname`. La régie lance les
+connexions en parallèle et indique le code de sortie et les messages
+pour chaque lecteur. Les commandes non interactives qui appellent
+`sudo` doivent disposer des autorisations requises sur le lecteur.
+
+Si une empreinte SSH est inconnue ou différente, vérifie-la sur le
+lecteur avant de la saisir dans la régie. La commande reste bloquée pour
+ce lecteur jusqu’à validation. La régie conserve l’empreinte vérifiée
+pour les connexions groupées suivantes.
 
 ### Bureau distant et terminal SSH
 

@@ -11,30 +11,18 @@ install_ssh() {
 }
 
 authorize_key() {
-    /usr/bin/python3 - "$1" <<'PY'
-import os
+    /usr/bin/python3 - "$base" "$1" <<'PYTHON'
 from pathlib import Path
-import re
-import subprocess
 import sys
 
-key = Path(sys.argv[1]).read_text(encoding="utf-8").strip()
-if not re.fullmatch(r"(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)) [A-Za-z0-9+/=]+(?: [^\r\n]*)?", key):
-    raise SystemExit("Fournis une seule clé publique OpenSSH (.pub).")
-subprocess.run(["ssh-keygen", "-lf", "-"], input=key + "\n", text=True, check=True)
-identity = key.split()[1]
-os.umask(0o077)
-directory = Path.home() / ".ssh"
-directory.mkdir(exist_ok=True)
-directory.chmod(0o700)
-authorized = directory / "authorized_keys"
-with authorized.open("a+", encoding="utf-8") as output:
-    authorized.chmod(0o600)
-    output.seek(0)
-    contents = output.read()
-    if not any(identity in line.split() for line in contents.splitlines() if not line.startswith("#")):
-        output.write(("" if not contents or contents.endswith("\n") else "\n") + key + "\n")
-PY
+sys.path.insert(0, sys.argv[1])
+from mise_a_jour import authorize_ssh_key
+
+try:
+    authorize_ssh_key(Path(sys.argv[2]).read_text(encoding="utf-8").strip())
+except (OSError, RuntimeError, ValueError) as error:
+    sys.exit(str(error))
+PYTHON
     sudo systemctl enable --now ssh.service
 }
 

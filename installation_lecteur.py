@@ -45,9 +45,7 @@ def installation_keys(root):
     return json.dumps({PUBLIC_KEY: updates, SSH_PUBLIC: access}, separators=(",", ":")).encode("ascii")
 
 
-def prepare_installations(root):
-    if (root / PUBLIC_KEY).exists() and not (root / ".soundlive-update" / "regie").is_file():
-        raise ValueError("Restaure la clé privée de signature de l’ancienne régie.")
+def prepare_ssh_identity(root):
     ssh = ssh_identity(root)
     public = Path(f"{ssh}.pub")
     if not ssh.is_file():
@@ -57,6 +55,19 @@ def prepare_installations(root):
         ssh_keygen("-t", "ed25519", "-N", "", "-C", "soundlive-installation", "-f", ssh)
     if not public.is_file():
         public.write_bytes(use_signing_key(ssh, "-y", "-f", ssh))
+    return ssh
+
+
+def ssh_access_public(root):
+    key = ssh_identity(root)
+    public = Path(f"{key}.pub")
+    return public_line(public.read_text(encoding="utf-8").strip()) if key.is_file() and public.is_file() else ""
+
+
+def prepare_installations(root):
+    if (root / PUBLIC_KEY).exists() and not (root / ".soundlive-update" / "regie").is_file():
+        raise ValueError("Restaure la clé privée de signature de l’ancienne régie.")
+    prepare_ssh_identity(root)
     prepare_key(root)
     return sha256(installation_keys(root)).hexdigest()
 

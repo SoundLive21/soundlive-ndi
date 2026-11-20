@@ -36,8 +36,8 @@ from commun import (APP_NAME, COPYRIGHT, DEFAULT_SOURCE, MEDIA_CHUNK, MEDIA_DISK
                     media_available, media_config, media_disk, media_items, media_revision, options, release_number)
 from diagnostic import Diagnostic
 from mise_a_jour import (ClientUpdate, FULL_LIMIT, IDENTIFICATION_RENDER_SOURCE, IDENTIFICATION_RUNTIME,
-                         MAINTENANCE_FILES, MAINTENANCE_KIT, OS_JOB_ID, OS_NAMESPACE, RESTART,
-                         digest, engine_name, maintenance_manifest,
+                         MAINTENANCE_FILES, MAINTENANCE_KIT, OS_JOB_ID, OS_NAMESPACE, RESTART, SSH_ACCESS_KEY,
+                         authorize_ssh_key, digest, engine_name, maintenance_manifest,
                          ssh_keygen_path, update_target, verify_manifest)
 
 
@@ -2356,6 +2356,11 @@ def desktop():
         if not acquired:
             return
         with (STATE / "gestion.log").open("w", buffering=1) as log:
+            if SSH_ACCESS_KEY:
+                try:
+                    authorize_ssh_key(SSH_ACCESS_KEY)
+                except (OSError, RuntimeError, ValueError) as error:
+                    print(f"Autorisation SSH de la régie : {error}", file=log)
             screen = Screen(log)
             def quit_screen():
                 Gtk.main_quit()

@@ -189,6 +189,11 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .identify svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7}
 button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-color:#ed7788;background:#571f2b;color:#fff}
 .identify-feedback{margin:0}
+#ssh-group{width:min(710px,94vw)}
+#ssh-group textarea{display:block;width:100%;padding:10px;background:#100d12;color:inherit;border:1px solid var(--edge);border-radius:8px;resize:vertical}
+.ssh-group-result{margin:6px 0;border:1px solid var(--edge);border-radius:8px;padding:8px}
+.ssh-group-result pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:15rem;overflow:auto;margin-bottom:0}
+.ssh-group-result code{display:inline;padding:0}
 @media(max-width:460px){
   .regie-system .metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
   #regie-latency{grid-column:1/-1;display:flex}
@@ -284,6 +289,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
       <button type="button" id="regie-system-open">Informations système de la régie</button>
       <button type="button" id="network-open">Gestion réseau</button>
       <button type="button" id="identify-all" aria-pressed="false" disabled>Identifier tous les écrans</button>
+      <button type="button" id="ssh-group-open" aria-haspopup="dialog" disabled>SSH groupé</button>
     </div>
   </section>
   <details class="preview-section" id="source-previews">
@@ -414,6 +420,29 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
       <button type="button" class="close-organizer">Fermer</button>
       <button type="submit" class="primary">Enregistrer</button>
     </div>
+  </form>
+</dialog>
+<dialog id="ssh-group" aria-labelledby="ssh-group-title">
+  <form class="dialog-body">
+    <h2 id="ssh-group-title">SSH groupé</h2>
+    <fieldset class="group-targets">
+      <legend>Lecteurs Raspberry Pi et Ubuntu</legend>
+      <div class="group-controls">
+        <button type="button" data-select-screens="all">Tout sélectionner</button>
+        <button type="button" data-select-screens="none">Tout désélectionner</button>
+      </div>
+      <div class="group-choices" id="ssh-group-readers"></div>
+    </fieldset>
+    <label>Compte SSH<input name="user" value="soundlive" required maxlength="64" autocomplete="username"></label>
+    <label>Commande<textarea name="command" rows="4" maxlength="4096" required placeholder="hostname"></textarea></label>
+    <p class="small">Préparer l’accès par clé envoie une mise à jour signée aux lecteurs sélectionnés.</p>
+    <div class="actions">
+      <button type="button" id="ssh-group-prepare">Préparer l’accès par clé</button>
+      <button type="submit" class="primary">Exécuter</button>
+      <button type="button" id="ssh-group-close">Fermer</button>
+    </div>
+    <p class="small" id="ssh-group-status" role="status"></p>
+    <div id="ssh-group-results"></div>
   </form>
 </dialog>
 <dialog id="group" aria-labelledby="group-title">
@@ -2919,6 +2948,7 @@ async function refreshScreens() {
     renderSourceGallery(rows);
     organizerButton.disabled = !rows.length;
     groupOpen.disabled = !rows.some(row => row.paired);
+    sshGroupOpen.disabled = !rows.some(row => row.paired && row.online && row.support?.includes("ssh"));
     if (group.open) groupFields();
     if (diagnostics.open) {
       const inspected = cards.get(inspectedId);
@@ -2993,6 +3023,141 @@ function bindScreenSelectionControls(dialog, list, changed) {
     };
   }
 }
+const sshGroupOpen = document.querySelector("#ssh-group-open");
+const sshGroup = document.querySelector("#ssh-group");
+const sshForm = select(sshGroup, "form");
+const sshReaders = select(sshGroup, "#ssh-group-readers");
+const sshPrepare = select(sshGroup, "#ssh-group-prepare");
+const sshProgress = select(sshGroup, "#ssh-group-status");
+const sshResults = select(sshGroup, "#ssh-group-results");
+let sshBusy = false;
+
+function sshFields() {
+  const count = selectedScreenIds(sshReaders).length;
+  sshPrepare.disabled = select(sshGroup, '[type="submit"]').disabled = sshBusy || !count || count > 32;
+  if (!sshBusy && count > 32) sshProgress.textContent = "Sélectionne au maximum 32 lecteurs par exécution.";
+}
+sshGroupOpen.onclick = () => {
+  if (!sshBusy) {
+    const previous = new Set(selectedScreenIds(sshReaders));
+    const rows = [...cards.values()].map(card => card.data)
+      .filter(row => row.paired && row.online && row.support?.includes("ssh"));
+    renderScreenChoices(sshReaders, rows, false);
+    for (const input of sshReaders.querySelectorAll(".screen-choice")) input.checked = previous.has(input.value);
+    for (const section of sshReaders.querySelectorAll(".group-section")) syncGroupChoice(section);
+  }
+  sshFields();
+  sshGroup.showModal();
+};
+sshForm.addEventListener("change", sshFields);
+bindScreenSelectionControls(sshGroup, sshReaders, sshFields);
+select(sshGroup, "#ssh-group-close").onclick = () => sshGroup.close();
+
+sshPrepare.onclick = action(async () => {
+  const ids = selectedScreenIds(sshReaders);
+  if (sshBusy || !ids.length || ids.length > 32) return;
+  sshBusy = true;
+  sshFields();
+  sshProgress.textContent = "Préparation de la clé SSH de la régie…";
+  try {
+    const {results} = await call("/api/ssh/group-prepare", {ids}, 20000);
+    sshResults.replaceChildren(...results.map(row => {
+      const paragraph = document.createElement("p");
+      paragraph.className = "small";
+      paragraph.textContent = row.name + " · " + (updateStates[row.state] || row.state);
+      return paragraph;
+    }));
+    sshProgress.textContent = results.some(row => row.state === "queued") ?
+      "Attends la confirmation de la mise à jour des lecteurs avant d’exécuter une commande." : "Préparation terminée.";
+    await refresh(true);
+  } catch (error) {
+    sshProgress.textContent = error.message;
+  } finally {
+    sshBusy = false;
+    sshFields();
+  }
+});
+
+function renderSshResults(results) {
+  sshResults.replaceChildren(...results.map(row => {
+    const detail = document.createElement("details");
+    detail.className = "ssh-group-result";
+    const summary = document.createElement("summary");
+    const states = {done:"Terminé", failed:"Échec", timeout:"Délai dépassé", host_key:"Empreinte à vérifier"};
+    summary.textContent = row.name + " · " + states[row.state] +
+      (Number.isInteger(row.code) && row.code >= 0 ? " · Code " + row.code : "");
+    detail.append(summary);
+    if (row.message) {
+      const message = document.createElement("p");
+      message.textContent = row.message;
+      detail.append(message);
+    }
+    if (row.state === "host_key") {
+      detail.open = true;
+      const presented = document.createElement("p");
+      presented.textContent = "Présentée · " + row.presented + (row.expected ? " · Attendue · " + row.expected : "");
+      const hint = document.createElement("p");
+      hint.append("Sur le lecteur, vérifie l’empreinte avec ");
+      const command = document.createElement("code");
+      command.textContent = 'for cle in /etc/ssh/ssh_host_*.pub; do ssh-keygen -lf "$cle"; done';
+      hint.append(command);
+      const label = document.createElement("label");
+      label.textContent = "Empreinte SSH vérifiée";
+      const input = document.createElement("input");
+      input.dataset.reader = row.id;
+      input.placeholder = "SHA256:…";
+      input.maxLength = 50;
+      label.append(input);
+      detail.append(presented, hint, label);
+    }
+    if (row.stdout || row.stderr) {
+      const output = document.createElement("pre");
+      output.textContent = row.stdout + (row.stderr ? (row.stdout ? "\n" : "") + "stderr\n" + row.stderr : "");
+      detail.append(output);
+    }
+    if (row.truncated) {
+      const note = document.createElement("p");
+      note.textContent = "Sortie tronquée.";
+      detail.append(note);
+    }
+    return detail;
+  }));
+  const retry = new Set(results.filter(row => row.state === "host_key").map(row => row.id));
+  for (const input of sshReaders.querySelectorAll(".screen-choice")) input.checked = retry.has(input.value);
+  for (const section of sshReaders.querySelectorAll(".group-section")) syncGroupChoice(section);
+}
+
+sshForm.onsubmit = action(async () => {
+  const ids = selectedScreenIds(sshReaders);
+  if (sshBusy || !ids.length || ids.length > 32) return;
+  const data = new FormData(sshForm);
+  const fingerprints = Object.fromEntries([...sshResults.querySelectorAll("[data-reader]")]
+    .filter(input => ids.includes(input.dataset.reader) && input.value.trim())
+    .map(input => [input.dataset.reader, input.value.trim()]));
+  sshBusy = true;
+  sshFields();
+  sshProgress.textContent = "Lancement de la commande SSH…";
+  try {
+    const {job} = await call("/api/ssh/group-start", {ids, user:data.get("user").trim(),
+      command:data.get("command"), fingerprints});
+    while (true) {
+      const progress = await call("/api/ssh/group-status", {job});
+      const complete = progress.results.filter(row => row.state !== "pending").length;
+      sshProgress.textContent = complete + "/" + progress.results.length + " lecteur(s) traité(s).";
+      if (progress.done) {
+        renderSshResults(progress.results);
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 800));
+    }
+  } catch (error) {
+    sshProgress.textContent = error.message;
+  } finally {
+    sshBusy = false;
+    sshFields();
+  }
+});
+
 function organizerFields() {
   const isNew = organizerTarget.value === "new";
   organizerName.required = isNew;

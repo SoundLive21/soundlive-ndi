@@ -36,6 +36,7 @@ IDENTIFICATION_RUNTIME = {}
 IDENTIFICATION_RENDER_SOURCE = b""
 MAINTENANCE_FILES = ("installation-lecteur-linux.sh", "maintenance-os.sh", "soundlive-ndi-maintenance.service")
 MAINTENANCE_KIT = {}
+SSH_ACCESS_KEY = ""
 
 
 class OpenSSHError(RuntimeError):
@@ -86,7 +87,7 @@ def check_engine(payload, target):
         raise ValueError("Le moteur fourni ne correspond pas à la plateforme du lecteur.")
 
 
-def full_contents(folder, target, *, release=False, include_engine=True):
+def full_contents(folder, target, *, release=False, include_engine=True, ssh_public=""):
     files = contents(folder)
     launcher = folder / "lancer-client.py"
     if release or launcher.is_file():
@@ -117,11 +118,33 @@ def full_contents(folder, target, *, release=False, include_engine=True):
             files["mise_a_jour.py"] += f"IDENTIFICATION_RENDER_SOURCE = {source!r}\n".encode("ascii")
         kit = {name: (folder / name).read_bytes() for name in MAINTENANCE_FILES}
         files["mise_a_jour.py"] += f"MAINTENANCE_KIT = {kit!r}\n".encode("ascii")
+        if ssh_public:
+            files["mise_a_jour.py"] += f"SSH_ACCESS_KEY = {ssh_public!r}\n".encode("ascii")
         if sum(len(files[name]) for name in FILES) > LIMIT:
             raise ValueError("Le client et ses ressources dépassent la limite de mise à jour.")
     if sum(map(len, files.values())) > FULL_LIMIT:
         raise ValueError("Le dossier applicatif est trop volumineux.")
     return files
+
+
+def authorize_ssh_key(key):
+    import fcntl
+    if not re.fullmatch(r"(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)) [A-Za-z0-9+/=]+(?: [^\r\n]*)?", key):
+        raise ValueError("Fournis une seule clé publique OpenSSH.")
+    identity = key.split()[1]
+    directory = Path.home() / ".ssh"
+    directory.mkdir(mode=0o700, exist_ok=True)
+    directory.chmod(0o700)
+    fd = os.open(directory / "authorized_keys", os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o600)
+    with os.fdopen(fd, "a+", encoding="utf-8") as output:
+        fcntl.flock(output, fcntl.LOCK_EX)
+        os.fchmod(output.fileno(), 0o600)
+        output.seek(0)
+        contents = output.read()
+        if any(identity in line.split() for line in contents.splitlines() if not line.lstrip().startswith("#")):
+            return
+        ssh_keygen("-lf", "-", data=(key + "\n").encode("utf-8"))
+        output.write(("" if not contents or contents.endswith("\n") else "\n") + key + "\n")
 
 
 def manifest(device, job, nonce, version):
