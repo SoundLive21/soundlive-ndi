@@ -5,13 +5,16 @@
 # Société SoundLive
 import configparser
 from concurrent.futures import Future, ThreadPoolExecutor
-from base64 import b64encode
+from base64 import b64decode, b64encode
+import gzip
 from hashlib import sha256
 from http.client import HTTPException
 import json
 import os
+import platform
 import re
 import secrets
+import shlex
 import shutil
 from pathlib import Path
 import signal
@@ -19,6 +22,7 @@ import socket
 import struct
 import subprocess
 import sys
+from tempfile import TemporaryDirectory
 import textwrap
 import threading
 import time
@@ -31,7 +35,8 @@ from commun import (APP_NAME, COPYRIGHT, DEFAULT_SOURCE, MEDIA_CHUNK, MEDIA_DISK
                     ORIENTATIONS, PREVIEW_LIMIT, SOFTWARE_VERSION, client_lock,
                     media_available, media_config, media_disk, media_items, media_revision, options, release_number)
 from diagnostic import Diagnostic
-from mise_a_jour import ClientUpdate, FULL_LIMIT, RESTART, digest, engine_name, ssh_keygen_path, update_target
+from mise_a_jour import (ClientUpdate, FULL_LIMIT, IDENTIFICATION_RENDER_SOURCE, IDENTIFICATION_RUNTIME,
+                         RESTART, digest, engine_name, ssh_keygen_path, update_target)
 
 
 def native_player_path(app, client_dir, filename, linux_sdl=False):
@@ -867,6 +872,102 @@ def replace_overlay_file(path, data):
     temporary.replace(path)
 
 
+def bundled_layer_shell_directory():
+    machine = platform.machine().lower()
+    if machine in ("x86_64", "amd64") and struct.calcsize("P") == 8:
+        architecture = "amd64"
+    elif machine.startswith("arm") or machine == "aarch64":
+        architecture = "arm64" if struct.calcsize("P") == 8 else "armhf"
+    else:
+        return None
+    distributions = IDENTIFICATION_RUNTIME.get("files", {})
+    if not distributions:
+        return None
+    try:
+        codename = platform.freedesktop_os_release().get("VERSION_CODENAME", "")
+    except (AttributeError, OSError):
+        codename = ""
+    files = distributions.get(codename, distributions.get("bookworm", {})).get(architecture)
+    expected = {"libgtk-layer-shell.so.0", "GtkLayerShell-0.1.typelib"}
+    if not files or set(files) != expected:
+        return None
+    revision = digest({name: value.encode("ascii") for name, value in files.items()})[:24]
+    folder = STATE / "identification-gtk" / revision
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for name, encoded in files.items():
+        data = gzip.decompress(b64decode(encoded, validate=True))
+        path = folder / name
+        if not path.is_file() or path.read_bytes() != data:
+            replace_overlay_file(path, data)
+    notice = folder / "copyright"
+    if not notice.is_file():
+        replace_overlay_file(notice, IDENTIFICATION_RUNTIME["copyright"].encode("utf-8"))
+    return folder
+
+
+def layer_shell_module(gi):
+    try:
+        gi.require_version("GtkLayerShell", "0.1")
+    except ValueError:
+        folder = bundled_layer_shell_directory()
+        if folder is None:
+            return None
+        gi.require_version("GIRepository", "2.0")
+        from gi.repository import GIRepository
+        repository = GIRepository.Repository
+        repository.prepend_search_path(str(folder))
+        repository.prepend_library_path(str(folder))
+        gi.require_version("GtkLayerShell", "0.1")
+    from gi.repository import GtkLayerShell
+    return GtkLayerShell if GtkLayerShell.is_supported() else None
+
+
+def supports_identification(program):
+    try:
+        check = subprocess.run([str(program), "--identification"], capture_output=True, timeout=2)
+        return check.returncode == 0 and check.stdout.strip() == b"identification"
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def updated_identification_player(program, log):
+    if not IDENTIFICATION_RENDER_SOURCE or supports_identification(program):
+        return program
+    compiler = shutil.which("gcc")
+    pkg_config = shutil.which("pkg-config")
+    include = APP / "ndi-sdk/include"
+    library = APP / "lib/libndi.so.6"
+    if not compiler or not pkg_config or not (include / "Processing.NDI.Lib.h").is_file() or not library.is_file():
+        print("Identification SDL : outils de compilation ou en-têtes NDI locaux indisponibles.", file=log)
+        return program
+
+    revision = sha256(IDENTIFICATION_RENDER_SOURCE).hexdigest()[:24]
+    folder = STATE / "identification-rendu" / revision
+    engine = folder / "lecteur-ndi-ubuntu"
+    if engine.is_file() and supports_identification(engine):
+        return str(engine)
+    try:
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        flags = shlex.split(subprocess.check_output([pkg_config, "--cflags", "--libs", "sdl2"],
+                                                    text=True, stderr=subprocess.PIPE, timeout=2))
+        with TemporaryDirectory(dir=folder) as directory:
+            source = Path(directory) / "lecteur-ndi-ubuntu.c"
+            pending = Path(directory) / engine.name
+            source.write_bytes(IDENTIFICATION_RENDER_SOURCE)
+            subprocess.run([compiler, "-O2", "-std=c11", "-I", str(include), str(source), *flags,
+                            str(library), "-o", str(pending)], check=True, capture_output=True, timeout=14)
+            if not supports_identification(pending):
+                raise RuntimeError("Le nouveau moteur ne répond pas au test d’identification.")
+            pending.replace(engine)
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+        details = getattr(error, "stderr", None)
+        detail = details.decode(errors="replace")[-240:] if isinstance(details, bytes) else details or str(error)
+        print(f"Identification SDL : {detail}", file=log)
+        return program
+    print(f"Moteur SDL pour l’identification prêt : {engine}", file=log)
+    return str(engine)
+
+
 def identification_filter():
     return (f"drawtext=textfile={IDENTIFICATION_TEXT.name}:reload=1:expansion=none:fontcolor=white:"
             "fontsize=max(11\\,min(h/32\\,w/34)):box=1:boxcolor=black@0.72:boxborderw=8:"
@@ -1439,9 +1540,7 @@ def desktop():
             self.window.connect("key-press-event", self.key_press)
             wayland = (self.window.get_display().__gtype__.name == "GdkWaylandDisplay"
                        or os.environ.get("XDG_SESSION_TYPE") == "wayland")
-            if self.dashboard and UBUNTU and wayland:
-                self.dashboard.internal_preview_required = True
-                self.prepare_internal_preview()
+            self.video_engine = PLAYER
             css = Gtk.CssProvider()
             css.load_from_data(b"""
                 window {background-image:linear-gradient(145deg,#230c11,#100e11 46%,#08080a);}
@@ -1487,6 +1586,11 @@ def desktop():
             layer.add_overlay(badge)
             layer.set_overlay_pass_through(badge, True)
             self.identification_popup = self.make_identification_popup(wayland)
+            if UBUNTU and wayland and not self.identification_popup:
+                self.video_engine = updated_identification_player(PLAYER, self.log)
+            if self.dashboard and UBUNTU and wayland:
+                self.dashboard.internal_preview_required = True
+                self.prepare_internal_preview()
             replace_overlay_file(IDENTIFICATION_TEXT, b"")
             IDENTIFICATION_TEXTURE.unlink(missing_ok=True)
             self.image_page = Gtk.Layout()
@@ -1579,12 +1683,9 @@ def desktop():
             layer_shell = None
             if wayland:
                 try:
-                    gi.require_version("GtkLayerShell", "0.1")
-                    from gi.repository import GtkLayerShell
-                    if GtkLayerShell.is_supported():
-                        layer_shell = GtkLayerShell
-                except (ImportError, ValueError):
-                    pass
+                    layer_shell = layer_shell_module(gi)
+                except (ImportError, OSError, RuntimeError, ValueError, GLib.Error) as error:
+                    print(f"Surcouche GTK pour l’identification : {error}", file=self.log)
                 if layer_shell is None:
                     return None
             popup = Gtk.Window(type=Gtk.WindowType.TOPLEVEL if wayland else Gtk.WindowType.POPUP,
@@ -1701,10 +1802,13 @@ def desktop():
             signature = (program, native)
             if signature not in self.identification_probes:
                 try:
-                    probe = subprocess.run([program, "--identification"] if native else [program, "-filters"],
-                                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=3)
-                    supported = not probe.returncode and (probe.stdout.strip() == b"identification" if native
-                        else re.search(rb"(?m)^\s*(?:[.A-Z]+\s+)?drawtext(?:\s|$)", probe.stdout))
+                    if native:
+                        supported = supports_identification(program)
+                    else:
+                        probe = subprocess.run([program, "-filters"], stdout=subprocess.PIPE,
+                                               stderr=subprocess.STDOUT, timeout=3)
+                        supported = not probe.returncode and re.search(
+                            rb"(?m)^\s*(?:[.A-Z]+\s+)?drawtext(?:\s|$)", probe.stdout)
                 except (OSError, subprocess.SubprocessError):
                     supported = False
                 self.identification_probes[signature] = supported
@@ -1754,7 +1858,7 @@ def desktop():
 
         def prepare_internal_preview(self):
             try:
-                check = subprocess.run([PLAYER, "--apercu-interne"], capture_output=True, timeout=2)
+                check = subprocess.run([self.video_engine, "--apercu-interne"], capture_output=True, timeout=2)
                 if check.returncode or check.stdout.strip() != b"apercu-interne":
                     raise RuntimeError("Moteur SDL ancien. Sur le lecteur, lance installer-ubuntu.sh --mettre-a-jour-rendu puis redémarre-le.")
                 try:
@@ -1913,7 +2017,7 @@ def desktop():
                     command, source = self.media.command(self.settings)
                 elif UBUNTU:
                     READY.unlink(missing_ok=True)
-                    command = [PLAYER, self.settings["source"], self.settings["bandwidth"],
+                    command = [self.video_engine, self.settings["source"], self.settings["bandwidth"],
                                str(volume), str(READY)]
                 self.identification_output = self.identification_video(command, UBUNTU and not local)
                 env = None

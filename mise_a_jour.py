@@ -30,6 +30,8 @@ SAFE_ID = re.compile(r"[a-f0-9]{64}")
 PUBLIC_KEY = "regie-update.pub"
 RESTART = 75
 CLIENT_UPDATE_ISSUES = ("launcher_required", "client_key_required", "client_openssh_required")
+IDENTIFICATION_RUNTIME = {}
+IDENTIFICATION_RENDER_SOURCE = b""
 
 
 class OpenSSHError(RuntimeError):
@@ -94,6 +96,23 @@ def full_contents(folder, target, *, release=False, include_engine=True):
                 raise ValueError(f"Moteur trop volumineux : {path.name}.")
             files[name] = path.read_bytes()
             check_engine(files[name], target)
+    if release and target in ("pi-ffplay", "linux-arm64", "linux-amd64"):
+        resource = folder / "identification-linux.txt"
+        if resource.stat().st_size > 2 * LIMIT:
+            raise ValueError("Surcouche d’identification trop volumineuse.")
+        bundle = json.loads(resource.read_text(encoding="utf-8"))
+        architectures = ("arm64", "armhf") if target == "pi-ffplay" else (target.removeprefix("linux-"),)
+        runtime = {"copyright": bundle["copyright"], "files": {
+            name: {arch: system["architectures"][arch]["files"] for arch in architectures}
+            for name, system in bundle["distributions"].items()}}
+        # Existing readers accept these same signed Python files. Carry the resources as
+        # data in the updater module to avoid a separate install or a second push.
+        files["mise_a_jour.py"] += f"\n\nIDENTIFICATION_RUNTIME = {runtime!r}\n".encode("utf-8")
+        if engine:
+            source = (folder / "lecteur-ndi-ubuntu.c").read_bytes()
+            files["mise_a_jour.py"] += f"IDENTIFICATION_RENDER_SOURCE = {source!r}\n".encode("ascii")
+        if sum(len(files[name]) for name in FILES) > LIMIT:
+            raise ValueError("Le client et sa surcouche dépassent la limite de mise à jour.")
     if sum(map(len, files.values())) > FULL_LIMIT:
         raise ValueError("Le dossier applicatif est trop volumineux.")
     return files

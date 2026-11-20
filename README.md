@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.69** et le client **1.4.34**.
+Ce kit contient la régie **1.4.70** et le client **1.4.35**.
 
 ## Installer et lancer la régie
 
@@ -60,13 +60,17 @@ lecteurs associés, y compris ceux qui se reconnectent plus tard. Utilise le
 bouton **Masquer** correspondant pour retirer l’encadré. L’identification est
 distincte des réglages de lecture.
 
-Mets à jour les lecteurs en **1.4.34**. Pour réparer un lecteur qui signale
-un problème d’identification, utilise `bash installer-client.sh --plateforme pi --reparer-identification`
-sur un Raspberry Pi. Sur Ubuntu, remplace `pi` par `ubuntu`. La commande
-détecte le moteur utilisé au démarrage, installe la surcouche GTK pour un Pi
-en FFplay ou met à jour le client et le moteur SDL. Rouvre ensuite la session
-graphique ou redémarre le lecteur. FFplay peut afficher l’encadré avec le
-filtre `drawtext` quand le compositeur ne prend pas en charge la surcouche.
+Pousse le client **1.4.35** depuis la régie. Le paquet signé inclut la
+surcouche GTK pour Raspberry Pi OS Bookworm et Trixie. Elle se charge depuis
+le compte du lecteur sur une session Wayland compatible, sans installation
+système ni accès Internet sur le Pi. FFplay peut aussi afficher l’encadré
+avec le filtre `drawtext` sur les autres sessions Wayland.
+
+Sur un lecteur SDL, le client peut préparer un moteur compatible au
+redémarrage de la mise à jour si le compilateur, les en-têtes NDI et le
+runtime sont déjà présents. L’ancien moteur reste utilisable si la compilation
+échoue. Si tu fournis un moteur compilé compatible avec l’archive de publication,
+il est livré par le mécanisme de mise à jour des moteurs déjà en place.
 
 ### Piloter depuis un autre PC, une tablette ou un téléphone
 
