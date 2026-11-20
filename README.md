@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.63** et le client **1.4.31**.
+Ce kit contient la régie **1.4.65** et le client **1.4.31**.
 
 ## Installer et lancer la régie
 
@@ -252,11 +252,10 @@ les réglages de routage des deux interfaces.
 
 ### Serveur DHCP du réseau écrans
 
-Démarre la régie, puis clique sur **Serveur DHCP** à côté de **Partage
-Internet** dans le lanceur Windows. Le bouton ouvre directement le panneau
-dans le navigateur sur le PC de régie. Sélectionne l’interface dédiée aux
-écrans, configurée avec une IPv4 fixe. Indique
-une plage libre hors des adresses fixes, la durée des baux et, si le
+Clique sur **Serveur DHCP** à côté de **Partage Internet** dans le lanceur
+Windows ou Ubuntu. La fenêtre est accessible même quand la régie est arrêtée.
+Sélectionne l’interface dédiée aux écrans, configurée avec une IPv4 fixe.
+Indique une plage libre hors des adresses fixes, la durée des baux et, si le
 réseau en utilise, une passerelle et jusqu’à deux DNS. Pour un réseau
 `10.10.2.0/24`, tu peux par exemple utiliser `10.10.2.150` à
 `10.10.2.199` si ces adresses sont libres.
@@ -264,9 +263,10 @@ réseau en utilise, une passerelle et jusqu’à deux DNS. Pour un réseau
 Confirme que ce réseau n’a pas d’autre DHCP, puis clique sur **Démarrer
 le DHCP**. Le panneau affiche l’IP, le nom éventuel, la MAC et l’expiration
 des baux. Le serveur utilise UDP 67 sur l’interface sélectionnée. La
-configuration et les baux sont conservés dans `.soundlive-dhcp/`. Le
-serveur actif redémarre avec la régie si l’interface est toujours valide.
-Le bouton **Arrêter le DHCP** enregistre l’arrêt.
+configuration et les baux sont conservés dans `.soundlive-dhcp/`. Fermer
+la fenêtre DHCP ou arrêter la régie laisse le DHCP actif. Quitter le lanceur
+coupe le DHCP. Il est réactivé au prochain lancement si la configuration
+est toujours valide. Le bouton **Arrêter le DHCP** enregistre l’arrêt.
 
 Sous Windows, si le pare-feu bloque les requêtes, ouvre PowerShell en
 administrateur et ajoute une règle pour UDP 67 sur la seule carte des
@@ -276,8 +276,9 @@ administrateur et ajoute une règle pour UDP 67 sur la seule carte des
 New-NetFirewallRule -Name 'SoundLive-NDI-DHCP' -DisplayName 'SoundLive-NDI DHCP' -Direction Inbound -Action Allow -Protocol UDP -LocalPort 67 -InterfaceAlias 'Ethernet'
 ```
 
-Sous Linux, le compte qui lance la régie doit avoir le droit d’écouter
-sur UDP 67 et de lier le socket à cette carte. Pour répartir l’accès à
+Sous Ubuntu, si elle est nécessaire, l’autorisation d’ouvrir le port UDP 67
+sur cette interface est demandée via `pkexec` (paquet `pkexec`). Le lanceur
+et le serveur DHCP restent sous ton compte. Pour répartir l’accès à
 Internet, configure aussi le partage Internet et renseigne dans le DHCP
 l’IPv4 de la passerelle réellement joignable sur ce réseau.
 

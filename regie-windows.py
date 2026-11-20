@@ -4,6 +4,7 @@
 # Société SoundLive
 """Lanceur graphique de la régie SoundLive-NDI."""
 from base64 import b64encode
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from ipaddress import IPv4Address
 import json
@@ -21,6 +22,7 @@ import traceback
 import webbrowser
 
 from commun import APP_NAME, COPYRIGHT
+from regie_dhcp import Service as DhcpService
 
 
 def relaunch(root):
@@ -165,6 +167,172 @@ def change_internet(root, operation, gateway=None):
         return run.stdout.strip() if operation == "diagnostic" else None
 
 
+class DhcpPanel:
+    def __init__(self, parent, service, tasks):
+        self.service = service
+        self.tasks = tasks
+        self.pending = None
+        self.adapters = []
+        self.leases = None
+        self.state = None
+        self.dialog = dialog = tk.Toplevel(parent)
+        dialog.title("Serveur DHCP · Réseau écrans")
+        dialog.transient(parent)
+        dialog.protocol("WM_DELETE_WINDOW", dialog.withdraw)
+        pane = ttk.Frame(dialog, padding=16)
+        pane.pack(fill="both", expand=True)
+        pane.columnconfigure(1, weight=1)
+        pane.rowconfigure(10, weight=1)
+
+        self.status = tk.StringVar(dialog)
+        self.error = tk.StringVar(dialog)
+        ttk.Label(pane, textvariable=self.status, wraplength=560).grid(row=0, columnspan=3, sticky="w", pady=(0, 8))
+        ttk.Label(pane, text="Interface du réseau écrans").grid(row=1, column=0, sticky="w", padx=(0, 10))
+        self.selector = ttk.Combobox(pane, width=45, state="disabled")
+        self.selector.grid(row=1, column=1, sticky="ew")
+        self.reload = ttk.Button(pane, text="Actualiser", command=self.load_adapters)
+        self.reload.grid(row=1, column=2, padx=(8, 0))
+        self.fields = {}
+        self.entries = []
+        for row, (name, label, default) in enumerate((
+            ("first", "Début de plage IPv4", ""), ("last", "Fin de plage IPv4", ""),
+            ("minutes", "Durée du bail (minutes)", "480"), ("router", "Passerelle (facultative)", ""),
+            ("dns1", "DNS principal (facultatif)", ""), ("dns2", "DNS secondaire (facultatif)", ""),
+        ), start=2):
+            self.fields[name] = field = tk.StringVar(dialog, value=default)
+            ttk.Label(pane, text=label).grid(row=row, column=0, sticky="w", pady=2)
+            entry = ttk.Entry(pane, textvariable=field, width=23)
+            entry.grid(row=row, column=1, sticky="w", pady=2)
+            self.entries.append(entry)
+        self.dedicated = tk.BooleanVar(dialog)
+        ttk.Label(pane, text="Choisis une plage libre hors des adresses fixes.").grid(
+            row=8, columnspan=3, sticky="w", pady=(8, 0))
+        self.confirm = ttk.Checkbutton(pane, variable=self.dedicated, command=self.controls,
+            text="Ce réseau écrans n’a pas d’autre serveur DHCP actif.")
+        self.confirm.grid(row=9, columnspan=3, sticky="w", pady=(4, 5))
+
+        leases = ttk.LabelFrame(pane, text="Baux en cours", padding=6)
+        leases.grid(row=10, columnspan=3, sticky="nsew", pady=(4, 8))
+        leases.columnconfigure(0, weight=1)
+        leases.rowconfigure(0, weight=1)
+        self.table = ttk.Treeview(leases, columns=("ip", "hostname", "mac", "expires"), show="headings", height=4)
+        for name, label, width in (("ip", "Adresse IP", 115), ("hostname", "Nom", 145),
+                                 ("mac", "Adresse MAC", 145), ("expires", "Expiration", 150)):
+            self.table.heading(name, text=label)
+            self.table.column(name, width=width, stretch=name == "hostname")
+        self.table.grid(row=0, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(leases, orient="vertical", command=self.table.yview)
+        scroll.grid(row=0, column=1, sticky="ns")
+        self.table.configure(yscrollcommand=scroll.set)
+        ttk.Label(pane, textvariable=self.error, wraplength=560).grid(row=11, columnspan=3, sticky="w")
+
+        actions = ttk.Frame(pane)
+        actions.grid(row=12, columnspan=3, sticky="ew", pady=(8, 0))
+        self.start = ttk.Button(actions, text="Démarrer le DHCP", command=self.start_service)
+        self.stop = ttk.Button(actions, text="Arrêter le DHCP", command=self.stop_service)
+        self.start.pack(side="left", padx=(0, 8))
+        self.stop.pack(side="left")
+        ttk.Button(actions, text="Fermer", command=dialog.withdraw).pack(side="right")
+        self.selector.bind("<<ComboboxSelected>>", lambda _event: self.controls())
+        self.load_adapters()
+        self.poll()
+
+    def show(self):
+        self.dialog.deiconify()
+        self.dialog.lift()
+
+    def controls(self):
+        running = self.state and self.state["running"]
+        busy = self.pending is not None
+        editable = not (busy or running)
+        self.selector.configure(state="readonly" if editable else "disabled")
+        for field in (*self.entries, self.confirm):
+            field.configure(state="normal" if editable else "disabled")
+        self.reload.configure(state="disabled" if busy else "normal")
+        self.start.configure(state="normal" if editable and self.selector.current() >= 0
+                             and self.dedicated.get() else "disabled")
+        enabled = self.state and self.state["config"].get("enabled")
+        self.stop.configure(state="normal" if not busy and (running or enabled) else "disabled")
+
+    def run(self, message, operation, *args, **kwargs):
+        if self.pending is not None:
+            return
+        self.error.set("")
+        self.status.set(message)
+        self.pending = self.tasks.submit(operation, *args, **kwargs)
+        self.controls()
+
+    def load_adapters(self):
+        self.run("Recherche des interfaces réseau…", self.service.status, include_interfaces=True)
+
+    def start_service(self):
+        index = self.selector.current()
+        if index < 0 or not self.dedicated.get():
+            return
+        values = {name: field.get().strip() for name, field in self.fields.items()}
+        try:
+            values["minutes"] = int(values["minutes"])
+        except ValueError:
+            self.error.set("Indique une durée de bail en minutes entre 1 et 10 080.")
+            return
+        dns = [value for value in (values.pop("dns1"), values.pop("dns2")) if value]
+        row = self.adapters[index]
+        self.run("Démarrage du DHCP…", self.service.start, dict(values, adapter=row["id"], ip=row["ip"], dns=dns))
+
+    def stop_service(self):
+        self.run("Arrêt du DHCP…", self.service.stop)
+
+    def configure_adapters(self, status):
+        index = self.selector.current()
+        previous = self.adapters[index] if index >= 0 else {}
+        config = status["config"]
+        selected = (previous.get("id", config.get("adapter")), previous.get("ip", config.get("ip")))
+        self.adapters = status["interfaces"]
+        self.selector.configure(values=[f"{row['label']} · {row['ip']} · {row['network']}" for row in self.adapters])
+        index = next((i for i, row in enumerate(self.adapters) if (row["id"], row["ip"]) == selected),
+                     0 if len(self.adapters) == 1 else -1)
+        if index >= 0:
+            self.selector.current(index)
+        else:
+            self.selector.set("")
+
+    def poll(self):
+        if self.pending is not None and not self.pending.done():
+            self.dialog.after(150, self.poll)
+            return
+        if self.pending is not None:
+            try:
+                status = self.pending.result()
+                if status is not None:
+                    self.configure_adapters(status)
+            except (OSError, RuntimeError, ValueError) as error:
+                self.error.set(str(error))
+            self.pending = None
+        status = self.service.status()
+        config = status["config"]
+        if self.state is None:
+            for name in ("first", "last", "minutes", "router"):
+                if name in config:
+                    self.fields[name].set(config[name])
+            for name, value in zip(("dns1", "dns2"), config.get("dns") or []):
+                self.fields[name].set(value)
+        self.state = status
+        label = f"DHCP actif · {config.get('ip')} · UDP 67" if status["running"] else "DHCP arrêté"
+        if not self.adapters and not status["running"]:
+            label += " · Aucune interface dédiée à IPv4 fixe détectée."
+        self.status.set(label + ("\n" + status["error"] if status["error"] else ""))
+        if self.leases != status["leases"]:
+            self.leases = status["leases"]
+            children = self.table.get_children()
+            if children:
+                self.table.delete(*children)
+            for row in self.leases:
+                expiry = datetime.fromtimestamp(row["expires"]).strftime("%d/%m/%Y %H:%M:%S")
+                self.table.insert("", "end", values=(row["ip"], row["hostname"], row["mac"], expiry))
+        self.controls()
+        self.dialog.after(1200, self.poll)
+
+
 class Launcher:
     def __init__(self, window, tableau, access):
         self.window = window
@@ -185,6 +353,10 @@ class Launcher:
         self.remote_address = tk.StringVar(value="—")
         self.connection_status = tk.StringVar(value="Accès distant arrêté")
         self.internet = None
+        self.dhcp = DhcpService(tableau.ROOT / ".soundlive-dhcp", tableau.dhcp_interfaces)
+        self.dhcp_panel = None
+        self.dhcp_tasks = ThreadPoolExecutor(max_workers=1)
+        self.dhcp_shutdown = None
 
         window.title(f"{APP_NAME} · Régie {tableau.SOFTWARE_VERSION}")
         window.minsize(620, 510)
@@ -273,8 +445,7 @@ class Launcher:
         share = ttk.Frame(panel)
         share.grid(row=7, sticky="ew", pady=(10, 0))
         ttk.Button(share, text="Partage Internet", command=self.internet_dialog).pack(side="left")
-        self.dhcp_button = ttk.Button(share, text="Serveur DHCP", command=self.open_dhcp)
-        self.dhcp_button.pack(side="left", padx=(8, 0))
+        ttk.Button(share, text="Serveur DHCP", command=self.open_dhcp).pack(side="left", padx=(8, 0))
         ttk.Label(panel, text=COPYRIGHT).grid(row=8, sticky="w", pady=(8, 0))
         window.update_idletasks()
         viewport.configure(width=min(panel.winfo_reqwidth(), window.winfo_screenwidth() * 9 // 10),
@@ -284,6 +455,7 @@ class Launcher:
         if not tableau.DATA.exists():
             self.status.set("Aucun écran associé dans ce dossier de régie")
         self.load_interfaces()
+        self.dhcp_tasks.submit(self.dhcp.restore)
         self.tick()
 
     def load_interfaces(self):
@@ -430,7 +602,6 @@ class Launcher:
         self.start_button.configure(state="normal" if stopped else "disabled")
         self.stop_button.configure(state="normal" if self.regie and not self.busy else "disabled")
         self.open_button.configure(state="normal" if self.regie and not self.busy else "disabled")
-        self.dhcp_button.configure(state="disabled" if self.busy else "normal")
         remote = self.regie and self.regie.remote_url and not self.busy
         self.copy_button.configure(state="normal" if remote else "disabled")
         self.certificate_button.configure(state="normal" if remote else "disabled")
@@ -595,7 +766,7 @@ class Launcher:
                 messagebox.showerror("Démarrage impossible", result[1], parent=self.window)
             self.controls()
         if self.closing and not self.busy and self.regie is None:
-            self.window.destroy()
+            self.finish_close()
             return
         self.refresh_remote_list()
         self.show_publication(self.publication_status.read())
@@ -623,20 +794,45 @@ class Launcher:
         self.moderation_controls()
 
     def close(self):
+        if self.closing:
+            return
         self.closing = True
         if self.regie is not None:
             self.stop()
         elif not self.busy:
+            self.finish_close()
+
+    def finish_close(self, restart=False):
+        if self.dhcp_shutdown is not None:
+            return
+        self.closing = True
+        self.window.withdraw()
+        if self.dhcp_panel is not None:
+            self.dhcp_panel.dialog.withdraw()
+        self.dhcp_shutdown = self.dhcp_tasks.submit(self.dhcp.stop, disable=False)
+        self.dhcp_tasks.shutdown(wait=False)
+
+        def finish():
+            if not self.dhcp_shutdown.done():
+                self.window.after(120, finish)
+                return
+            if restart:
+                try:
+                    relaunch(self.tableau.ROOT)
+                except OSError as error:
+                    messagebox.showwarning("Mise à jour installée",
+                        f"Le lanceur n’a pas pu redémarrer. Ouvre-le manuellement.\n\n{error}", parent=self.window)
             self.window.destroy()
+
+        finish()
 
     def open_dashboard(self):
         webbrowser.open(self.regie.local_url)
 
     def open_dhcp(self):
-        if self.regie is None:
-            messagebox.showinfo("Serveur DHCP", "Démarre la régie pour ouvrir le panneau DHCP.", parent=self.window)
-            return
-        webbrowser.open(self.regie.local_url + "/#dhcp")
+        if self.dhcp_panel is None:
+            self.dhcp_panel = DhcpPanel(self.window, self.dhcp, self.dhcp_tasks)
+        self.dhcp_panel.show()
 
     def show_publication(self, status):
         state = status["state"]
@@ -721,12 +917,8 @@ class Launcher:
                 if not ok:
                     outcome.set(value)
                 elif installing:
-                    try:
-                        relaunch(root)
-                    except OSError as error:
-                        messagebox.showwarning("Mise à jour installée",
-                            f"Le lanceur n’a pas pu redémarrer. Ouvre-le manuellement.\n\n{error}", parent=form)
-                    self.window.destroy()
+                    form.destroy()
+                    self.finish_close(restart=True)
                 elif selected:
                     outcome.set(f"Version {selected[0]} disponible.")
                     if self.regie is not None:

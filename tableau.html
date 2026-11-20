@@ -295,33 +295,6 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
     <div class="actions"><button type="submit">Fermer</button></div>
   </form>
 </dialog>
-<dialog id="dhcp-dialog" aria-labelledby="dhcp-title" __LOCAL_ONLY__>
-  <form class="dialog-body" id="dhcp-form">
-    <h2 id="dhcp-title">Serveur DHCP des écrans</h2>
-    <p id="dhcp-state" role="status"></p>
-    <fieldset id="dhcp-fields">
-      <div class="pair-grid">
-        <label>Interface du réseau écrans<select name="adapter" required></select></label>
-        <label>Début de plage IPv4<input name="first" placeholder="10.10.2.150" maxlength="15" required></label>
-        <label>Fin de plage IPv4<input name="last" placeholder="10.10.2.199" maxlength="15" required></label>
-        <label>Bail (minutes)<input name="minutes" type="number" value="480" required min="1" max="10080"></label>
-        <label>Passerelle (facultative)<input name="router" placeholder="10.10.2.87" maxlength="15"></label>
-        <label>DNS principal (facultatif)<input name="dns1" placeholder="1.1.1.1" maxlength="15"></label>
-        <label>DNS secondaire (facultatif)<input name="dns2" placeholder="1.0.0.1" maxlength="15"></label>
-      </div>
-      <p class="small">Choisis une plage libre, hors des adresses fixes des écrans et des équipements.</p>
-      <label class="check"><input type="checkbox" name="dedicated" required> Ce réseau écrans n’a pas d’autre serveur DHCP actif.</label>
-    </fieldset>
-    <h3>Baux en cours</h3>
-    <p class="small" id="dhcp-no-leases">Aucun bail actif.</p>
-    <ul class="interfaces" id="dhcp-leases"></ul>
-    <div class="actions">
-      <button type="submit" class="primary" id="dhcp-start">Démarrer le DHCP</button>
-      <button type="button" id="dhcp-stop" disabled>Arrêter le DHCP</button>
-      <button type="button" id="dhcp-close">Fermer</button>
-    </div>
-  </form>
-</dialog>
 <dialog id="session-warning" aria-labelledby="session-title" aria-describedby="session-detail">
   <div class="dialog-body">
     <h2 id="session-title">Ta session va expirer</h2>
@@ -913,86 +886,6 @@ async function call(path, data) {
     clearTimeout(timer);
   }
 }
-
-const dhcpDialog = document.querySelector("#dhcp-dialog");
-const dhcpForm = document.querySelector("#dhcp-form");
-const dhcpAdapter = dhcpForm.elements.namedItem("adapter");
-const dhcpFields = document.querySelector("#dhcp-fields");
-const dhcpStart = document.querySelector("#dhcp-start");
-const dhcpStop = document.querySelector("#dhcp-stop");
-let dhcpTimer = 0, dhcpBusy = false;
-function renderDhcp({running, error, config, leases}) {
-  const address = config.ip ? " · " + config.ip + " / UDP 67" : "";
-  document.querySelector("#dhcp-state").textContent = error ||
-    (running ? "DHCP actif" + address : dhcpAdapter.options.length ? "DHCP arrêté" :
-      "Aucune interface dédiée avec une IPv4 fixe n’est disponible.");
-  dhcpFields.disabled = dhcpBusy || running;
-  dhcpStart.disabled = dhcpFields.disabled || !dhcpAdapter.options.length;
-  dhcpStop.disabled = dhcpBusy || (!running && !config.enabled);
-  document.querySelector("#dhcp-no-leases").hidden = Boolean(leases.length);
-  document.querySelector("#dhcp-leases").replaceChildren(...leases.map(row => {
-    const item = document.createElement("li");
-    const expiry = new Date(row.expires * 1000).toLocaleString("fr-FR");
-    item.textContent = [row.ip, row.hostname, row.mac, "Expiration " + expiry].filter(Boolean).join(" · ");
-    return item;
-  }));
-}
-async function refreshDhcp() {
-  if (!dhcpDialog.open) return;
-  try {
-    if (!dhcpBusy) {
-      const status = await call("/api/dhcp");
-      if (!dhcpBusy && dhcpDialog.open) renderDhcp(status);
-    }
-  } catch (error) {
-    document.querySelector("#dhcp-state").textContent = error.message;
-  } finally {
-    if (dhcpDialog.open) dhcpTimer = setTimeout(refreshDhcp, 2000);
-  }
-}
-async function openDhcp() {
-  dhcpForm.reset();
-  const status = await call("/api/dhcp?interfaces");
-  dhcpAdapter.replaceChildren(...status.interfaces.map(row =>
-    new Option(row.label + " · " + row.ip + " · " + row.network, JSON.stringify([row.id, row.ip]))));
-  const config = status.config;
-  const saved = JSON.stringify([config.adapter, config.ip]);
-  if ([...dhcpAdapter.options].some(item => item.value === saved)) dhcpAdapter.value = saved;
-  for (const field of ["first", "last", "router", "minutes"]) {
-    if (config[field] !== undefined) dhcpForm.elements.namedItem(field).value = config[field];
-  }
-  for (const index of [0, 1]) dhcpForm.elements.namedItem("dns" + (index + 1)).value = config.dns?.[index] || "";
-  renderDhcp(status);
-  dhcpDialog.showModal();
-  dhcpTimer = setTimeout(refreshDhcp, 2000);
-}
-document.querySelector("#dhcp-close").onclick = () => dhcpDialog.close();
-dhcpDialog.addEventListener("close", () => clearTimeout(dhcpTimer));
-async function changeDhcp(data) {
-  if (dhcpBusy) return;
-  dhcpBusy = true;
-  dhcpFields.disabled = dhcpStart.disabled = dhcpStop.disabled = true;
-  try {
-    const next = await call("/api/dhcp", data);
-    dhcpBusy = false;
-    renderDhcp(next);
-  } catch (error) {
-    dhcpBusy = false;
-    try { renderDhcp(await call("/api/dhcp")); } catch {}
-    noticeError(error);
-  } finally {
-    dhcpBusy = false;
-  }
-}
-dhcpForm.onsubmit = event => {
-  event.preventDefault();
-  const form = new FormData(dhcpForm);
-  const [adapter, ip] = JSON.parse(form.get("adapter"));
-  const dns = [form.get("dns1"), form.get("dns2")].map(value => value.trim()).filter(Boolean);
-  changeDhcp({operation:"start", adapter, ip, first:form.get("first").trim(), last:form.get("last").trim(),
-    router:form.get("router").trim(), minutes:Number(form.get("minutes")), dns, dedicated:form.has("dedicated")});
-};
-dhcpStop.onclick = () => changeDhcp({operation:"stop"});
 
 function createPreview(parent, title, target, screen = false) {
   const element = document.querySelector("#preview-template").content.firstElementChild.cloneNode(true);
@@ -3316,7 +3209,6 @@ refreshConnections();
 refreshRegieVersion();
 refreshTraffic();
 refreshRegieLatency();
-if (!dhcpDialog.hidden && location.hash === "#dhcp") openDhcp().catch(noticeError);
 setInterval(refresh,2000);
 setInterval(refreshTraffic,2000);
 setInterval(refreshRegieLatency,5000);

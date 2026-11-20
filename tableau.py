@@ -40,12 +40,11 @@ from installation_lecteur import KEYS_PATH, installation_keys, prepare_installat
 from mise_a_jour import (CLIENT_UPDATE_ISSUES, ENGINE_ASSETS, SAFE_ID, OpenSSHError, contents, digest,
                          engine_name, full_contents, package, prepare_key)
 from qrencoder import QRCode, QRErrorCorrectLevel
-from regie_dhcp import Service as DhcpService
 from terminal_ssh import HostKeyCheck, Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.63"
+SOFTWARE_VERSION = "1.4.65"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -923,8 +922,7 @@ class Request(BaseHTTPRequestHandler):
         elif path == "/api/media-download":
             self.send_media_archive(url.query)
         elif path == "/":
-            self.reply(200, PAGE.replace(b"__REMOTE_ONLY__", b"" if remote else b"hidden")
-                       .replace(b"__LOCAL_ONLY__", b"hidden" if remote else b""))
+            self.reply(200, PAGE.replace(b"__REMOTE_ONLY__", b"" if remote else b"hidden"))
         elif path == "/terminal":
             self.reply(200, TERMINAL_PAGE)
         elif remote and path == "/connexion":
@@ -938,16 +936,6 @@ class Request(BaseHTTPRequestHandler):
                              "desktop_protocol": desktop_protocol(), "support": regie_support_methods()})
         elif path == "/api/interface-traffic":
             self.reply(200, self.server.interface_traffic.read())
-        elif path == "/api/dhcp":
-            if remote:
-                self.reply(403, {"error": "Le DHCP se gère depuis la console locale de la régie."})
-                return
-            try:
-                result = self.server.dhcp.status(include_interfaces=url.query == "interfaces")
-            except (OSError, RuntimeError, ValueError) as error:
-                self.reply(409, {"error": str(error)})
-                return
-            self.reply(200, result)
         elif path == "/api/regie-latency":
             self.reply(200, {"ok": True})
         elif path == "/api/regie-version":
@@ -1048,22 +1036,6 @@ class Request(BaseHTTPRequestHandler):
             value = json.loads(payload)
             if not isinstance(value, dict):
                 raise ValueError("Requête invalide.")
-            if path == "/api/dhcp":
-                if remote:
-                    self.reply(403, {"error": "Le DHCP se gère depuis la console locale de la régie."})
-                    return
-                try:
-                    if value.get("operation") == "start" and value.get("dedicated") is True:
-                        self.server.dhcp.start(value)
-                    elif value.get("operation") == "stop":
-                        self.server.dhcp.stop()
-                    else:
-                        raise ValueError("Confirme que le réseau écrans dispose d’un seul serveur DHCP.")
-                except (OSError, RuntimeError, ValueError) as error:
-                    self.reply(409, {"error": str(error)})
-                    return
-                self.reply(200, self.server.dhcp.status())
-                return
             if path == "/api/pair":
                 value.pop("installation_fingerprint", None)
                 if value.get("prepare_installation") is True:
@@ -1682,7 +1654,6 @@ class Regie:
         self.connections = None
         self.server = ThreadingHTTPServer(("0.0.0.0", port), Request)
         self.server.terminals = Terminals()
-        self.server.dhcp = DhcpService(ROOT / ".soundlive-dhcp", dhcp_interfaces)
         self.server.interface_traffic = InterfaceTraffic()
         self.server.publication_status = publication_status or PublicationStatus(
             ROOT / "source-publications.json", SOFTWARE_VERSION)
@@ -1720,13 +1691,11 @@ class Regie:
                 self.remote.server_close()
             self.server.server_close()
             raise
-        self.server.dhcp.restore()
         if self.remote is not None:
             threading.Thread(target=self.remote.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True).start()
         threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True).start()
 
     def close(self):
-        self.server.dhcp.stop(disable=False)
         self.server.terminals.close()
         for server in (self.remote, self.server):
             if server is not None:

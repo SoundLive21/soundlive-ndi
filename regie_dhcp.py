@@ -2,8 +2,12 @@
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Interface, IPv4Network
 import json
+import os
+from pathlib import Path
+import shutil
 import socket
 import struct
+import subprocess
 import sys
 from threading import Event, Lock, Thread
 from time import monotonic, time
@@ -245,18 +249,18 @@ class Leases:
         return None
 
 
-def open_listener(settings):
+def bind_listener(interface, index=None):
     listener = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     try:
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         if sys.platform == "win32":
             listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
             listener.setsockopt(socket.IPPROTO_IP, IP_IFLIST, 1)
-            listener.setsockopt(socket.IPPROTO_IP, IP_ADD_IFLIST, int(settings.adapter["index"]))
-            listener.setsockopt(socket.IPPROTO_IP, IP_UNICAST_IF, struct.pack("!I", settings.adapter["index"]))
+            listener.setsockopt(socket.IPPROTO_IP, IP_ADD_IFLIST, index)
+            listener.setsockopt(socket.IPPROTO_IP, IP_UNICAST_IF, struct.pack("!I", index))
         elif sys.platform.startswith("linux"):
             listener.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE,
-                                settings.adapter["label"].encode() + b"\0")
+                                interface.encode() + b"\0")
         else:
             raise ValueError("Le serveur DHCP intégré est disponible sous Windows et Linux.")
         listener.bind(("", 67))
@@ -265,6 +269,48 @@ def open_listener(settings):
         listener.close()
         raise
     return listener
+
+
+def open_listener_elevated(interface):
+    pkexec = shutil.which("pkexec")
+    if not pkexec:
+        raise RuntimeError("Installe pkexec pour autoriser l’ouverture du port DHCP sous Ubuntu.")
+    command = [pkexec, "--disable-internal-agent", "/usr/bin/python3", "-I",
+               str(Path(__file__).resolve()), "--ouvrir-socket", interface]
+    # Only the bound socket is returned. Configuration and leases stay in the launcher process.
+    incoming, outgoing = socket.socketpair()
+    with incoming, outgoing:
+        try:
+            result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=outgoing, stderr=subprocess.PIPE,
+                                    text=True, errors="replace", timeout=90)
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError("La demande d’autorisation DHCP a expiré.") from error
+        outgoing.close()
+        if result.returncode == 126:
+            raise RuntimeError("La demande d’autorisation DHCP a été annulée.")
+        if result.returncode:
+            raise RuntimeError(result.stderr.strip() or "L’autorisation d’ouverture du port DHCP a échoué.")
+        incoming.settimeout(2)
+        message, descriptors, _, _ = socket.recv_fds(incoming, 1, 1)
+        try:
+            if message != b"D" or len(descriptors) != 1:
+                raise RuntimeError("Le système n’a pas transmis le socket DHCP.")
+            listener = socket.fromfd(descriptors[0], socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        finally:
+            for descriptor in descriptors:
+                os.close(descriptor)
+    listener.settimeout(0.25)
+    return listener
+
+
+def open_listener(settings):
+    interface = settings.adapter["label"]
+    try:
+        return bind_listener(interface, settings.adapter["index"])
+    except PermissionError:
+        if not sys.platform.startswith("linux") or os.geteuid() == 0:
+            raise
+    return open_listener_elevated(interface)
 
 
 class Service:
@@ -379,3 +425,15 @@ class Service:
         if include_interfaces:
             result["interfaces"] = candidates(self.interfaces())
         return result
+
+
+if __name__ == "__main__":
+    if not sys.platform.startswith("linux") or len(sys.argv) != 3 or sys.argv[1] != "--ouvrir-socket":
+        sys.exit("Ce module DHCP est utilisé par le lanceur SoundLive-NDI.")
+    interface = sys.argv[2]
+    try:
+        socket.if_nametoindex(interface)
+        with socket.socket(fileno=sys.stdout.fileno()) as channel, bind_listener(interface) as listener:
+            socket.send_fds(channel, [b"D"], [listener.fileno()])
+    except OSError as error:
+        sys.exit(f"Impossible d’ouvrir DHCP UDP 67 sur {interface}. {error}")
