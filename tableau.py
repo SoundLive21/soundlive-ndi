@@ -44,7 +44,7 @@ from terminal_ssh import GROUP_LIMIT, HostKeyCheck, Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.75"
+SOFTWARE_VERSION = "1.4.76"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -1257,10 +1257,11 @@ class Request(BaseHTTPRequestHandler):
         terminals = self.server.terminals
         try:
             if operation in ("target", "start"):
-                target = support_target(value.get("id"))
+                key = value.get("id")
+                target = support_target(key)
                 if "ssh" not in target["support"]:
                     raise ValueError("Le terminal web SSH est disponible pour les postes Linux.")
-                result = target if operation == "target" else terminals.start(owner, target["address"], value)
+                result = target if operation == "target" else terminals.start(owner, key, target["address"], value)
             elif operation in ("group-start", "group-prepare"):
                 ids = value.get("ids")
                 if (not isinstance(ids, list) or not ids or len(ids) > GROUP_LIMIT

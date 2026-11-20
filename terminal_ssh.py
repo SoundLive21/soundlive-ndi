@@ -37,11 +37,16 @@ class HostKeyCheck(RuntimeError):
         super().__init__("Empreinte SSH différente." if expected else "Empreinte SSH inconnue.")
 
 
-def connect_client(paramiko, client, host, user, auth, fingerprint):
+def connect_client(paramiko, client, host, user, auth, fingerprint, on_verified=None):
+    warning = ""
+
     class HostKeyPolicy(paramiko.MissingHostKeyPolicy):
         def missing_host_key(self, _client, _hostname, key):
+            nonlocal warning
             if not hmac.compare_digest(fingerprint, key_fingerprint(key)):
                 raise HostKeyCheck(key, fingerprint or None)
+            if on_verified:
+                warning = on_verified()
 
     if not fingerprint:
         client.load_system_host_keys()
@@ -59,6 +64,7 @@ def connect_client(paramiko, client, host, user, auth, fingerprint):
         raise RuntimeError(detail) from error
     except (paramiko.SSHException, OSError) as error:
         raise RuntimeError("Connexion SSH impossible. Vérifie le service et l’adresse.") from error
+    return warning
 
 
 def group_command(client, command, ssh_error):
@@ -153,7 +159,13 @@ class Terminals:
         for session in active:
             session.close()
 
-    def start(self, owner, host, data):
+    def connect_reader(self, paramiko, client, key, address, user, auth, entered):
+        with self.lock:
+            fingerprint = entered or self.pins.get(key, "")
+        callback = (lambda: self.save_pin(key, entered)) if entered else None
+        return connect_client(paramiko, client, address, user, auth, fingerprint, callback)
+
+    def start(self, owner, key, host, data):
         user = data.get("user", "")
         method = data.get("auth", "key")
         fingerprint = data.get("fingerprint", "")
@@ -191,7 +203,7 @@ class Terminals:
             self.sessions[identifier] = session
         try:
             client = session.client
-            connect_client(paramiko, client, host, user, auth, fingerprint)
+            warning = self.connect_reader(paramiko, client, key, host, user, auth, fingerprint)
             session.screen = pyte.Screen(COLUMNS, LINES)
             session.stream = pyte.ByteStream(session.screen)
             session.channel = client.invoke_shell(term="xterm", width=COLUMNS, height=LINES)
@@ -201,7 +213,7 @@ class Terminals:
             if isinstance(error, (paramiko.SSHException, OSError)):
                 raise RuntimeError("Connexion SSH impossible. Vérifie le service et l’adresse.") from error
             raise
-        return {"session": identifier, "columns": COLUMNS, "lines": LINES}
+        return {"session": identifier, "columns": COLUMNS, "lines": LINES, "pin_warning": warning}
 
     def start_group(self, owner, targets, data):
         user, command = data.get("user"), data.get("command")
@@ -231,7 +243,7 @@ class Terminals:
             job = self.groups[identifier] = dict(owner=owner, results=rows, finished=None)
             for key, target in targets.items():
                 if "address" in target:
-                    pin = pins.get(key, self.pins.get(key, ""))
+                    pin = pins.get(key, "")
                     self.executor.submit(self.run_target, paramiko, job, key, target["address"], user, command, identity, pin)
             if not any(row["state"] == "pending" for row in rows.values()):
                 job["finished"] = time.monotonic()
@@ -241,8 +253,7 @@ class Terminals:
         client = None
         try:
             client = paramiko.SSHClient()
-            connect_client(paramiko, client, address, user, {"key_filename": str(identity)}, pin)
-            message = self.save_pin(key, pin) if pin else ""
+            message = self.connect_reader(paramiko, client, key, address, user, {"key_filename": str(identity)}, pin)
             result = group_command(client, command, paramiko.SSHException)
             if message:
                 result["message"] = " ".join(filter(None, (result["message"], message)))

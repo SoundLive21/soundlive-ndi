@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.75** et le client **1.4.39**.
+Ce kit contient la régie **1.4.76** et le client **1.4.39**.
 
 ## Installer et lancer la régie
 
@@ -384,7 +384,7 @@ pour chaque lecteur. Les commandes non interactives qui appellent
 Si une empreinte SSH est inconnue ou différente, vérifie-la sur le
 lecteur avant de la saisir dans la régie. La commande reste bloquée pour
 ce lecteur jusqu’à validation. La régie conserve l’empreinte vérifiée
-pour les connexions groupées suivantes.
+pour le terminal individuel et les connexions groupées suivantes.
 
 ### Bureau distant et terminal SSH
 
@@ -483,9 +483,11 @@ for cle in /etc/ssh/ssh_host_*.pub; do ssh-keygen -lf "$cle"; done
 ```
 
 Saisis l’empreinte correspondante dans **Empreinte SSH vérifiée** puis clique
-sur **Connecter**. Cette empreinte est utilisée pour la connexion en cours,
-y compris quand la clé d’hôte a changé depuis son enregistrement dans
-`known_hosts`.
+sur **Connecter**. La régie enregistre l’empreinte quand la clé présentée
+correspond, même si le compte SSH refuse ensuite l’authentification.
+Le terminal individuel et **SSH groupé** réutilisent cette empreinte.
+Si la clé d’hôte change à nouveau, vérifie la nouvelle empreinte depuis
+le lecteur puis saisis-la pour remplacer celle enregistrée.
 
 Clique dans le terminal pour coller avec **Ctrl+V**. Le bouton **Coller des
 commandes** ouvre une zone où tu peux relire le texte avant de l’envoyer.

@@ -158,7 +158,8 @@ form.onsubmit = async event => {
     session = opened.session;
     hostKey.hidden = true;
     terminal.textContent = "";
-    message("Session SSH ouverte");
+    if (!opened.pin_warning) sshFingerprint.value = "";
+    message(opened.pin_warning || "Session SSH ouverte", Boolean(opened.pin_warning));
     controls();
     terminalInput.focus();
     sync();
