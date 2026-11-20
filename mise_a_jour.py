@@ -34,6 +34,8 @@ RESTART = 75
 CLIENT_UPDATE_ISSUES = ("launcher_required", "client_key_required", "client_openssh_required")
 IDENTIFICATION_RUNTIME = {}
 IDENTIFICATION_RENDER_SOURCE = b""
+MAINTENANCE_FILES = ("installation-lecteur-linux.sh", "maintenance-os.sh", "soundlive-ndi-maintenance.service")
+MAINTENANCE_KIT = {}
 
 
 class OpenSSHError(RuntimeError):
@@ -113,8 +115,10 @@ def full_contents(folder, target, *, release=False, include_engine=True):
         if engine:
             source = (folder / "lecteur-ndi-ubuntu.c").read_bytes()
             files["mise_a_jour.py"] += f"IDENTIFICATION_RENDER_SOURCE = {source!r}\n".encode("ascii")
+        kit = {name: (folder / name).read_bytes() for name in MAINTENANCE_FILES}
+        files["mise_a_jour.py"] += f"MAINTENANCE_KIT = {kit!r}\n".encode("ascii")
         if sum(len(files[name]) for name in FILES) > LIMIT:
-            raise ValueError("Le client et sa surcouche dépassent la limite de mise à jour.")
+            raise ValueError("Le client et ses ressources dépassent la limite de mise à jour.")
     if sum(map(len, files.values())) > FULL_LIMIT:
         raise ValueError("Le dossier applicatif est trop volumineux.")
     return files

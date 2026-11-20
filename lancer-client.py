@@ -37,6 +37,24 @@ def launcher_lock(path):
         yield True
 
 
+def activate_maintenance():
+    if sys.platform != "linux" or os.geteuid() == 0:
+        sys.exit("Lance l’activation sous le compte du lecteur Linux, sans sudo devant Python.")
+    from mise_a_jour import ClientUpdate, SAFE_ID
+
+    updater = ClientUpdate(APP, APP)
+    active = updater.read().get("active")
+    if isinstance(active, str) and SAFE_ID.fullmatch(active):
+        entry = updater.versions / active / "ecran.py"
+        if entry.is_file():
+            with launcher_lock(updater.versions / "maintenance-activation.lock") as acquired:
+                if not acquired:
+                    sys.exit("Une activation est déjà en cours.")
+                env = {**os.environ, "SOUNDLIVE_APP": str(APP)}
+                return subprocess.call([sys.executable, "-B", str(entry), "--activer-maintenance-os"], env=env)
+    sys.exit("Pousse le client 1.4.38 depuis la régie et attends la confirmation de la mise à jour.")
+
+
 def main():
     if sys.platform != "win32" and os.geteuid() == 0:
         sys.exit("Lance SoundLive-NDI avec le compte de la session graphique.")
@@ -102,6 +120,11 @@ def main():
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--activer-maintenance-os"]:
+        try:
+            sys.exit(activate_maintenance())
+        except (OSError, ValueError) as error:
+            sys.exit(str(error))
     if sys.platform == "win32" or os.geteuid() == 0:
         sys.exit(main())
     state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "soundlive-ndi"

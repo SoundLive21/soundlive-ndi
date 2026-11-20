@@ -36,7 +36,8 @@ from commun import (APP_NAME, COPYRIGHT, DEFAULT_SOURCE, MEDIA_CHUNK, MEDIA_DISK
                     media_available, media_config, media_disk, media_items, media_revision, options, release_number)
 from diagnostic import Diagnostic
 from mise_a_jour import (ClientUpdate, FULL_LIMIT, IDENTIFICATION_RENDER_SOURCE, IDENTIFICATION_RUNTIME,
-                         OS_JOB_ID, OS_NAMESPACE, RESTART, digest, engine_name, maintenance_manifest,
+                         MAINTENANCE_FILES, MAINTENANCE_KIT, OS_JOB_ID, OS_NAMESPACE, RESTART,
+                         digest, engine_name, maintenance_manifest,
                          ssh_keygen_path, update_target, verify_manifest)
 
 
@@ -1302,6 +1303,22 @@ class LocalMedia:
     def close(self):
         self.closed.set()
         self.executor.shutdown(wait=False, cancel_futures=True)
+
+
+def activate_os_maintenance():
+    if WINDOWS or os.geteuid() == 0:
+        raise ValueError("Lance l’activation sous le compte du lecteur Linux, sans sudo devant Python.")
+    if not MAINTENANCE_KIT:
+        raise ValueError("Pousse le client 1.4.38 depuis la régie, puis relance l’activation.")
+    with TemporaryDirectory(prefix="soundlive-maintenance-") as folder:
+        for name in MAINTENANCE_FILES:
+            (Path(folder) / name).write_bytes(MAINTENANCE_KIT[name])
+        code = subprocess.call(["/bin/bash", "-c",
+                                'source "$1/installation-lecteur-linux.sh" && install_os_maintenance "$1"',
+                                "soundlive-ndi", folder])
+    if code == 0:
+        print("Maintenance système activée. Lance la mise à jour du système depuis la régie.")
+    return code
 
 
 class OsMaintenance:
@@ -2667,6 +2684,8 @@ def run_windows_screen(tk, log):
 
 if __name__ == "__main__":
     try:
+        if sys.argv[1:] == ["--activer-maintenance-os"]:
+            sys.exit(activate_os_maintenance())
         if len(sys.argv) == 3 and sys.argv[1] == "--apercu-ndi":
             sys.stdout.buffer.write(capture_ndi_preview(sys.argv[2]))
         elif len(sys.argv) == 3 and sys.argv[1] in ("--info-ecran", "--capture-ecran"):

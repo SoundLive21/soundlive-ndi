@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.73** et le client **1.4.37**.
+Ce kit contient la régie **1.4.74** et le client **1.4.38**.
 
 ## Installer et lancer la régie
 
@@ -74,14 +74,19 @@ il est livré par le mécanisme de mise à jour des moteurs déjà en place.
 
 ### Mettre à jour le système des lecteurs Pi et Ubuntu
 
-Installe la régie **1.4.73**, puis pousse le client **1.4.37** dans
-**Actions de groupe**. Le kit d’installation Linux installe le service de
-maintenance. Sur les lecteurs existants, active-le une fois depuis le kit
-décompressé, sous le compte du lecteur disposant de droits administrateur.
+Installe la régie **1.4.74**, puis utilise **Actions de groupe → Pousser la
+mise à jour client** pour livrer le client **1.4.38** et son script
+d’activation. Après confirmation de la mise à jour, lance une fois cette
+commande sur chaque lecteur déjà installé, sous son compte habituel.
+Le script peut demander le mot de passe `sudo`.
 
 ```bash
-bash installer-client.sh --activer-maintenance-os
+/usr/bin/python3 "$HOME/.local/share/soundlive-ndi/lancer-client.py" --activer-maintenance-os
 ```
+
+Si le lecteur utilise encore l’ancien dossier d’installation, remplace
+`soundlive-ndi` par `soundlive-ecrans` dans cette commande. Le kit
+d’installation Linux active le service pour les nouvelles installations.
 
 Dans **Actions de groupe**, sélectionne les lecteurs en ligne puis **Mettre à
 jour le système**. Chaque lecteur interrompt sa diffusion et affiche
