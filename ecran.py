@@ -1672,8 +1672,9 @@ def desktop():
             for role in ("name", "group"):
                 label = Gtk.Label(xalign=0)
                 label.get_style_context().add_class(role)
+                label.set_line_wrap(True)
+                label.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
                 label.set_max_width_chars(35)
-                label.set_ellipsize(Pango.EllipsizeMode.END)
                 box.pack_start(label, False, False, 0)
                 label.show()
                 labels.append(label)
@@ -1768,9 +1769,17 @@ def desktop():
                 if popup:
                     window, (box, name, group), layer_shell = popup
                     if labels and not waiting:
-                        name.set_text(labels[0])
-                        group.set_text(labels[1])
-                        box.show()
+                        resize = not window.get_visible() or (name.get_text(), group.get_text()) != labels
+                        if resize:
+                            name.set_text(labels[0])
+                            group.set_text(labels[1])
+                            box.show()
+                            # Wayland can allocate the label's minimum instead of its natural width.
+                            box.set_size_request(-1, -1)
+                            width = box.get_preferred_width()[1]
+                            height = box.get_preferred_height_for_width(width)[1]
+                            box.set_size_request(width, -1)
+                            window.resize(width, height)
                         display = self.window.get_display()
                         monitor = display.get_monitor_at_window(self.window.get_window()) if self.window.get_window() else None
                         if monitor is None:
@@ -1780,8 +1789,9 @@ def desktop():
                             self.identification_monitor = monitor
                         elif monitor and not layer_shell:
                             area = monitor.get_geometry()
-                            size = box.get_preferred_size()[1]
-                            window.move(area.x + area.width - size.width - 18, area.y + area.height - size.height - 18)
+                            width = box.get_preferred_width()[1]
+                            height = box.get_preferred_height_for_width(width)[1]
+                            window.move(area.x + area.width - width - 18, area.y + area.height - height - 18)
                         window.show()
                         visible = True
                     else:
