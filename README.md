@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.71** et le client **1.4.36**.
+Ce kit contient la régie **1.4.72** et le client **1.4.36**.
 
 ## Installer et lancer la régie
 
@@ -53,8 +53,8 @@ mise à jour ou un transfert vers un autre PC de régie.
 
 ### Identifier les écrans pendant la diffusion
 
-Clique sur la **cible** à côté de l’adresse IP d’un écran pour afficher son nom
-et son groupe dans un encadré translucide en bas à droite. Dans l’encadré
+Clique sur la **cible**, tout à droite de la ligne de l’adresse IP d’un écran,
+pour afficher son nom et son groupe dans un encadré translucide. Dans l’encadré
 **Régie**, **Identifier tous les écrans** applique la demande à tous les
 lecteurs associés, y compris ceux qui se reconnectent plus tard. Utilise le
 même bouton pour retirer l’encadré. L’identification est distincte des réglages

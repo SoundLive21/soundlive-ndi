@@ -99,8 +99,9 @@ button{padding:9px 13px;cursor:pointer;background:#2b222f;font-weight:600;white-
 dialog{width:min(480px,90vw);border:1px solid var(--edge);border-radius:14px;background:var(--panel);color:var(--text);padding:24px}dialog::backdrop{background:#0009}
 code{display:block;padding:11px;background:#100d12;border-radius:7px;overflow-wrap:anywhere;white-space:normal}
 @media(max-width:460px){main{margin-top:35px}header #count{display:none}article{padding:16px}.heading{align-items:flex-start}}
-.device-meta{display:flex;align-items:center;gap:8px;min-height:20px;margin:8px 0 15px;color:var(--sub);font-size:.82rem;flex-wrap:wrap}
-.address{margin:0}.device-kind:empty{display:none}
+.device-meta{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;min-height:20px;margin:8px 0 15px;color:var(--sub);font-size:.82rem}
+.device-meta-info{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.address{margin:0}.device-meta-info span:empty{display:none}
 .metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 18px}
 .metrics[hidden]{display:none}
 .metric{--tone:#c6b7c8;display:grid;grid-template-columns:16px minmax(0,1fr);align-items:center;text-align:left;gap:5px 6px;padding:9px 8px;min-width:0;background:#17131a;border:1px solid var(--edge);border-radius:9px}
@@ -184,7 +185,6 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .regie-system .metric.disk strong{margin-inline-start:0}
 .regie-system .disk-free{grid-column:1/-1}
 .regie-details{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px}
-.address-actions{display:inline-flex;align-items:center;gap:6px}
 .identify:not([hidden]){display:inline-grid;place-items:center;width:32px;height:32px;padding:0}
 .identify svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7}
 button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-color:#ed7788;background:#571f2b;color:#fff}
@@ -636,14 +636,14 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
   <article>
     <div class="card-heading"><h2></h2><span class="badge"></span></div>
     <div class="device-meta">
-      <span class="device-kind"></span>
-      <span class="address-actions">
+      <div class="device-meta-info">
+        <span class="device-kind"></span>
         <span class="address"></span>
-        <button type="button" class="identify" aria-label="Identification de l’écran" aria-pressed="false" hidden>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.3"/></svg>
-        </button>
-      </span>
-      <span class="client-release"></span>
+        <span class="client-release"></span>
+      </div>
+      <button type="button" class="identify" aria-label="Identification de l’écran" aria-pressed="false" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.3"/></svg>
+      </button>
     </div>
     <p class="small identify-feedback" hidden></p>
     <div class="metrics" hidden>
