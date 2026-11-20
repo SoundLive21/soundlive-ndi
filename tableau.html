@@ -275,7 +275,10 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
       </div>
     </div>
     <p class="small" id="traffic-help">Trafic total de l’interface sélectionnée, NDI compris lorsque ce PC diffuse.</p>
-    <div class="regie-details"><button type="button" id="regie-system-open">Informations système de la régie</button></div>
+    <div class="regie-details">
+      <button type="button" id="regie-system-open">Informations système de la régie</button>
+      <button type="button" id="network-open">Gestion réseau</button>
+    </div>
   </section>
   <details class="preview-section" id="source-previews">
     <summary>Aperçu des sources NDI disponibles</summary>
@@ -294,6 +297,51 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
     <ul class="interfaces" id="connections-list"></ul>
     <div class="actions"><button type="submit">Fermer</button></div>
   </form>
+</dialog>
+<dialog id="network-dialog" aria-labelledby="network-title" style="width:min(650px, 92vw)">
+  <div class="dialog-body">
+    <h2 id="network-title">Gestion réseau</h2>
+    <p id="network-access" role="status"></p>
+    <p id="network-error" role="alert" hidden></p>
+    <fieldset id="internet-fields" disabled>
+      <legend>Partage Internet</legend>
+      <p id="internet-state"></p>
+      <label>Interface du réseau écrans<select id="internet-adapter"></select></label>
+      <div class="actions">
+        <button type="button" id="internet-enable">Activer</button>
+        <button type="button" id="internet-disable">Désactiver</button>
+        <button type="button" id="internet-diagnostic">Diagnostic</button>
+      </div>
+    </fieldset>
+    <pre id="internet-report" tabindex="0" style="white-space:pre-wrap;overflow-wrap:anywhere" hidden></pre>
+    <form id="network-dhcp">
+      <fieldset id="network-dhcp-fields" disabled>
+        <legend>Serveur DHCP</legend>
+        <p id="network-dhcp-state"></p>
+        <div class="pair-grid">
+          <label>Interface du réseau écrans<select name="adapter" required></select></label>
+          <label>Début de plage IPv4<input name="first" maxlength="15" required></label>
+          <label>Fin de plage IPv4<input name="last" maxlength="15" required></label>
+          <label>Durée du bail (minutes)<input name="minutes" type="number" value="480" required min="1" max="10080"></label>
+          <label>Passerelle (facultative)<input name="router" maxlength="15"></label>
+          <label>DNS principal (facultatif)<input name="dns1" maxlength="15"></label>
+          <label>DNS secondaire (facultatif)<input name="dns2" maxlength="15"></label>
+        </div>
+        <label class="check"><input type="checkbox" name="dedicated" required> Ce réseau écrans n’a pas d’autre serveur DHCP actif.</label>
+      </fieldset>
+      <div class="actions">
+        <button type="submit" id="network-dhcp-start" disabled>Démarrer le DHCP</button>
+        <button type="button" id="network-dhcp-stop" disabled>Arrêter le DHCP</button>
+      </div>
+    </form>
+    <h3>Baux en cours</h3>
+    <p id="network-no-leases" class="small">Aucun bail actif.</p>
+    <ul id="network-leases" class="interfaces"></ul>
+    <form method="dialog" class="actions">
+      <button type="button" id="network-refresh">Actualiser</button>
+      <button type="submit">Fermer</button>
+    </form>
+  </div>
 </dialog>
 <dialog id="session-warning" aria-labelledby="session-title" aria-describedby="session-detail">
   <div class="dialog-body">
@@ -864,10 +912,10 @@ function apiResult(status, result) {
   }
   return result;
 }
-async function call(path, data) {
+async function call(path, data, timeout = 6000) {
   if (remoteSessionEnded) throw Error("Session distante fermée.");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 6000);
+  const timer = setTimeout(() => controller.abort(), timeout);
   let response;
   try {
     response = await fetch(path, data === undefined ? {signal:controller.signal} : {
@@ -886,6 +934,124 @@ async function call(path, data) {
     clearTimeout(timer);
   }
 }
+
+const networkDialog = document.querySelector("#network-dialog");
+const networkAccess = document.querySelector("#network-access");
+const networkError = document.querySelector("#network-error");
+const networkRefresh = document.querySelector("#network-refresh");
+const internetFields = document.querySelector("#internet-fields");
+const internetAdapter = document.querySelector("#internet-adapter");
+const internetEnable = document.querySelector("#internet-enable");
+const internetDisable = document.querySelector("#internet-disable");
+const internetReport = document.querySelector("#internet-report");
+const networkDhcp = document.querySelector("#network-dhcp");
+const dhcpFields = document.querySelector("#network-dhcp-fields");
+const dhcpAdapter = networkDhcp.elements.namedItem("adapter");
+const dhcpStart = document.querySelector("#network-dhcp-start");
+const dhcpStop = document.querySelector("#network-dhcp-stop");
+const networkPath = "/api/regie-network";
+let networkState = null;
+let networkBusy = false;
+
+function networkControls() {
+  const authorized = !networkBusy && networkState?.authorized;
+  const sharing = Boolean(networkState?.internet);
+  internetFields.disabled = !authorized;
+  internetAdapter.disabled = sharing;
+  internetEnable.disabled = sharing || !internetAdapter.value;
+  internetDisable.disabled = !sharing;
+  dhcpFields.disabled = !authorized || networkState?.dhcp.running;
+  dhcpStart.disabled = dhcpFields.disabled || !dhcpAdapter.value;
+  dhcpStop.disabled = !authorized || !networkState?.dhcp.config.enabled;
+  networkRefresh.disabled = networkBusy;
+}
+
+function networkOptions(select, options, selected) {
+  const preferred = selected || select.value;
+  select.replaceChildren(new Option("Choisir une interface", ""), ...options);
+  if (options.some(option => option.value === preferred)) select.value = preferred;
+  else if (options.length === 1) select.value = options[0].value;
+}
+
+function renderNetwork(result) {
+  const previous = networkState?.dhcp.config;
+  networkState = result.available ? result : null;
+  if (!networkState) {
+    networkAccess.textContent = "Démarre la régie depuis le lanceur graphique pour gérer le réseau.";
+    return;
+  }
+  networkAccess.textContent = result.authorized ? "Gestion réseau autorisée" :
+    "Autorise la gestion réseau web une fois dans le lanceur de la régie, puis clique sur Actualiser.";
+  document.querySelector("#internet-state").textContent = result.internet ?
+    "Partage configuré · " + result.internet : "Partage désactivé";
+  networkOptions(internetAdapter, result.interfaces.map(row => new Option(row.label + " · " + row.ip, row.ip)),
+    result.internet);
+  const {running, config, interfaces, leases, error} = result.dhcp;
+  const choice = config.adapter ? JSON.stringify([config.adapter, config.ip]) : "";
+  const changed = JSON.stringify(config) !== JSON.stringify(previous);
+  networkOptions(dhcpAdapter, interfaces.map(row => new Option(row.label + " · " + row.ip + " · " + row.network,
+    JSON.stringify([row.id, row.ip]))), changed ? choice : "");
+  if (changed) {
+    for (const name of ["first", "last", "router", "minutes"]) {
+      if (config[name] !== undefined) networkDhcp.elements.namedItem(name).value = config[name];
+    }
+    for (const index of [0, 1]) networkDhcp.elements.namedItem("dns" + (index + 1)).value = config.dns?.[index] || "";
+  }
+  document.querySelector("#network-dhcp-state").textContent = error || result.interface_error ||
+    (running ? "DHCP actif · " + config.ip : interfaces.length ? "DHCP arrêté" : "Aucune interface dédiée à IPv4 fixe.");
+  document.querySelector("#network-no-leases").hidden = Boolean(leases.length);
+  document.querySelector("#network-leases").replaceChildren(...leases.map(row => {
+    const item = document.createElement("li");
+    item.textContent = [row.ip, row.hostname, row.mac, new Date(row.expires * 1000).toLocaleString("fr-FR")]
+      .filter(Boolean).join(" · ");
+    return item;
+  }));
+}
+
+async function networkRequest(data) {
+  if (networkBusy) return;
+  networkBusy = true;
+  networkError.hidden = true;
+  networkAccess.textContent = data ? "Opération réseau en cours…" : "Lecture de l’état réseau…";
+  networkControls();
+  try {
+    if (data) {
+      const result = await call(networkPath, data, 65000);
+      internetReport.textContent = result.report;
+      internetReport.hidden = !result.report;
+    }
+    renderNetwork(await call(networkPath, undefined, 12000));
+  } catch (error) {
+    networkAccess.textContent = "Actualise l’état réseau avant de réessayer.";
+    networkError.textContent = error.message;
+    networkError.hidden = false;
+    if (error.status === 403 && networkState) networkState.authorized = false;
+  } finally {
+    networkBusy = false;
+    networkControls();
+  }
+}
+
+document.querySelector("#network-open").onclick = () => {
+  networkDialog.showModal();
+  networkRequest();
+};
+networkRefresh.onclick = () => networkRequest();
+internetAdapter.onchange = dhcpAdapter.onchange = networkControls;
+internetEnable.onclick = () => networkRequest({kind:"internet", operation:"activer", data:internetAdapter.value});
+internetDisable.onclick = () => networkRequest({kind:"internet", operation:"desactiver"});
+document.querySelector("#internet-diagnostic").onclick = () => networkRequest({kind:"internet", operation:"diagnostic",
+  data:internetAdapter.value || null});
+networkDhcp.onsubmit = event => {
+  event.preventDefault();
+  const form = new FormData(networkDhcp);
+  const [adapter, ip] = JSON.parse(form.get("adapter"));
+  const dns = [form.get("dns1"), form.get("dns2")].map(value => value.trim()).filter(Boolean);
+  networkRequest({kind:"dhcp", operation:"start", data:{adapter, ip, dns, first:form.get("first").trim(),
+    last:form.get("last").trim(), router:form.get("router").trim(), minutes:Number(form.get("minutes")),
+    dedicated:form.has("dedicated")}});
+};
+dhcpStop.onclick = () => networkRequest({kind:"dhcp", operation:"stop"});
 
 function createPreview(parent, title, target, screen = false) {
   const element = document.querySelector("#preview-template").content.firstElementChild.cloneNode(true);

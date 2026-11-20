@@ -333,14 +333,14 @@ class Service:
             self.config = {}
             self.error = "Impossible de lire la configuration DHCP enregistrée."
 
-    def start(self, data):
+    def start(self, data, listener_factory=None):
         with self.lock:
             if self.listener:
                 raise ValueError("Arrête le serveur DHCP avant de modifier ses paramètres.")
             settings = Settings.parse(data, candidates(self.interfaces()))
             leases = Leases(settings, self.path / "baux.json")
             try:
-                listener = open_listener(settings)
+                listener = (listener_factory or open_listener)(settings)
             except PermissionError as error:
                 raise ValueError("Accès au port DHCP refusé. Vérifie les droits UDP 67 de la régie.") from error
             except OSError as error:

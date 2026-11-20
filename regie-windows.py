@@ -22,7 +22,8 @@ import traceback
 import webbrowser
 
 from commun import APP_NAME, COPYRIGHT
-from regie_dhcp import Service as DhcpService
+from regie_dhcp import Service as DhcpService, bind_listener, candidates
+from regie_reseau import INTERNET_OPERATIONS, NetworkAuthorization
 
 
 def relaunch(root):
@@ -167,9 +168,72 @@ def change_internet(root, operation, gateway=None):
         return run.stdout.strip() if operation == "diagnostic" else None
 
 
+class NetworkControl:
+    def __init__(self, tableau):
+        self.root = tableau.ROOT
+        self.interfaces = tableau.dhcp_interfaces
+        self.dhcp = DhcpService(self.root / ".soundlive-dhcp", self.interfaces)
+        self.authorization = NetworkAuthorization()
+        self.lock = threading.Lock()
+
+    def status(self):
+        dhcp = self.dhcp.status()
+        try:
+            rows = self.interfaces()
+            dhcp["interfaces"] = candidates(rows)
+            interfaces = [{"label": row["label"], "ip": row["ip"]} for row in rows]
+            interface_error = ""
+        except (RuntimeError, OSError, ValueError) as error:
+            dhcp["interfaces"] = interfaces = []
+            interface_error = str(error)
+        return {"available": True, "authorized": self.authorization.ready, "interfaces": interfaces,
+                "internet": internet_state().get("gateway"), "dhcp": dhcp, "interface_error": interface_error}
+
+    def open_dhcp_socket(self, settings):
+        interface = settings.adapter["label"]
+        try:
+            return bind_listener(interface, settings.adapter["index"])
+        except PermissionError:
+            if not sys.platform.startswith("linux"):
+                raise
+        return self.authorization.request("dhcp", interface=interface)
+
+    def change(self, kind, operation, data=None, *, web=False):
+        if not self.lock.acquire(blocking=False):
+            raise RuntimeError("Une modification réseau est déjà en cours.")
+        try:
+            authorized = self.authorization.ready
+            if web and not authorized:
+                raise PermissionError("Autorise la gestion réseau web dans le lanceur de la régie.")
+            if kind == "internet" and operation in INTERNET_OPERATIONS:
+                gateway = data
+                if gateway is not None and (not isinstance(gateway, str) or not gateway.strip()):
+                    raise ValueError("Adresse IPv4 invalide.")
+                if authorized:
+                    return self.authorization.request("internet", operation=operation, gateway=gateway)
+                return change_internet(self.root, operation, gateway)
+            if kind == "dhcp" and operation == "stop":
+                self.dhcp.stop()
+                return None
+            if kind == "dhcp" and operation == "start":
+                if not isinstance(data, dict) or data.get("dedicated") is not True:
+                    raise ValueError("Confirme qu’aucun autre serveur DHCP n’est actif sur le réseau écrans.")
+                self.dhcp.start(data, listener_factory=self.open_dhcp_socket if authorized else None)
+                return None
+            raise ValueError("Action réseau inconnue.")
+        finally:
+            self.lock.release()
+
+    def close(self):
+        with self.lock:
+            self.authorization.revoke(closing=True)
+            self.dhcp.stop(disable=False)
+
+
 class DhcpPanel:
-    def __init__(self, parent, service, tasks):
-        self.service = service
+    def __init__(self, parent, network, tasks):
+        self.network = network
+        self.service = network.dhcp
         self.tasks = tasks
         self.pending = None
         self.adapters = []
@@ -277,10 +341,11 @@ class DhcpPanel:
             return
         dns = [value for value in (values.pop("dns1"), values.pop("dns2")) if value]
         row = self.adapters[index]
-        self.run("Démarrage du DHCP…", self.service.start, dict(values, adapter=row["id"], ip=row["ip"], dns=dns))
+        data = dict(values, adapter=row["id"], ip=row["ip"], dns=dns, dedicated=True)
+        self.run("Démarrage du DHCP…", self.network.change, "dhcp", "start", data)
 
     def stop_service(self):
-        self.run("Arrêt du DHCP…", self.service.stop)
+        self.run("Arrêt du DHCP…", self.network.change, "dhcp", "stop")
 
     def configure_adapters(self, status):
         index = self.selector.current()
@@ -310,12 +375,17 @@ class DhcpPanel:
             self.pending = None
         status = self.service.status()
         config = status["config"]
-        if self.state is None:
+        if self.state is None or config != self.state["config"]:
             for name in ("first", "last", "minutes", "router"):
                 if name in config:
                     self.fields[name].set(config[name])
-            for name, value in zip(("dns1", "dns2"), config.get("dns") or []):
-                self.fields[name].set(value)
+            dns = config.get("dns", [])
+            for index, name in enumerate(("dns1", "dns2")):
+                self.fields[name].set(dns[index] if index < len(dns) else "")
+            match = next((index for index, row in enumerate(self.adapters)
+                          if (row["id"], row["ip"]) == (config.get("adapter"), config.get("ip"))), None)
+            if match is not None:
+                self.selector.current(match)
         self.state = status
         label = f"DHCP actif · {config.get('ip')} · UDP 67" if status["running"] else "DHCP arrêté"
         if not self.adapters and not status["running"]:
@@ -353,7 +423,7 @@ class Launcher:
         self.remote_address = tk.StringVar(value="—")
         self.connection_status = tk.StringVar(value="Accès distant arrêté")
         self.internet = None
-        self.dhcp = DhcpService(tableau.ROOT / ".soundlive-dhcp", tableau.dhcp_interfaces)
+        self.network = NetworkControl(tableau)
         self.dhcp_panel = None
         self.dhcp_tasks = ThreadPoolExecutor(max_workers=1)
         self.dhcp_shutdown = None
@@ -446,6 +516,8 @@ class Launcher:
         share.grid(row=7, sticky="ew", pady=(10, 0))
         ttk.Button(share, text="Partage Internet", command=self.internet_dialog).pack(side="left")
         ttk.Button(share, text="Serveur DHCP", command=self.open_dhcp).pack(side="left", padx=(8, 0))
+        self.network_button = ttk.Button(share, text="Autoriser la gestion réseau web", command=self.authorize_network)
+        self.network_button.pack(side="left", padx=(8, 0))
         ttk.Label(panel, text=COPYRIGHT).grid(row=8, sticky="w", pady=(8, 0))
         window.update_idletasks()
         viewport.configure(width=min(panel.winfo_reqwidth(), window.winfo_screenwidth() * 9 // 10),
@@ -455,7 +527,7 @@ class Launcher:
         if not tableau.DATA.exists():
             self.status.set("Aucun écran associé dans ce dossier de régie")
         self.load_interfaces()
-        self.dhcp_tasks.submit(self.dhcp.restore)
+        self.dhcp_tasks.submit(self.network.dhcp.restore)
         self.tick()
 
     def load_interfaces(self):
@@ -555,7 +627,7 @@ class Launcher:
 
             def run():
                 try:
-                    report = change_internet(self.tableau.ROOT, operation, gateway)
+                    report = self.network.change("internet", operation, gateway)
                     results.put((report, False))
                 except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
                     results.put((str(error), True))
@@ -699,7 +771,7 @@ class Launcher:
 
         def launch():
             try:
-                regie = self.tableau.Regie(publication_status=self.publication_status)
+                regie = self.tableau.Regie(publication_status=self.publication_status, network_control=self.network)
                 try:
                     generated, certificate = (
                         self.access.prepare_access(self.tableau.REMOTE_ACCESS, address, password)
@@ -809,7 +881,7 @@ class Launcher:
         self.window.withdraw()
         if self.dhcp_panel is not None:
             self.dhcp_panel.dialog.withdraw()
-        self.dhcp_shutdown = self.dhcp_tasks.submit(self.dhcp.stop, disable=False)
+        self.dhcp_shutdown = self.dhcp_tasks.submit(self.network.close)
         self.dhcp_tasks.shutdown(wait=False)
 
         def finish():
@@ -831,8 +903,32 @@ class Launcher:
 
     def open_dhcp(self):
         if self.dhcp_panel is None:
-            self.dhcp_panel = DhcpPanel(self.window, self.dhcp, self.dhcp_tasks)
+            self.dhcp_panel = DhcpPanel(self.window, self.network, self.dhcp_tasks)
         self.dhcp_panel.show()
+
+    def authorize_network(self):
+        authorization = self.network.authorization
+        enabled = authorization.ready
+        prompt = "Retirer l’autorisation de gestion réseau web ?" if enabled else (
+            "Autoriser les sessions web de la régie à gérer le partage Internet et le DHCP "
+            "jusqu’à la fermeture du lanceur ?")
+        if not messagebox.askyesno("Gestion réseau web", prompt, parent=self.window):
+            return
+        self.network_button.configure(state="disabled", text="Modification de l’autorisation…")
+        task = self.dhcp_tasks.submit(authorization.revoke if enabled else authorization.open)
+
+        def receive():
+            if not task.done():
+                self.window.after(150, receive)
+                return
+            self.network_button.configure(state="normal", text="Retirer l’autorisation réseau web" if authorization.ready
+                                          else "Autoriser la gestion réseau web")
+            try:
+                task.result()
+            except (OSError, ValueError, RuntimeError) as error:
+                messagebox.showerror("Gestion réseau web", str(error), parent=self.window)
+
+        receive()
 
     def show_publication(self, status):
         state = status["state"]

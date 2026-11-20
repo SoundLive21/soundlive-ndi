@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.65** et le client **1.4.31**.
+Ce kit contient la régie **1.4.66** et le client **1.4.31**.
 
 ## Installer et lancer la régie
 
@@ -281,6 +281,21 @@ sur cette interface est demandée via `pkexec` (paquet `pkexec`). Le lanceur
 et le serveur DHCP restent sous ton compte. Pour répartir l’accès à
 Internet, configure aussi le partage Internet et renseigne dans le DHCP
 l’IPv4 de la passerelle réellement joignable sur ce réseau.
+
+### Gérer le partage Internet et le DHCP depuis la console web
+
+Sur le PC régie, clique une fois sur **Autoriser la gestion réseau web**
+dans le lanceur et accepte la demande administrateur de Windows ou Ubuntu.
+Sur Ubuntu Desktop, l’autorisation graphique utilise `pkexec`. Démarre
+la régie avec **Activer l’accès distant** pour utiliser la console HTTPS
+depuis un autre poste. Après connexion, ouvre **Gestion réseau** dans
+la section régie. Tu peux régler le partage Internet, lancer son diagnostic,
+démarrer ou arrêter le serveur DHCP et consulter les baux avec **Actualiser**.
+
+Les commandes modifient les mêmes réglages que le lanceur. Tu peux retirer
+l’autorisation depuis le lanceur. Elle expire à sa fermeture. L’arrêt de la régie coupe
+l’accès à la console web. Le DHCP déjà démarré continue de servir les écrans
+tant que le lanceur reste ouvert.
 
 ### Bureau distant et terminal SSH
 

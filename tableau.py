@@ -44,7 +44,7 @@ from terminal_ssh import HostKeyCheck, Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.65"
+SOFTWARE_VERSION = "1.4.66"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -936,6 +936,9 @@ class Request(BaseHTTPRequestHandler):
                              "desktop_protocol": desktop_protocol(), "support": regie_support_methods()})
         elif path == "/api/interface-traffic":
             self.reply(200, self.server.interface_traffic.read())
+        elif path == "/api/regie-network":
+            network = self.server.network_control
+            self.reply(200, network.status() if network else {"available": False})
         elif path == "/api/regie-latency":
             self.reply(200, {"ok": True})
         elif path == "/api/regie-version":
@@ -1036,6 +1039,9 @@ class Request(BaseHTTPRequestHandler):
             value = json.loads(payload)
             if not isinstance(value, dict):
                 raise ValueError("Requête invalide.")
+            if path == "/api/regie-network":
+                self.change_network(value)
+                return
             if path == "/api/pair":
                 value.pop("installation_fingerprint", None)
                 if value.get("prepare_installation") is True:
@@ -1102,6 +1108,20 @@ class Request(BaseHTTPRequestHandler):
             print(error, flush=True)
             status, result = 500, {"error": "Le serveur n’a pas pu terminer la demande."}
         self.reply(status, result)
+
+    def change_network(self, value):
+        network = self.server.network_control
+        if network is None:
+            self.reply(409, {"error": "Démarre la régie avec son lanceur graphique pour gérer le réseau."})
+            return
+        try:
+            report = network.change(value.get("kind"), value.get("operation"), value.get("data"), web=True)
+        except PermissionError as error:
+            self.reply(403, {"error": str(error)})
+        except (OSError, RuntimeError, ValueError, TypeError, subprocess.SubprocessError) as error:
+            self.reply(409, {"error": str(error)})
+        else:
+            self.reply(200, {"report": report or ""})
 
     def terminal_action(self, operation, value):
         owner = (self.client_address[0], getattr(self, "remote_session", None))
@@ -1649,11 +1669,12 @@ class Request(BaseHTTPRequestHandler):
         return 200, {"ok": True}
 
 class Regie:
-    def __init__(self, port=8765, publication_status=None):
+    def __init__(self, port=8765, publication_status=None, network_control=None):
         self.remote_url = None
         self.connections = None
         self.server = ThreadingHTTPServer(("0.0.0.0", port), Request)
         self.server.terminals = Terminals()
+        self.server.network_control = network_control
         self.server.interface_traffic = InterfaceTraffic()
         self.server.publication_status = publication_status or PublicationStatus(
             ROOT / "source-publications.json", SOFTWARE_VERSION)
@@ -1681,6 +1702,7 @@ class Regie:
                 self.remote = RemoteDashboard(REMOTE_ACCESS, Request, self.server.server_port)
                 self.remote.interface_traffic = self.server.interface_traffic
                 self.remote.terminals = self.server.terminals
+                self.remote.network_control = self.server.network_control
                 self.server.waiting_qr = waiting_access(*self.remote.server_address)
                 self.remote_url = f"https://{self.remote.server_address[0]}:{self.remote.server_port}"
                 self.server.remote_connections = self.remote.remote_connections = self.connections
