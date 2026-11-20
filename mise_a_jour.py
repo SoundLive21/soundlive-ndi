@@ -26,6 +26,8 @@ ENGINE_ASSETS = {
     "pi-ffplay": None,
 }
 NAMESPACE = "soundlive-update"
+OS_NAMESPACE = "soundlive-maintenance-os"
+OS_JOB_ID = re.compile(r"[a-f0-9]{32}")
 SAFE_ID = re.compile(r"[a-f0-9]{64}")
 PUBLIC_KEY = "regie-update.pub"
 RESTART = 75
@@ -207,18 +209,44 @@ def prepare_key(folder):
     return public
 
 
-def package(private, files, device, job, nonce, version):
+def maintenance_manifest(device, job, boot, nonce):
+    return json.dumps([OS_NAMESPACE, device, job, boot, nonce], separators=(",", ":")).encode("ascii")
+
+
+def sign_manifest(private, payload, namespace):
     with TemporaryDirectory() as tmp:
         message = Path(tmp) / "manifest"
-        message.write_bytes(manifest(device, job, nonce, version))
-        use_signing_key(private, "-Y", "sign", "-f", private, "-n", NAMESPACE, message)
+        message.write_bytes(payload)
+        use_signing_key(private, "-Y", "sign", "-f", private, "-n", namespace, message)
         signature = message.with_suffix(".sig").read_bytes().replace(b"\r\n", b"\n")
     # OpenSSH 9.2 exige un LF à la fin de l'en-tête de la signature.
     if not (signature.startswith(b"-----BEGIN SSH SIGNATURE-----\n")
             and signature.endswith(b"\n-----END SSH SIGNATURE-----\n")):
         raise RuntimeError("ssh-keygen a produit un bloc de signature invalide.")
-    return dict(version=version, signature=b64encode(signature).decode("ascii"),
+    return b64encode(signature).decode("ascii")
+
+
+def package(private, files, device, job, nonce, version):
+    return dict(version=version, signature=sign_manifest(private, manifest(device, job, nonce, version), NAMESPACE),
                 files={name: b64encode(value).decode("ascii") for name, value in files.items()})
+
+
+def verify_manifest(public, encoded_signature, payload, namespace):
+    signature = b64decode(encoded_signature, validate=True)
+    key = public.read_text(encoding="ascii").split()
+    if len(key) < 2 or key[0] != "ssh-ed25519":
+        raise ValueError("Clé publique de la régie invalide.")
+    # Keep the allowed-signers file closed and fully specified before verification.
+    with TemporaryDirectory() as tmp:
+        allowed = Path(tmp) / "allowed"
+        allowed.write_text(f"regie {key[0]} {key[1]}\n", encoding="ascii")
+        sigfile = Path(tmp) / "signature"
+        sigfile.write_bytes(signature)
+        try:
+            ssh_keygen("-Y", "verify", "-f", allowed, "-I", "regie", "-n", namespace,
+                       "-s", sigfile, data=payload)
+        except RuntimeError as error:
+            raise ValueError("Signature de la mise à jour non reconnue.") from error
 
 
 def verify(public, bundle, device, job, nonce, target=None):
@@ -240,21 +268,7 @@ def verify(public, bundle, device, job, nonce, target=None):
     files = {name: b64decode(value, validate=True) for name, value in encoded.items()}
     if sum(map(len, files.values())) > limit or digest(files) != version:
         raise ValueError("Paquet de mise à jour altéré.")
-    signature = b64decode(bundle["signature"], validate=True)
-    key = public.read_text(encoding="ascii").split()
-    if len(key) < 2 or key[0] != "ssh-ed25519":
-        raise ValueError("Clé publique de la régie invalide.")
-    # Keep the allowed-signers file closed and fully specified before verification.
-    with TemporaryDirectory() as tmp:
-        allowed = Path(tmp) / "allowed"
-        allowed.write_text(f"regie {key[0]} {key[1]}\n", encoding="ascii")
-        sigfile = Path(tmp) / "signature"
-        sigfile.write_bytes(signature)
-        try:
-            ssh_keygen("-Y", "verify", "-f", allowed, "-I", "regie", "-n", NAMESPACE,
-                       "-s", sigfile, data=manifest(device, job, nonce, version))
-        except RuntimeError as error:
-            raise ValueError("Signature de la mise à jour non reconnue.") from error
+    verify_manifest(public, bundle["signature"], manifest(device, job, nonce, version), NAMESPACE)
     if engine in files:
         check_engine(files[engine], target)
     return files

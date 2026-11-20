@@ -37,6 +37,27 @@ installed_sdl_directory() {
     return 1
 }
 
+install_os_maintenance() (
+    local kit=$1 account rule
+    account=$(id -un)
+    if (( EUID == 0 )) || [[ ! $account =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$ ]]; then
+        echo 'Lance l’activation sous le compte du lecteur, sans sudo.' >&2
+        return 1
+    fi
+    if [[ ! -r "$kit/maintenance-os.sh" || ! -r "$kit/soundlive-ndi-maintenance.service" ]]; then
+        echo 'Décompresse le kit SoundLive-NDI complet pour activer la maintenance.' >&2
+        return 1
+    fi
+    rule=$(mktemp) || return
+    trap 'rm -f -- "$rule"' EXIT
+    printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/soundlive-ndi-maintenance ""\n' "$account" >"$rule"
+    sudo visudo -cf "$rule" &&
+        sudo install -o root -g root -m 0755 "$kit/maintenance-os.sh" /usr/local/sbin/soundlive-ndi-maintenance &&
+        sudo install -o root -g root -m 0644 "$kit/soundlive-ndi-maintenance.service" /etc/systemd/system/soundlive-ndi-maintenance@.service &&
+        sudo systemctl daemon-reload &&
+        sudo install -o root -g root -m 0440 "$rule" /etc/sudoers.d/soundlive-ndi-maintenance
+)
+
 prepare_remote_access() {
     local kit=$1 platform=$2
     bash "$kit/installer-ssh-linux.sh" configurer

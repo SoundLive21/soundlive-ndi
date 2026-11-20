@@ -1,0 +1,10 @@
+[Unit]
+Description=Mise à jour du système du lecteur SoundLive-NDI (%i)
+After=network-online.target
+
+[Service]
+Type=oneshot
+StateDirectory=soundlive-ndi-maintenance
+TimeoutStartSec=infinity
+ExecStart=/usr/local/sbin/soundlive-ndi-maintenance --run %i
+ExecStopPost=/usr/local/sbin/soundlive-ndi-maintenance --finish %i

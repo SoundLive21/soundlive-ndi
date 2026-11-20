@@ -439,6 +439,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
       <option value="orientation">Changer l’orientation des écrans</option>
       <option value="media">Gérer les images et vidéos autonomes</option>
       <option value="update">Pousser la mise à jour client</option>
+      <option value="os-update">Mettre à jour le système</option>
       <option value="reboot">Redémarrer les récepteurs</option>
       <option value="poweroff">Éteindre les récepteurs</option>
       <option value="remove">Retirer les écrans de la gestion</option>
@@ -684,6 +685,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
     <p class="small current-stream" hidden><span></span><strong></strong></p>
     <div class="screen-preview" hidden></div>
     <p class="small update-status" hidden></p>
+    <p class="small update-status os-update-status" hidden></p>
     <details class="screen-controls">
       <summary>Commandes et réglages</summary>
       <section class="pending"></section>
@@ -2746,6 +2748,12 @@ function render(row) {
   select(stream, "strong").textContent = (playing && (row.report.active_media || row.report.active_source)) ||
     (row.media?.enabled ? "" : row.options?.source || "");
   ui.error.textContent = row.report.error || "";
+  const osStatus = select(el, ".os-update-status");
+  const maintenance = row.os_update;
+  osStatus.textContent = maintenance ?
+    [osUpdateStates[maintenance.state], maintenance.message].filter(Boolean).join(" · ") : "";
+  osStatus.dataset.state = maintenance?.state || "";
+  osStatus.hidden = !osStatus.textContent;
   const updateStatus = select(el, ".update-status");
   const update = row.client_update?.state === "updated" ? null : row.client_update;
   const availability = row.update_availability;
@@ -2757,7 +2765,7 @@ function render(row) {
     [updateStates[update.state], update.message].filter(Boolean).join(" · ") :
     availability === "available" ? "Version " + clientRelease + " disponible" :
     availability === "offline" ? "" : (updateStates[availability] || "");
-  updateStatus.hidden = !updateStatus.textContent;
+  updateStatus.hidden = !updateStatus.textContent || availability === "maintenance";
   form.hidden = !row.options;
   ui.pending.hidden = row.paired;
   if (!row.paired) {
@@ -2782,8 +2790,8 @@ function render(row) {
   syncSourceChoice(card);
   ui.toggle.textContent = row.options.enabled ? "Stop" : "Reprendre";
   ui.toggle.setAttribute("aria-label", row.options.enabled ? "Stopper la diffusion" : "Reprendre la diffusion");
-  ui.reboot.disabled = !row.online || row.report.can_reboot === false;
-  ui.poweroff.disabled = !row.online || !row.report.can_poweroff;
+  ui.reboot.disabled = !row.online || row.os_busy || row.report.can_reboot === false;
+  ui.poweroff.disabled = !row.online || row.os_busy || !row.report.can_poweroff;
   ui.poweroff.title = row.online && !row.report.can_poweroff ? "Extinction distante indisponible sur ce lecteur." : "";
 }
 const screenNames = new Intl.Collator("fr",{numeric:true,sensitivity:"base"});
@@ -3190,7 +3198,17 @@ const groupActions = {
   bandwidth:["Régler la qualité NDI", "bandwidth"], update:["Pousser la mise à jour"],
   orientation:["Changer l’orientation des écrans", "orientation"],
 };
+const osUpdateStates = {
+  queued:"Mise à jour système demandée", waiting:"En attente de l’arrêt de la diffusion",
+  starting:"Démarrage de la mise à jour système", running:"Mise à jour système en cours",
+  rebooting:"Mise à jour installée · Redémarrage en cours", updated:"Mise à jour et redémarrage confirmés",
+  failed:"Échec de la maintenance système", setup_required:"Ignoré · activation administrateur requise",
+  key_required:"Ignoré · clé de mise à jour indisponible",
+};
 const groupDeviceActions = {
+  "os-update": {title:"Mettre à jour le système", label:"Mettre à jour et redémarrer",
+                result:"Mise à jour système demandée", path:"/api/os-updates",
+                detail:"La diffusion sera interrompue sur les Pi et Ubuntu prêts. Chaque lecteur redémarrera après réussite. Les lecteurs hors ligne seront ignorés."},
   reboot: {title:"Redémarrer les récepteurs", label:"Redémarrer", result:"Redémarrage demandé",
            detail:"La diffusion sera interrompue pendant le redémarrage. Les récepteurs hors ligne seront ignorés."},
   poweroff: {title:"Éteindre les récepteurs", label:"Éteindre", result:"Extinction demandée",
@@ -3244,6 +3262,7 @@ groupSources.onchange = () => {
 };
 groupSourceInput.oninput = renderGroupSources;
 const updateStates = {
+  maintenance:"Maintenance système en cours",
   queued:"Mise à jour en attente",
   installing:"Installation en cours",
   updated:"Mise à jour confirmée",
@@ -3331,15 +3350,17 @@ groupForm.onsubmit = action(() => {
     showAction({
       title:deviceAction.title, detail:summary + "\n" + deviceAction.detail, label:deviceAction.label,
       async perform() {
-        const {results} = await call("/api/group", {ids, operation});
+        const {results} = await call(deviceAction.path || "/api/group", {ids, operation});
         group.close();
         await refresh(true);
         const details = results.map(item => {
           const status = {requested:deviceAction.result, removed:deviceAction.result,
-                          offline:"Ignoré · hors ligne", unsupported:"Ignoré · client à mettre à jour"};
-          return item.name + " · " + status[item.state];
+                          maintenance:"Ignoré · opération en cours", offline:"Ignoré · hors ligne",
+                          unsupported:operation === "os-update" ? "Ignoré · nécessite un Pi ou Ubuntu avec le lecteur 1.4.37"
+                            : "Ignoré · client à mettre à jour"};
+          return item.name + " · " + (status[item.state] || osUpdateStates[item.state]);
         }).join("\n");
-        const failures = results.filter(item=>!["requested","removed"].includes(item.state)).length;
+        const failures = results.filter(item=>!["requested","removed","queued"].includes(item.state)).length;
         return batchOutcome(details, deviceAction.result, failures, results.length);
       }
     });

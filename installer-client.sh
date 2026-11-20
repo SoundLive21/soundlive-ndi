@@ -92,6 +92,12 @@ if [[ -z $kind ]]; then
     fi
 fi
 desktop="${XDG_CONFIG_HOME:-$HOME/.config}/autostart/ndi-ecran.desktop"
+if [[ ${1:-} == --activer-maintenance-os && $# -eq 1 ]]; then
+    source "$base/installation-lecteur-linux.sh"
+    install_os_maintenance "$base"
+    echo 'Mise à jour système activée pour ce compte. Installe aussi le lecteur 1.4.37 depuis la régie.'
+    exit 0
+fi
 if [[ ${1:-} == --reparer-identification && $# -eq 1 ]]; then
     if (( EUID == 0 )); then
         echo 'Lance cette réparation depuis le compte du lecteur, sans sudo.' >&2

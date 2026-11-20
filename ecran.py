@@ -36,7 +36,8 @@ from commun import (APP_NAME, COPYRIGHT, DEFAULT_SOURCE, MEDIA_CHUNK, MEDIA_DISK
                     media_available, media_config, media_disk, media_items, media_revision, options, release_number)
 from diagnostic import Diagnostic
 from mise_a_jour import (ClientUpdate, FULL_LIMIT, IDENTIFICATION_RENDER_SOURCE, IDENTIFICATION_RUNTIME,
-                         RESTART, digest, engine_name, ssh_keygen_path, update_target)
+                         OS_JOB_ID, OS_NAMESPACE, RESTART, digest, engine_name, maintenance_manifest,
+                         ssh_keygen_path, update_target, verify_manifest)
 
 
 def native_player_path(app, client_dir, filename, linux_sdl=False):
@@ -1303,6 +1304,93 @@ class LocalMedia:
         self.executor.shutdown(wait=False, cancel_futures=True)
 
 
+class OsMaintenance:
+    helper = Path("/usr/local/sbin/soundlive-ndi-maintenance")
+    unit = Path("/etc/systemd/system/soundlive-ndi-maintenance@.service")
+    results = Path("/var/lib/soundlive-ndi-maintenance")
+    pending = ("waiting", "starting", "running", "rebooting")
+
+    def __init__(self, path):
+        self.path = path
+        self.job = None
+        try:
+            record = read_json(path)
+            if (isinstance(record, dict) and OS_JOB_ID.fullmatch(str(record.get("id")))
+                    and isinstance(record.get("boot"), str) and isinstance(record.get("message"), str)
+                    and (record.get("state") in self.pending or record.get("state") in ("updated", "failed"))
+                    and (record.get("state") != "starting" or isinstance(record.get("started"), (int, float)))):
+                self.job = record
+        except (OSError, ValueError):
+            pass
+
+    @property
+    def active(self):
+        return bool(self.job and self.job["state"] in self.pending)
+
+    def report(self):
+        if self.job:
+            return {key: self.job[key] for key in ("id", "state", "message")}
+
+    def change(self, state, message=""):
+        if state != self.job["state"] or message != self.job.get("message"):
+            job = {**self.job, "state": state, "message": message}
+            write_json(self.path, job)
+            self.job = job
+
+    def accept(self, job):
+        if self.active or (self.job and self.job["id"] == job):
+            return False
+        record = dict(id=job, boot=BOOT, state="waiting", message="")
+        write_json(self.path, record)
+        self.job = record
+        return True
+
+    def start(self):
+        if not self.job or self.job["state"] != "waiting":
+            return
+        self.job["started"] = time.monotonic()
+        self.change("starting")
+        try:
+            proc = subprocess.run(["sudo", "-n", str(self.helper)], input=self.job["id"] + "\n",
+                                  capture_output=True, text=True, timeout=4)
+        except subprocess.TimeoutExpired:
+            # The start may already have been queued. Wait for the service's durable result.
+            return
+        except OSError as error:
+            self.change("failed", str(error))
+            return
+        if proc.returncode:
+            self.change("failed", "Activation administrateur requise : " + proc.stderr.strip()[:180])
+
+    def refresh(self):
+        if not self.active:
+            return
+        path = self.results / self.job["id"]
+        try:
+            boot, state = path.read_text(encoding="ascii").split()
+            written = path.stat().st_mtime
+        except (OSError, ValueError):
+            if self.job["boot"] != BOOT or (self.job["state"] == "starting"
+                    and time.monotonic() - self.job["started"] > 45):
+                self.change("failed", "Le service de mise à jour n’a pas démarré.")
+            return
+        if state == "rebooting":
+            if boot != BOOT:
+                self.change("updated")
+            elif time.time() - written > 300:
+                self.change("failed", "Redémarrage non confirmé après la mise à jour.")
+            else:
+                self.change("rebooting")
+        elif state == "running" and boot == BOOT:
+            self.change("running")
+        elif state == "busy":
+            self.change("failed", "Une autre mise à jour système est déjà en cours.")
+        elif state == "reboot_failed":
+            self.change("failed", "Paquets installés. Le redémarrage automatique a échoué.")
+        else:
+            self.change("failed", "Mise à jour système interrompue ou APT en échec. Consulte le journal du lecteur.")
+
+
 class DashboardClient:
     def __init__(self, identity, orientation):
         self.identity = identity
@@ -1397,6 +1485,9 @@ class DashboardClient:
                       capture_needs_consent=uses_portal and self.portal.stream is None)
         if self.can_update:
             report["update_result"] = self.updater.report()
+        nonce = secrets.token_hex(32) if report.get("os_capability") == "ready" else None
+        if nonce:
+            report["os_nonce"] = nonce
         started = time.monotonic()
         try:
             reply = post(server, "/api/poll", report, token)
@@ -1406,6 +1497,16 @@ class DashboardClient:
             self.refresh_display(display_pid, self.orientation)
             raise
         self.latency_ms = round((time.monotonic() - started) * 1000, 1)
+        job = reply.pop("os_job", None)
+        reply.pop("maintenance", None)
+        if nonce and isinstance(job, dict) and OS_JOB_ID.fullmatch(str(job.get("id"))) and isinstance(job.get("signature"), str):
+            try:
+                verify_manifest(self.updater.public, job["signature"],
+                                maintenance_manifest(report["id"], job["id"], BOOT, nonce), OS_NAMESPACE)
+            except (OSError, RuntimeError, ValueError):
+                pass
+            else:
+                reply["maintenance"] = job["id"]
         if not (reply.get("reboot") or reply.get("poweroff")):
             self.orientation = options(reply["options"])["orientation"]
             self.refresh_display(display_pid, self.orientation)
@@ -1530,6 +1631,8 @@ def desktop():
             self.error = ""
             self.discovery_error = ""
             self.power_id = None
+            self.maintenance = OsMaintenance(STATE / "maintenance-os.json")
+            self.maintenance.refresh()
             self.work = ThreadPoolExecutor(max_workers=1)
             self.request = None
             self.restart_client = False
@@ -1625,6 +1728,9 @@ def desktop():
             box.pack_start(self.group_label, False, False, 0)
             self.title = Gtk.Label()
             self.title.get_style_context().add_class("waiting-status")
+            self.title.set_line_wrap(True)
+            self.title.set_justify(Gtk.Justification.CENTER)
+            self.title.set_max_width_chars(56)
             box.pack_start(self.title, False, False, 0)
             self.regie_label = Gtk.Label()
             self.regie_label.get_style_context().add_class("reader-regie")
@@ -1741,7 +1847,7 @@ def desktop():
             replace_overlay_file(IDENTIFICATION_TEXTURE, header + bitmap)
 
         def refresh_identification(self):
-            labels = self.identification
+            labels = None if self.maintenance.active else self.identification
             waiting = self.window.get_visible()
             route = self.identification_output
             popup = self.identification_popup
@@ -1834,7 +1940,11 @@ def desktop():
 
         def waiting(self):
             text = ("En attente d’un média local" if self.media.enabled else "En attente du flux vidéo")
-            self.title.set_text(text if self.settings["enabled"] else "Diffusion arrêtée")
+            if self.maintenance.active:
+                text = "Mise à jour système, veuillez patienter.\nLe système redémarrera automatiquement."
+            elif not self.settings["enabled"]:
+                text = "Diffusion arrêtée"
+            self.title.set_text(text)
             self.window.fullscreen()
             self.window.show_all()
             self.pages.set_visible_child(self.waiting_box)
@@ -2010,6 +2120,8 @@ def desktop():
             GLib.timeout_add_seconds(5, self.probe)
 
         def start(self):
+            if self.maintenance.active:
+                return
             volume = 0 if self.settings["muted"] else self.settings["volume"]
             command = [
                 PLAYER, "-hide_banner", "-nostats", "-fs", "-framedrop",
@@ -2064,7 +2176,11 @@ def desktop():
                 self.stop_at = GLib.get_monotonic_time() + 3 * GLib.USEC_PER_SEC
 
         def check(self):
-            if self.media.tick():
+            maintaining = self.maintenance.active
+            self.maintenance.refresh()
+            if maintaining and not self.maintenance.active:
+                self.waiting()
+            if not self.maintenance.active and self.media.tick():
                 self.terminate()
                 self.waiting()
                 if self.player is None:
@@ -2111,7 +2227,10 @@ def desktop():
                     self.media.finished(0)
                     self.terminate()
                     self.waiting()
-            if (self.media.enabled and self.settings["enabled"] and self.player is None and self.local_pixbuf is None
+            if self.maintenance.active and self.player is None and self.local_pixbuf is None:
+                self.maintenance.start()
+            if (not self.maintenance.active and self.media.enabled and self.settings["enabled"]
+                    and self.player is None and self.local_pixbuf is None
                     and GLib.get_monotonic_time() >= self.retry_at):
                 self.start()
             self.refresh_identification()
@@ -2141,7 +2260,10 @@ def desktop():
                     print(status, file=self.log)
                     self.connection_status = status
             state = "Arrêté" if not self.settings["enabled"] else "Lecture" if self.video_ready else "En attente"
+            capability = ("setup_required" if not (self.maintenance.helper.is_file() and self.maintenance.unit.is_file())
+                          else "ready" if self.dashboard.can_update else "key_required")
             data = dict(id=self.identity["id"], boot=BOOT, state=state, sources=self.sources,
+                        os_capability=capability, os_result=self.maintenance.report(),
                         active_source=self.active_source if state == "Lecture" else None,
                         error=self.error, can_poweroff=True, media_status=self.media.report(),
                         local_video=self.playing_local, identification=self.identification_state)
@@ -2170,6 +2292,10 @@ def desktop():
             return GLib.SOURCE_CONTINUE
 
         def apply(self, result):
+            job = result.get("maintenance")
+            if job and self.maintenance.accept(job):
+                self.terminate()
+                self.waiting()
             new = options(result["options"])
             self.media.receive(result.get("media"), result.get("media_catalog"))
             message = waiting_update_message(result.get("reader_update"))
@@ -2186,6 +2312,8 @@ def desktop():
                 if playback_changed:
                     self.terminate()
                     self.waiting()
+            if self.maintenance.active:
+                return
             if result.get("poweroff"):
                 self.power("poweroff", result["poweroff"], "Extinction")
             elif result.get("reboot"):

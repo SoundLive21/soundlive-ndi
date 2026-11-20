@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.72** et le client **1.4.36**.
+Ce kit contient la régie **1.4.73** et le client **1.4.37**.
 
 ## Installer et lancer la régie
 
@@ -60,8 +60,8 @@ lecteurs associés, y compris ceux qui se reconnectent plus tard. Utilise le
 même bouton pour retirer l’encadré. L’identification est distincte des réglages
 de lecture.
 
-Pousse le client **1.4.36** depuis la régie. Le paquet signé inclut la
-surcouche GTK pour Raspberry Pi OS Bookworm et Trixie. Elle se charge depuis
+Le paquet signé du client inclut la surcouche GTK pour Raspberry Pi OS
+Bookworm et Trixie. Elle se charge depuis
 le compte du lecteur sur une session Wayland compatible, sans installation
 système ni accès Internet sur le Pi. FFplay peut aussi afficher l’encadré
 avec le filtre `drawtext` sur les autres sessions Wayland.
@@ -71,6 +71,30 @@ redémarrage de la mise à jour si le compilateur, les en-têtes NDI et le
 runtime sont déjà présents. L’ancien moteur reste utilisable si la compilation
 échoue. Si tu fournis un moteur compilé compatible avec l’archive de publication,
 il est livré par le mécanisme de mise à jour des moteurs déjà en place.
+
+### Mettre à jour le système des lecteurs Pi et Ubuntu
+
+Installe la régie **1.4.73**, puis pousse le client **1.4.37** dans
+**Actions de groupe**. Le kit d’installation Linux installe le service de
+maintenance. Sur les lecteurs existants, active-le une fois depuis le kit
+décompressé, sous le compte du lecteur disposant de droits administrateur.
+
+```bash
+bash installer-client.sh --activer-maintenance-os
+```
+
+Dans **Actions de groupe**, sélectionne les lecteurs en ligne puis **Mettre à
+jour le système**. Chaque lecteur interrompt sa diffusion et affiche
+« Mise à jour système, veuillez patienter. Le système redémarrera
+automatiquement. » La régie affiche l’état de chaque lecteur. Après réussite, il
+redémarre et recharge la dernière configuration de diffusion dès que la
+session graphique s’ouvre. Configure la connexion automatique sur un lecteur
+qui doit repartir seul. Si APT échoue, le lecteur reprend son fonctionnement
+et signale l’erreur sans redémarrer. Les dépôts configurés sur le lecteur
+doivent être joignables.
+
+Pour consulter les dernières opérations sur un lecteur Linux, lance
+`sudo journalctl -u 'soundlive-ndi-maintenance@*.service' -n 100`.
 
 ### Piloter depuis un autre PC, une tablette ou un téléphone
 

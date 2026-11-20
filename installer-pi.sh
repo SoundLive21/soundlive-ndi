@@ -89,6 +89,7 @@ if [[ -d "$app/.versions" ]]; then
     touch "$app/.versions/revenir-base"
 fi
 sudo install -o root -g root -m 0440 "$rule" /etc/sudoers.d/soundlive-ecrans
+install_os_maintenance "$here"
 desktop_file="$autostart/ndi-ecran.desktop"
 if [[ -f "$desktop_file" && ! -f "$desktop_file.avant-tableau" ]]; then
     cp -p -- "$desktop_file" "$desktop_file.avant-tableau"

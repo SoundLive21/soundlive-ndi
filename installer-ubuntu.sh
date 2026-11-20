@@ -281,6 +281,7 @@ if [[ $sdk == "$temp/NDI SDK for Linux" ]]; then
     install -m 644 "$temp/lib/libndi.so.6" "$app/ndi-sdk/lib/$sdk_arch/libndi.so.6"
 fi
 sudo install -o root -g root -m 0440 "$rule" /etc/sudoers.d/soundlive-ecrans
+install_os_maintenance "$here"
 
 install_autostart
 

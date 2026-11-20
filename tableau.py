@@ -37,14 +37,14 @@ from commun import (APP_NAME, MEDIA_CHUNK, MEDIA_COUNT_LIMIT, MEDIA_DISK_PERCENT
                     options, release_number)
 from diagnostic import Diagnostic, NetworkRates, desktop_protocol, network_info
 from installation_lecteur import KEYS_PATH, installation_keys, prepare_installations
-from mise_a_jour import (CLIENT_UPDATE_ISSUES, ENGINE_ASSETS, SAFE_ID, OpenSSHError, contents, digest,
-                         engine_name, full_contents, package, prepare_key)
+from mise_a_jour import (CLIENT_UPDATE_ISSUES, ENGINE_ASSETS, OS_NAMESPACE, SAFE_ID, OpenSSHError, contents,
+                         digest, engine_name, full_contents, maintenance_manifest, package, prepare_key, sign_manifest)
 from qrencoder import QRCode, QRErrorCorrectLevel
 from terminal_ssh import HostKeyCheck, Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.72"
+SOFTWARE_VERSION = "1.4.73"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -85,6 +85,7 @@ MEDIA_EXPORTS = {}
 LATENCY_TESTS = {}
 CLIENT_UPDATES = {}
 UPDATE_AGE = 120
+OS_STATES = ("queued", "waiting", "starting", "running", "rebooting", "updated", "failed")
 UPDATE_KEY = ROOT / ".soundlive-update" / "regie"
 UPDATE_FILES = contents(ROOT)
 UPDATE_DIGEST = digest(UPDATE_FILES)
@@ -303,10 +304,87 @@ def remove_screens(targets):
         del PREVIEWS[source]
 
 
+def os_status(row, now):
+    job = row.get("os_update")
+    if job and job["state"] == "queued" and now >= job["until"]:
+        return {**job, "state": "failed", "message": "Le lecteur n’a pas reçu la demande."}
+    return job
+
+
+def os_busy(row, now):
+    return (os_status(row, now) or {}).get("state") in OS_STATES[:5]
+
+
+def os_updates(targets, now):
+    before = {}
+    results = []
+    for key, row in targets.items():
+        report = row.get("report", {})
+        state = report.get("os_capability", "unsupported")
+        current = row.get("power", {})
+        client_update = update_view(key, report, now) or {}
+        if not report.get("boot") or now - report.get("seen", 0) >= ONLINE_AGE:
+            state = "offline"
+        elif os_busy(row, now) or client_update.get("state") in ("queued", "installing") or (
+                current.get("boot") == report["boot"] and now - current.get("time", 0) < POWER_REQUEST_AGE):
+            state = "maintenance"
+        elif state == "ready":
+            if UPDATE_KEY.is_file():
+                before[key] = row.get("os_update")
+                row["os_update"] = dict(id=secrets.token_hex(16), boot=report["boot"],
+                                        until=now + UPDATE_AGE, state="queued", message="")
+                state = "queued"
+            else:
+                state = "key_required"
+        results.append(dict(id=key, name=row["name"], state=state))
+    if before:
+        try:
+            save()
+        except OSError:
+            for key, job in before.items():
+                if job is None:
+                    targets[key].pop("os_update", None)
+                else:
+                    targets[key]["os_update"] = job
+            raise
+    return results
+
+
+def os_poll(row, data, boot, now):
+    job = row.get("os_update")
+    if not job or job["state"] in ("updated", "failed"):
+        return None
+    result = data.get("os_result")
+    if isinstance(result, dict) and result.get("id") == job["id"] and result.get("state") in OS_STATES[1:]:
+        state = result["state"]
+        if state == "updated" and boot == job["boot"]:
+            return None
+        if state in OS_STATES[1:5] and boot != job["boot"]:
+            state = "failed"
+            result = {"message": "Le lecteur a redémarré avant la fin de la mise à jour."}
+        update = {**job, "state": state, "message": str(result.get("message") or "")[:240]}
+        if update != job:
+            row["os_update"] = update
+            try:
+                save()
+            except OSError:
+                row["os_update"] = job
+                raise
+        return None
+    if (job["state"] == "queued" and now < job["until"] and job["boot"] == boot
+            and data.get("os_capability") == "ready"):
+        nonce = data.get("os_nonce")
+        if isinstance(nonce, str) and SAFE_ID.fullmatch(nonce):
+            return {"id": job["id"]}
+    return None
+
+
 def queue_power(row, operation, now):
     report = row.get("report", {})
     if not report.get("boot") or now - report.get("seen", 0) >= ONLINE_AGE:
         return "offline"
+    if os_busy(row, now):
+        return "maintenance"
     if operation == "poweroff" and not report.get("can_poweroff"):
         return "unsupported"
     if operation == "reboot" and report.get("can_reboot") is False:
@@ -375,6 +453,8 @@ def batch(path, data, now):
     if any(not row or "options" not in row for row in targets.values()):
         return 409, {"error": "La sélection contient un écran qui n’est plus associé."}
     results = []
+    if path == "/api/os-updates":
+        return 200, {"results": os_updates(targets, now)}
     if path == "/api/group":
         operation = data.get("operation")
         if operation is not None:
@@ -409,7 +489,7 @@ def batch(path, data, now):
             return 409, {"error": "Crée la clé de régie avec python tableau.py --preparer-mises-a-jour."}
         for key, row in targets.items():
             report = row.get("report", {})
-            state = update_availability(report, now, key_exists=True)
+            state = "maintenance" if os_busy(row, now) else update_availability(report, now, key_exists=True)
             if state == "available":
                 state = "queued"
                 existing = update_view(key, report, now)
@@ -988,7 +1068,8 @@ class Request(BaseHTTPRequestHandler):
                         source_resolutions={source: resolution for source in report.get("sources", [])
                                             if (resolution := source_resolution(source))},
                         client_update=update_view(key, report, now),
-                        update_availability=update_availability(report, now, key_exists),
+                        update_availability="maintenance" if os_busy(row, now) else update_availability(report, now, key_exists),
+                        os_update=os_status(row, now), os_busy=os_busy(row, now),
                         media=screen_media(row), media_revision=media_revision(screen_media(row)),
                         media_folders=media_folders(row), media_folder=row.get("media_folder", MEDIA_DEFAULT_FOLDER),
                         media_disk=media_capacity(row),
@@ -1090,6 +1171,25 @@ class Request(BaseHTTPRequestHandler):
                 return
             with LOCK:
                 status, result = self.apply(path, value)
+            if path == "/api/poll" and status == 200 and result.get("os_job"):
+                job = result["os_job"]
+                try:
+                    job["signature"] = sign_manifest(UPDATE_KEY, maintenance_manifest(
+                        value["id"], job["id"], safe_text(value["boot"]), value["os_nonce"]), OS_NAMESPACE)
+                except (OSError, RuntimeError) as error:
+                    print(f"Signature de la maintenance système : {error}", flush=True)
+                    result["os_job"] = None
+                    with LOCK:
+                        row = SCREENS.get(value["id"], {})
+                        previous = row.get("os_update")
+                        if previous and previous["id"] == job["id"] and previous["state"] == "queued":
+                            row["os_update"] = {**previous, "state": "failed",
+                                                "message": "La régie n’a pas pu signer la demande."}
+                            try:
+                                save()
+                            except OSError:
+                                row["os_update"] = previous
+                                raise
             if path == "/api/client-package" and status == 200:
                 try:
                     result = package(UPDATE_KEY, **result)
@@ -1452,7 +1552,7 @@ class Request(BaseHTTPRequestHandler):
             return self.prepare_media_export(data, now)
         if path == "/api/preview":
             return request_preview(data, now)
-        if path in ("/api/group", "/api/client-updates", "/api/screen-groups"):
+        if path in ("/api/group", "/api/client-updates", "/api/os-updates", "/api/screen-groups"):
             return batch(path, data, now)
         if path == "/api/pair":
             key = secrets.token_hex(8)
@@ -1595,7 +1695,11 @@ class Request(BaseHTTPRequestHandler):
                                       error=str(identification.get("error") or "")[:240])
             else:
                 identification = None
+            os_capability = data.get("os_capability")
+            if os_capability not in ("ready", "setup_required", "key_required") or row["kind"] == "windows":
+                os_capability = "unsupported"
             row["report"] = dict(seen=now, ip=self.client_address[0], state=state, boot=boot,
+                                 os_capability=os_capability,
                                  identification=identification,
                                  active_source=active_source,
                                  active_media=active_media,
@@ -1617,8 +1721,10 @@ class Request(BaseHTTPRequestHandler):
                                  update_target=update_target, update_has_engine=data.get("update_has_engine") is True,
                                  update_result=result,
                                  latency_ms=bounded_number(data.get("latency_ms"), 10000))
+            os_job = os_poll(row, data, boot, now) if os_capability != "unsupported" else None
+            maintaining = os_busy(row, now)
             power = row.get("power", {})
-            pending = power.get("boot") == boot and now - power.get("time", 0) < POWER_REQUEST_AGE
+            pending = not maintaining and power.get("boot") == boot and now - power.get("time", 0) < POWER_REQUEST_AGE
             operation = power.get("operation") if pending else None
             availability = update_availability(row["report"], now, UPDATE_KEY.is_file())
             recommendation = dict(version=CLIENT_VERSION, state=availability)
@@ -1632,11 +1738,11 @@ class Request(BaseHTTPRequestHandler):
                              preview_request=preview,
                              waiting=dict(name=row["name"], group=row.get("group"),
                                           qr=getattr(self.server, "waiting_qr", None)),
-                             reader_update=recommendation,
+                             reader_update=recommendation, os_job=os_job,
                              reboot=power["id"] if operation == "reboot" else None,
                              poweroff=power["id"] if operation == "poweroff" else None,
                              latency_test=test["id"] if test else None,
-                             client_update=job["id"] if can_update and job and result is None
+                             client_update=job["id"] if can_update and not maintaining and job and result is None
                              and now < job["until"] else None)
         if path == "/api/remove":
             remove_screens({key: row})
@@ -1691,6 +1797,8 @@ class Request(BaseHTTPRequestHandler):
                 return 409, {"error": "Le récepteur est hors ligne."}
             if state == "unsupported":
                 return 409, {"error": "Cette commande n’est pas prise en charge par le lecteur."}
+            if state == "maintenance":
+                return 409, {"error": "Une mise à jour système est en cours sur le lecteur."}
         else:
             return 400, {"error": "Action indisponible."}
         save()
