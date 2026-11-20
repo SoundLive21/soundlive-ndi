@@ -273,6 +273,8 @@ class Launcher:
         share = ttk.Frame(panel)
         share.grid(row=7, sticky="ew", pady=(10, 0))
         ttk.Button(share, text="Partage Internet", command=self.internet_dialog).pack(side="left")
+        self.dhcp_button = ttk.Button(share, text="Serveur DHCP", command=self.open_dhcp)
+        self.dhcp_button.pack(side="left", padx=(8, 0))
         ttk.Label(panel, text=COPYRIGHT).grid(row=8, sticky="w", pady=(8, 0))
         window.update_idletasks()
         viewport.configure(width=min(panel.winfo_reqwidth(), window.winfo_screenwidth() * 9 // 10),
@@ -428,6 +430,7 @@ class Launcher:
         self.start_button.configure(state="normal" if stopped else "disabled")
         self.stop_button.configure(state="normal" if self.regie and not self.busy else "disabled")
         self.open_button.configure(state="normal" if self.regie and not self.busy else "disabled")
+        self.dhcp_button.configure(state="disabled" if self.busy else "normal")
         remote = self.regie and self.regie.remote_url and not self.busy
         self.copy_button.configure(state="normal" if remote else "disabled")
         self.certificate_button.configure(state="normal" if remote else "disabled")
@@ -628,6 +631,12 @@ class Launcher:
 
     def open_dashboard(self):
         webbrowser.open(self.regie.local_url)
+
+    def open_dhcp(self):
+        if self.regie is None:
+            messagebox.showinfo("Serveur DHCP", "Démarre la régie pour ouvrir le panneau DHCP.", parent=self.window)
+            return
+        webbrowser.open(self.regie.local_url + "/#dhcp")
 
     def show_publication(self, status):
         state = status["state"]

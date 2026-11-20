@@ -917,6 +917,7 @@ async function call(path, data) {
 }
 
 const dhcpDialog = document.querySelector("#dhcp-dialog");
+const dhcpOpen = document.querySelector("#dhcp-open");
 const dhcpForm = document.querySelector("#dhcp-form");
 const dhcpAdapter = dhcpForm.elements.namedItem("adapter");
 const dhcpFields = document.querySelector("#dhcp-fields");
@@ -952,7 +953,7 @@ async function refreshDhcp() {
     if (dhcpDialog.open) dhcpTimer = setTimeout(refreshDhcp, 2000);
   }
 }
-document.querySelector("#dhcp-open").onclick = action(async () => {
+dhcpOpen.onclick = action(async () => {
   dhcpForm.reset();
   const status = await call("/api/dhcp?interfaces");
   dhcpAdapter.replaceChildren(...status.interfaces.map(row =>
@@ -3318,6 +3319,7 @@ refreshConnections();
 refreshRegieVersion();
 refreshTraffic();
 refreshRegieLatency();
+if (!dhcpOpen.hidden && location.hash === "#dhcp") dhcpOpen.click();
 setInterval(refresh,2000);
 setInterval(refreshTraffic,2000);
 setInterval(refreshRegieLatency,5000);
