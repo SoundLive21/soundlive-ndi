@@ -44,6 +44,7 @@ jobs:
           python3 tests/test-desktop-services.py
           bash tests/test-vnc-install.sh
           bash tests/test-session-lecteur.sh
+          python3 tests/test-autologin-gdm.py
           python3 tests/test-desktop-remmina.py
   windows-no-wifi:
     runs-on: windows-latest
