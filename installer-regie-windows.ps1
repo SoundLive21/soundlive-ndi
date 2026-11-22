@@ -210,21 +210,25 @@ try {
     Write-Log "Interpréteur : $python"
     $pythonw = Join-Path (Split-Path -Parent $python) 'pythonw.exe'
 
-    Set-Status 'Vérification des modules HTTPS et terminal SSH…'
-    $check = '-c "import cryptography, paramiko, pyte"'
+    Set-Status 'Vérification des modules HTTPS (truststore) et terminal SSH…'
+    # Important : truststore doit aussi être vérifié ici. Sinon une installation
+    # existante qui possède déjà les trois autres modules passe à côté de pip.
+    $check = '-c "import cryptography, paramiko, pyte, truststore"'
     $modules = Invoke-Hidden $python $check
     if ($modules.ExitCode -ne 0) {
+        Write-Log 'Au moins un module Python manque, installation des dépendances complètes (dont truststore).'
         $pip = Invoke-Hidden $python '-m pip --version'
         if ($pip.ExitCode -ne 0) {
             $pip = Invoke-Hidden $python '-m ensurepip --user'
             if ($pip.ExitCode -ne 0) { throw 'Impossible de mettre en place pip pour installer les modules de la régie.' }
         }
-        Set-Status 'Installation des modules HTTPS et terminal SSH…'
+        Set-Status 'Installation des modules HTTPS (truststore) et terminal SSH…'
         $modules = Invoke-Hidden $python '-m pip --disable-pip-version-check --isolated install --user --no-input --timeout 20 --retries 2 --only-binary=:all: cryptography paramiko pyte truststore'
-        if ($modules.ExitCode -ne 0) { throw 'Impossible de télécharger ou installer les modules Python. Vérifie la connexion Internet.' }
+        if ($modules.ExitCode -ne 0) { throw 'Impossible de télécharger ou installer les modules Python. Vérifie la connexion Internet et le journal.' }
         $modules = Invoke-Hidden $python $check
-        if ($modules.ExitCode -ne 0) { throw 'Les modules Python nécessaires sont introuvables après installation.' }
+        if ($modules.ExitCode -ne 0) { throw "Les modules Python nécessaires (dont truststore) sont introuvables après installation. Interpréteur : $python. Journal : $log" }
     }
+    Write-Log "Modules Python confirmés : cryptography, paramiko, pyte, truststore (interpréteur $python)."
 
     $env:SOUNDLIVE_SETUP_KIT = $payload
     $probeFiles = "import os,sys,pathlib; root=pathlib.Path(os.environ['SOUNDLIVE_SETUP_KIT']); sys.path.insert(0,str(root)); from versions_regie import FILES,required_files,software_version; v=software_version((root/'tableau.py').read_bytes(),'tableau.py'); a={f for f in FILES if (root/f).is_file()}; missing=required_files(v)-a; assert not missing, sorted(missing); print(*sorted(a),sep=chr(10))"
