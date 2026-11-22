@@ -25,6 +25,9 @@ assert command("192.168.56.21", "rdp") == [
 assert command("192.168.56.21", "vnc") == [
     "/usr/bin/remmina", "-c", "vnc://192.168.56.21:5900"
 ]
+assert command("192.168.56.21", "rdp", 3390) == [
+    "/usr/bin/remmina", "-c", "rdp://192.168.56.21:3390"
+]
 assert command("192.168.56.21", "ssh") is None
 print("OK : sur Linux, Remmina lance RDP et VNC sur les bons ports.")
 
