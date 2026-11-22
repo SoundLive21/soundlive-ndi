@@ -955,7 +955,7 @@ class Launcher:
         form.transient(self.window)
         pane = ttk.Frame(form, padding=18)
         pane.pack(fill="both", expand=True)
-        repo = tk.StringVar(form, value=current.get("repository", ""))
+        repo = tk.StringVar(form, value=current.get("repository") or versions.DEFAULT_REPOSITORY)
         available = self.publication_status.read().get("version")
         outcome = tk.StringVar(form, value=f"Version installée · {self.tableau.SOFTWARE_VERSION}"
                                + (f"\nVersion {available} disponible." if available else "")
@@ -974,13 +974,27 @@ class Launcher:
                     if len(key) > 4096 or not key.startswith(b"ssh-ed25519 "):
                         raise ValueError("Sélectionne une clé publique Ed25519.")
                     trusted.write_bytes(key)
-                    key_button.configure(text="Remplacer la clé publique de l’éditeur")
+                    refresh_key_button()
                 except (OSError, ValueError) as error:
                     outcome.set(str(error))
 
-        key_button = ttk.Button(pane, command=select_key, text=(
-            "Remplacer la clé publique de l’éditeur" if trusted.is_file() else "Importer la clé publique de l’éditeur"))
+        def key_ready():
+            if trusted.is_file():
+                return True
+            try:
+                return versions.repository(repo.get()).lower() == versions.DEFAULT_REPOSITORY.lower()
+            except ValueError:
+                return False
+
+        def refresh_key_button():
+            label = ("Remplacer la clé publique de l’éditeur" if trusted.is_file() else
+                     "Clé officielle intégrée · Changer de clé" if key_ready() else
+                     "Importer la clé publique de l’éditeur")
+            key_button.configure(text=label)
+
+        key_button = ttk.Button(pane, command=select_key)
         key_button.pack(anchor="w")
+        refresh_key_button()
         ttk.Label(pane, textvariable=outcome, wraplength=420).pack(anchor="w", pady=12)
         buttons = ttk.Frame(pane)
         buttons.pack(anchor="e")
@@ -1019,7 +1033,7 @@ class Launcher:
                     outcome.set(f"Version {selected[0]} disponible.")
                     if self.regie is not None:
                         outcome.set(f"Version {selected[0]} disponible. Ferme cette fenêtre et arrête la régie pour l’installer.")
-                    elif trusted.is_file():
+                    elif key_ready():
                         apply.configure(state="normal")
                     else:
                         outcome.set(f"Version {selected[0]} disponible. Importe la clé de l’éditeur puis vérifie de nouveau.")
@@ -1033,6 +1047,7 @@ class Launcher:
             try:
                 name = versions.repository(repo.get())
                 config.write_text(json.dumps({"repository": name}), encoding="utf-8")
+                refresh_key_button()
             except (ValueError, OSError) as error:
                 outcome.set(str(error))
                 return
