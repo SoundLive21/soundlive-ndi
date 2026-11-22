@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.90** et le client **1.4.40**.
+Ce kit contient la régie **1.4.91** et le client **1.4.41**.
 
 ## Installer et lancer la régie
 
@@ -510,6 +510,16 @@ clé publique SSH au compte du lecteur.
   un poste existant, exécute en administrateur
   `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\installer-bureau-distant-windows.ps1 -ActiverRdp`.
   Pour utiliser un MSI officiel déjà téléchargé, indique `-VncMsi C:\chemin\tightvnc.msi`.
+- Depuis la régie 1.4.91 et les lecteurs 1.4.41, les boutons
+  **RDP/MSRDP** et **VNC/TigerVNC** sont affichés selon les ports TCP
+  réellement en écoute sur le lecteur Ubuntu, et non seulement selon
+  GNOME/Wayland ou X11. Si seul RDP écoute sur 3389 (ou 3390), seul RDP
+  est proposé ; si seul VNC écoute sur 5900, seul VNC est proposé ;
+  si les deux sont actifs, les deux restent disponibles. Si aucun n'est
+  actif, aucune connexion graphique n'est présentée. Une mise à jour du
+  lecteur est nécessaire pour obtenir la détection dynamique.
+  La détection d'un port ne vérifie pas le mot de passe ni l'accès du
+  pare-feu depuis la régie.
 - Sous Ubuntu GNOME/Wayland (notamment Ubuntu 26.04), TigerVNC Viewer
   ne suffit pas à partager le bureau. Le partage intégré à GNOME utilise
   **RDP** : ouvre **Paramètres → Système → Bureau à distance → Partage du
