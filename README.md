@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.78** et le client **1.4.40**.
+Ce kit contient la régie **1.4.82** et le client **1.4.40**.
 
 ## Installer et lancer la régie
 
@@ -971,14 +971,19 @@ La vérification des versions GitHub utilise HTTPS et continue à **vérifier le
 Depuis la version 1.4.81, le lanceur Windows utilise `truststore` lorsqu'il est
 disponible, afin de faire valider la chaîne du certificat avec le magasin
 de certificats Windows (y compris les intermédiaires manquants).
-Le nouvel installateur Windows installe automatiquement ce module.
+**Depuis la 1.4.82**, l'installateur Windows vérifie explicitement que
+`truststore` est disponible dans **le Python choisi pour lancer la régie**.
+Même si `cryptography`, `paramiko` et `pyte` sont déjà installés, le script
+installe automatiquement `truststore` lorsqu'il manque, puis revérifie
+l'import des quatre modules. Une erreur d'installation est affichée et
+consignée dans `%LOCALAPPDATA%\\SoundLive-NDI-installation.log`.
 
-Une installation existante ayant déjà le module Python installé peut l'ajouter
-sans changer de configuration : `py -3 -m pip install --user truststore`.
-Cette commande doit cibler le même Python que le lanceur. La régie doit ensuite
-être redémarrée. Sur une ancienne version, mettre aussi à jour les fichiers du
-logiciel vers la 1.4.81 ou plus récente : installer `truststore` seul ne modifie
-pas l'ancien code de téléchargement.
+Pour une réparation manuelle sur une ancienne version, dans PowerShell :
+`& "$env:LOCALAPPDATA\\Programs\\Python\\Python313\\python.exe" -m pip install --user truststore`
+(si c'est bien cet interpréteur que l'installateur a choisi).
+Redémarre ensuite la régie. Une installation utilisant l'ancien téléchargeur
+doit aussi disposer de SoundLive-NDI **1.4.81 ou supérieure** pour bénéficier
+de la validation TLS via le magasin Windows.
 
 Si Windows ne fait pas non plus confiance au certificat, vérifier la date,
 les mises à jour des autorités racines, les proxy et les antivirus effectuant
