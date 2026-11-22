@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.91** et le client **1.4.41**.
+Ce kit contient la régie **1.4.92** et le client **1.4.41**.
 
 ## Installer et lancer la régie
 
@@ -182,6 +182,54 @@ bash installer-client.sh --plateforme ubuntu http://192.168.10.20:8765 CODE
   du kit avant de lancer l’installateur. Le client démarre à la prochaine
   ouverture de session. La compilation et la lecture Windows restent à valider
   sur un poste Windows équipé du SDK et d’une source NDI.
+
+### Connexion automatique et écran toujours actif (depuis 1.4.92)
+
+Les **installateurs des lecteurs** (pas celui de la régie) préparent une
+session dédiée à l'affichage NDI. Cette configuration est utile si le lecteur
+doit redémarrer après une coupure de courant et reprendre la lecture sans
+intervention humaine.
+
+- **Ubuntu GNOME (GDM)** : la connexion automatique du compte qui a lancé
+  l'installateur est activée dans `/etc/gdm3/custom.conf`. Le script conserve
+  une copie de la configuration précédente (`.soundlive-avant`). Les réglages
+  GNOME empêchent l'activation automatique de l'écran de verrouillage,
+  l'assombrissement, l'extinction d'écran due à l'inactivité et la suspension
+  automatique. Ils sont réappliqués à chaque ouverture de session.
+- **Raspberry Pi OS** : `raspi-config` active **Desktop Autologin (B4)** et
+  désactive **Screen Blanking**. Les sessions X11 désactivent également DPMS
+  via `xset`. Les systèmes LightDM utilisent un profil local
+  `/etc/lightdm/lightdm.conf.d/60-soundlive-autologin.conf`.
+- **Windows 10/11** : l'installation désactive l'économiseur, l'extinction
+  automatique des écrans et la mise en veille liée à l'inactivité pour le
+  profil d'alimentation actif. Lors de la première installation, si
+  l'autologin n'est pas déjà actif pour le compte Windows du lecteur,
+  l'installateur télécharge et vérifie la signature de **Microsoft
+  Sysinternals Autologon**, puis ouvre son interface pour que l'utilisateur
+  saisisse lui-même les identifiants et clique sur **Enable**.
+  SoundLive-NDI ne stocke jamais le mot de passe de connexion automatique.
+  Si cet outil ne peut pas être téléchargé, configure-le manuellement.
+
+Sur un lecteur Linux, le script peut être relancé sans réinstaller NDI :
+
+```bash
+bash configurer-session-lecteur-linux.sh ubuntu
+# Ou, sur un Raspberry Pi :
+bash configurer-session-lecteur-linux.sh pi
+```
+
+Sur Windows, depuis PowerShell administrateur dans le kit :
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\configurer-session-lecteur-windows.ps1
+```
+
+**Sécurité :** cette configuration facilite l'accès physique au poste et
+ne convient qu'à un lecteur dédié, sous un compte local limité. Sur Linux,
+`SOUNDLIVE_SKIP_AUTOLOGIN=1` permet de conserver le verrouillage à
+l'ouverture de session tout en désactivant l'inactivité de l'écran.
+N'active pas l'autologin pour un compte possédant des données personnelles
+ou des privilèges d'administration inutiles.
 
 Pour produire le binaire Windows, installe le SDK NDI 6 sur le poste de
 compilation et décompresse le paquet de développement SDL2 pour Visual C++.
