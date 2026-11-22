@@ -13,8 +13,17 @@ active_device() {
 }
 
 nmcli device set "$eth" autoconnect no
-nmcli device set "$wlan" autoconnect no
+if [[ -n $wlan && -n $wifi_uuid ]]; then
+    nmcli device set "$wlan" autoconnect no
+fi
 ip link set dev "$eth" up
+# Lecteur Ethernet seul : ne touche jamais au Wi-Fi ni à sa radio.
+if [[ -z $wlan || -z $wifi_uuid ]]; then
+    if ! active_device "$eth" "$eth_uuid"; then
+        nmcli --wait 12 connection up uuid "$eth_uuid" ifname "$eth"
+    fi
+    exit 0
+fi
 if [[ $(cat "/sys/class/net/$eth/carrier" 2>/dev/null || true) == 1 ]]; then
     if active_device "$eth" "$eth_uuid"; then
         if [[ $(nmcli radio wifi) != disabled ]]; then
