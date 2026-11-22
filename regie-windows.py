@@ -192,7 +192,7 @@ class NetworkControl:
     def open_dhcp_socket(self, settings):
         interface = settings.adapter["label"]
         try:
-            return bind_listener(interface, settings.adapter["index"])
+            return bind_listener(interface, settings.adapter["index"], str(settings.server))
         except PermissionError:
             if not sys.platform.startswith("linux"):
                 raise
