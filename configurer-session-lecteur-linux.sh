@@ -2,9 +2,9 @@
 # Configure la session d'un lecteur NDI dédié : autologin + écran toujours actif.
 set -euo pipefail
 
-mode=$\{1:-ubuntu}
+mode=${1:-ubuntu}
 verify=false
-if [[ $\{2:-} == --verifier ]]; then verify=true; fi
+if [[ ${2:-} == --verifier ]]; then verify=true; fi
 if [[ $mode != ubuntu && $mode != pi ]]; then
     echo 'Usage : bash configurer-session-lecteur-linux.sh ubuntu|pi [--verifier]' >&2
     exit 2
@@ -18,7 +18,7 @@ if [[ ! $account =~ ^[a-zA-Z_][a-zA-Z0-9_.-]*$ ]]; then
     echo "Compte utilisateur non pris en charge : $account" >&2
     exit 1
 fi
-autostart="$\{XDG_CONFIG_HOME:-$HOME/.config}/autostart"
+autostart="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
 launcher="$HOME/.local/bin/soundlive-ndi-ecran-actif"
 if $verify; then
     echo "Vérification : mode $mode, compte $account, sans modification."
@@ -44,7 +44,7 @@ if command -v gsettings >/dev/null 2>&1; then
     set_gnome org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type nothing
     set_gnome org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type nothing
 fi
-if [[ $\{XDG_SESSION_TYPE:-} == x11 && -n $\{DISPLAY:-} ]] && command -v xset >/dev/null 2>&1; then
+if [[ ${XDG_SESSION_TYPE:-} == x11 && -n ${DISPLAY:-} ]] && command -v xset >/dev/null 2>&1; then
     xset s off || true
     xset s noblank || true
     xset -dpms || true
@@ -62,7 +62,7 @@ DESKTOP
 # Appliquer immédiatement dans la session courante lorsqu'elle est accessible.
 "$launcher"
 
-if [[ $\{SOUNDLIVE_SKIP_AUTOLOGIN:-0} == 1 ]]; then
+if [[ ${SOUNDLIVE_SKIP_AUTOLOGIN:-0} == 1 ]]; then
     echo 'Connexion automatique ignorée (SOUNDLIVE_SKIP_AUTOLOGIN=1).'
     exit 0
 fi
@@ -131,6 +131,6 @@ elif [[ $dm == *lightdm* || ( -z $dm && -d /etc/lightdm ) ]]; then
         sudo tee /etc/lightdm/lightdm.conf.d/60-soundlive-autologin.conf >/dev/null
     echo "LightDM : ouverture de session automatique configurée pour $account."
 else
-    echo "Gestionnaire de connexion inconnu ($\{dm:-absent}) : configure l’autologin manuellement." >&2
+    echo "Gestionnaire de connexion inconnu (${dm:-absent}) : configure l’autologin manuellement." >&2
 fi
 echo 'Écran actif et verrouillage automatique désactivés pour la session du lecteur.'
