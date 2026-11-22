@@ -5,7 +5,7 @@ base=$(cd -- "$(dirname -- "$0")" && pwd)
 usage() {
     cat <<'HELP'
 Usage : bash installer-client.sh [--plateforme pi|ubuntu] --preparer \
-  --hote ndi-player-03 --ip 10.10.2.103/24 --wifi "Réseau écrans" \
+  --hote ndi-player-03 --ip 10.10.2.103/24 [--wifi "Réseau écrans"] \
   --regie http://10.10.2.99:8765 --code CODE
 
 Options : --ethernet INTERFACE --interface-wifi INTERFACE
@@ -53,7 +53,7 @@ if [[ ${1:-} == appliquer ]]; then
     "${nm[@]}" connection add type ethernet ifname "$eth" con-name "$eth_name" \
         connection.uuid "$eth_uuid" connection.autoconnect no ipv4.method manual ipv4.addresses "$ip" \
         ipv4.gateway "$gateway" ipv4.dns "$dns" ipv6.method disabled >/dev/null
-    if [[ -n $wifi_keyfile ]]; then
+    if [[ -n $wlan && -n $wifi_keyfile ]]; then
         # NetworkManager only loads keyfiles owned by root with mode 0600.
         new_wifi_uuid=$(sed -n 's/^uuid=//p' "$wifi_keyfile")
         [[ $new_wifi_uuid =~ ^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$ ]]
@@ -63,16 +63,18 @@ if [[ ${1:-} == appliquer ]]; then
             sudo rm -f -- "$path"
             exit 1
         fi
-    else
+    elif [[ -n $wlan ]]; then
         [[ $("${nm[@]}" -e no -g 802-11-wireless.ssid connection show uuid "$wifi_uuid") == "$expected_ssid" ]]
         temp_name="SoundLive configuration ${eth_uuid:0:8}"
         "${nm[@]}" connection clone uuid "$wifi_uuid" "$temp_name" >/dev/null
         new_wifi_uuid=$("${nm[@]}" -g connection.uuid connection show id "$temp_name")
     fi
-    "${nm[@]}" connection modify uuid "$new_wifi_uuid" connection.interface-name "$wlan" \
-        connection.id "$wifi_name" connection.autoconnect no connection.permissions '' 802-11-wireless.powersave 2 \
-        ipv4.method manual ipv4.addresses "$ip" ipv4.gateway "$gateway" ipv4.dns "$dns" \
-        ipv4.routes '' ipv4.never-default no ipv6.method disabled
+    if [[ -n $wlan ]]; then
+        "${nm[@]}" connection modify uuid "$new_wifi_uuid" connection.interface-name "$wlan" \
+            connection.id "$wifi_name" connection.autoconnect no connection.permissions '' 802-11-wireless.powersave 2 \
+            ipv4.method manual ipv4.addresses "$ip" ipv4.gateway "$gateway" ipv4.dns "$dns" \
+            ipv4.routes '' ipv4.never-default no ipv6.method disabled
+    fi
     printf '%s\n' "$eth" "$wlan" "$eth_uuid" "$new_wifi_uuid" > "$profiles"
     sudo systemctl stop soundlive-ndi-network.timer soundlive-ndi-network.service 2>/dev/null || true
     sudo install -o root -g root -m 0755 "$base/soundlive-ndi-network-static.sh" /usr/local/sbin/soundlive-ndi-network
@@ -129,7 +131,7 @@ if (( EUID == 0 )); then
     echo "Lance l'installation depuis le compte du bureau, sans sudo." >&2
     exit 1
 fi
-if [[ -z $ssid || $ssid == *$'\n'* || -z $regie || -z $hote || -z $ip ]]; then
+if [[ $ssid == *$'\n'* || -z $regie || -z $hote || -z $ip ]]; then
     usage >&2
     exit 2
 fi
@@ -141,7 +143,7 @@ from urllib.parse import urlsplit
 
 host, cidr, gateway, dns, dns2, server, ssid = sys.argv[1:]
 try:
-    if not 1 <= len(ssid.encode()) <= 32 or any(ord(char) < 32 for char in ssid):
+    if ssid and (not 1 <= len(ssid.encode()) <= 32 or any(ord(char) < 32 for char in ssid)):
         raise ValueError("Le SSID doit comporter 1 à 32 octets et aucun caractère de contrôle.")
     if not re.fullmatch(r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?", host):
         raise ValueError("Hostname invalide.")
@@ -171,6 +173,10 @@ except ValueError as error:
     raise SystemExit(str(error))
 PY
 if [[ -n $dns2 ]]; then dns="$dns,$dns2"; fi
+if [[ -z $ssid && ( -n $wlan || -n $wifi_file || $wifi_open == true || $wifi_prompt == true ) ]]; then
+    echo 'Sans SSID, ne renseigne aucune option Wi-Fi : le lecteur utilisera Ethernet seul.' >&2
+    exit 2
+fi
 if { $wifi_open && { $wifi_prompt || [[ -n $wifi_file ]]; }; } || { $wifi_prompt && [[ -n $wifi_file ]]; }; then
     echo 'Choisis une seule méthode pour la clé Wi-Fi.' >&2
     exit 2
@@ -210,8 +216,13 @@ choose_interface() {
     return 1
 }
 eth=$(choose_interface ethernet "$eth")
-wlan=$(choose_interface wifi "$wlan")
-printf 'Lecteur %s, IPv4 %s, Ethernet %s, Wi-Fi %s (%s)\n' "$hote" "$ip" "$eth" "$wlan" "$ssid"
+if [[ -n $ssid ]]; then
+    wlan=$(choose_interface wifi "$wlan")
+    printf 'Lecteur %s, IPv4 %s, Ethernet %s, Wi-Fi %s (%s)\n' "$hote" "$ip" "$eth" "$wlan" "$ssid"
+else
+    wlan=
+    printf 'Lecteur %s, IPv4 %s, Ethernet %s, Wi-Fi non configuré.\n' "$hote" "$ip" "$eth"
+fi
 if $verify; then
     printf 'Paramètres validés. Réseau et système inchangés.\n'
     exit 0
@@ -263,7 +274,7 @@ wifi_profile() {
 }
 
 wifi_uuid= wifi_keyfile=
-if $wifi_open || $wifi_prompt || [[ -n $wifi_file ]] || ! wifi_uuid=$(wifi_profile); then
+if [[ -n $ssid ]] && { $wifi_open || $wifi_prompt || [[ -n $wifi_file ]] || ! wifi_uuid=$(wifi_profile); }; then
     wifi_keyfile="$work/wifi.nmconnection"
     if $wifi_open; then
         password=
