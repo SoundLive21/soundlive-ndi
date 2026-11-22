@@ -903,16 +903,20 @@ def desktop_command(address, protocol):
     return None
 
 
-def support_methods(kind):
+def support_methods(kind, desktop=None):
     if kind == "windows":
         return ("rdp", "vnc")
-    if kind in ("pi", "ubuntu"):
+    if kind == "ubuntu":
+        # GNOME Wayland partage le bureau en RDP. X11 utilise TigerVNC.
+        return ("ssh", "rdp") if desktop == "rdp" else ("ssh", "vnc")
+    if kind == "pi":
         return ("ssh", "vnc")
     return ()
 
 
 def regie_support_methods():
-    return support_methods("windows" if sys.platform == "win32" else "ubuntu")
+    return support_methods("windows" if sys.platform == "win32" else "ubuntu",
+                           desktop_protocol())
 
 
 def support_target(key):
@@ -927,7 +931,7 @@ def support_target(key):
         if address.is_loopback or address.is_unspecified or address.is_multicast:
             raise ValueError("Adresse du lecteur invalide.")
         return dict(address=str(address), name=row["name"], user=row.get("ssh_user", "soundlive"),
-                    support=support_methods(row.get("kind")),
+                    support=support_methods(row.get("kind"), report.get("desktop_protocol")),
                     ssh_host_fingerprints=row.get("ssh_host_fingerprints", []))
 
 
@@ -1138,7 +1142,7 @@ class Request(BaseHTTPRequestHandler):
                         pairing=row.get("pairing") if now < row.get("pairing_until", 0) else None,
                         installation_fingerprint=row.get("installation_fingerprint"),
                         paired="token" in row, version=row.get("version", 0), kind=row.get("kind"),
-                        support=support_methods(row.get("kind")),
+                        support=support_methods(row.get("kind"), report.get("desktop_protocol")),
                         group=row.get("group"), identify=row.get("identify") is True,
                         resolution_limit=row.get("resolution_limit"),
                         group_order=group_order.get(group), screen_order=screen_order.get(group, {}).get(key),
