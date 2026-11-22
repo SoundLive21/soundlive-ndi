@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.84** et le client **1.4.40**.
+Ce kit contient la régie **1.4.85** et le client **1.4.40**.
 
 ## Installer et lancer la régie
 
@@ -1022,6 +1022,16 @@ locaux, dont `ecrans.json` et `source-publications.json`, puis relance
 avant de lire sa liste de fichiers. Il peut ainsi installer les nouveaux
 fichiers du logiciel explicitement déclarés dans la publication signée.
 
+
+### Correctif 1.4.85 : syntaxe du script de partage Windows
+
+Le script `regie-internet-windows.ps1` n'emploie plus d'apostrophes
+typographiques non échappées dans ses chaînes PowerShell simples.
+Ces caractères provoquaient une erreur `ScriptBlock.Create` avec
+« Jeton inattendu » avant toute modification du réseau.
+Le correctif rétablit l'exécution du diagnostic et des opérations de partage.
+La réussite de l'activation dépend encore de la disponibilité de WinNAT
+sur le système et de l'absence de conflit réseau.
 
 ### Diagnostic Windows : partage Internet / WinNAT
 
