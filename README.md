@@ -477,10 +477,24 @@ pour le terminal individuel et les connexions groupées suivantes.
 La fenêtre **Informations** propose **SSH** et **TigerVNC** pour un Pi ou un
 poste Ubuntu, et **MSRDP** et **TigerVNC** pour un poste Windows.
 
-Pour un lecteur, la console locale lance TigerVNC Viewer ou le client
-Microsoft `mstsc.exe` quand l’application est disponible. Depuis l’interface
-HTTPS ou la fiche de la régie, télécharge le fichier `.tigervnc` ou `.rdp`
-et ouvre-le dans le client correspondant sur ton poste de commande.
+Pour un lecteur, la console locale utilise **Remmina sous Ubuntu** s'il
+est installé (protocole RDP ou VNC). Sans Remmina, une régie Linux utilise
+TigerVNC Viewer pour VNC si celui-ci est disponible. Sous Windows,
+la connexion RDP lance `mstsc.exe`, tandis que VNC utilise TigerVNC Viewer.
+Depuis l’interface HTTPS, télécharge le fichier `.tigervnc` ou `.rdp`,
+ou saisis directement l'adresse dans Remmina avec le bon protocole.
+
+Sur la machine **qui lance les connexions** (la régie Ubuntu ou un autre PC
+Ubuntu), tu peux installer les deux protocoles Remmina avec :
+
+```bash
+sudo apt install remmina remmina-plugin-rdp remmina-plugin-vnc
+```
+
+Pour un lecteur Ubuntu GNOME/Wayland à l'adresse `192.168.56.21` et dont
+le service RDP écoute sur TCP 3389, sélectionne **RDP** dans Remmina, puis
+le serveur `192.168.56.21:3389`. Le choix **VNC** ne fonctionnera pas
+sans serveur VNC actif sur le lecteur.
 Les premières installations Pi et Ubuntu mettent en place OpenSSH et
 `tigervnc-viewer`. Les commandes générées par la régie ajoutent aussi sa
 clé publique SSH au compte du lecteur.
@@ -501,7 +515,7 @@ clé publique SSH au compte du lecteur.
   **RDP** : ouvre **Paramètres → Système → Bureau à distance → Partage du
   bureau**, active **Contrôle à distance** et relève les identifiants de
   connexion RDP. Sur ces lecteurs, la régie affiche désormais **MSRDP**
-  au lieu de TigerVNC. GNOME peut choisir le port 3390 si l'accès RDP
+  au lieu de TigerVNC (ou RDP dans Remmina sous Ubuntu). GNOME peut choisir le port 3390 si l'accès RDP
   de connexion à distance utilise déjà le 3389 : utilise le port indiqué
   dans les paramètres Ubuntu.
 - Sous Ubuntu X11, l'installation prépare un serveur `x0tigervncserver`
