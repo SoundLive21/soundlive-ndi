@@ -39,6 +39,7 @@ FILES = frozenset((
     "demarrer-windows.bat", "demarrer-regie-ubuntu.sh", "SoundLive-NDI.c", "SoundLive-NDI.exe",
     "ecran.py", "diagnostic.py", "mise_a_jour.py", "lancer-client.py",
     "installer-client.sh", "installer-client.cmd", "installer-client-windows.py",
+    "configurer-session-lecteur-linux.sh", "configurer-session-lecteur-windows.ps1",
     "preparer-lecteur-linux.sh", "preparer-lecteur-windows.ps1", "installation_lecteur.py",
     "installer-ssh-linux.sh",
     "regie-internet.py", "regie-internet-windows.ps1", "regie_dhcp.py", "regie_reseau.py",
@@ -96,6 +97,8 @@ def required_files(version):
         files.update(("identification-linux.txt", "lecteur-ndi-ubuntu.c"))
     if version >= (1, 4, 73):
         files.update(("maintenance-os.sh", "soundlive-ndi-maintenance.service"))
+    if version >= (1, 4, 92):
+        files.update(("configurer-session-lecteur-linux.sh", "configurer-session-lecteur-windows.ps1"))
     return files
 
 
