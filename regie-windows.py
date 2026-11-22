@@ -957,7 +957,7 @@ class Launcher:
         selected = None
         answers = Queue()
         ttk.Label(pane, text="Dépôt officiel GitHub").pack(anchor="w")
-        ttk.Entry(pane, textvariable=repo, width=52, state="disabled").pack(fill="x", pady=(4, 10))
+        ttk.Entry(pane, textvariable=repo, width=52, state="readonly").pack(fill="x", pady=(4, 10))
         ttk.Label(pane, textvariable=outcome, wraplength=420).pack(anchor="w", pady=12)
         buttons = ttk.Frame(pane)
         buttons.pack(anchor="e")
