@@ -165,7 +165,8 @@ class PublicationStatus:
         try:
             repo = repository(json.loads(self.config.read_text(encoding="utf-8"))["repository"])
         except FileNotFoundError:
-            repo = None
+            # Même si l'installation ne peut pas écrire le JSON, utiliser le dépôt officiel.
+            repo = DEFAULT_REPOSITORY
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             return {"state": "unavailable"}
         with self.lock:
@@ -211,7 +212,10 @@ class PublicationStatus:
 
 
 def verify_release(public, archive, signature, archive_name=ARCHIVE):
-    key = public.read_text(encoding="ascii").split()
+    # Une clé intégrée permet de vérifier les releases officielles même si
+    # l'installation n'a pas pu créer publication.pub sur le disque.
+    key = (public if isinstance(public, str) and public.startswith("ssh-ed25519 ")
+           else Path(public).read_text(encoding="ascii")).split()
     if len(key) < 2 or key[0] != "ssh-ed25519":
         raise ValueError("Clé publique de publication Ed25519 requise.")
     with TemporaryDirectory() as folder:
@@ -296,7 +300,16 @@ def install(root, release, public):
         raise ValueError("Nom d’archive de publication invalide.")
     archive = download(url, MAX_ARCHIVE)
     signature = download(url + ".sig", 16 * 1024)
-    verify_release(public, archive, signature, archive_name)
+    # N'utiliser la clé embarquée que pour le dépôt officiel, jamais pour
+    # un dépôt GitHub tiers. Une clé personnalisée existante reste prioritaire.
+    trusted = Path(public)
+    if not trusted.is_file():
+        parsed = urlsplit(url)
+        prefix = f"/{DEFAULT_REPOSITORY}/releases/download/"
+        if parsed.scheme != "https" or parsed.hostname != "github.com" or not parsed.path.lower().startswith(prefix.lower()):
+            raise ValueError("Importe la clé publique de l'éditeur de ce dépôt pour installer la mise à jour.")
+        trusted = DEFAULT_PUBLICATION_KEY
+    verify_release(trusted, archive, signature, archive_name)
     files = archive_files(archive, version, archive_name, signature_verified=True)
     with TemporaryDirectory(dir=root, prefix=".soundlive-publication-") as folder:
         stage = Path(folder)
