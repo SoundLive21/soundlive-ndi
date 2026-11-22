@@ -39,6 +39,17 @@ if [[ $mode == pi && $session != x11 ]] && command -v raspi-config >/dev/null; t
     install_package wayvnc
     sudo raspi-config nonint do_vnc 0
     echo 'VNC activé sur Raspberry Pi OS. Utilise les identifiants du Pi avec un client compatible WayVNC.'
+elif [[ $mode == ubuntu && $session == wayland &&
+        "${XDG_CURRENT_DESKTOP,,}" == *gnome* || $mode == ubuntu && $session == wayland &&
+        "${XDG_CURRENT_DESKTOP,,}" == *ubuntu* ]]; then
+    # GNOME/Wayland (Ubuntu récent) partage l'écran via GNOME Remote Desktop (RDP).
+    # Aucun mot de passe RDP ne doit être inventé ou enregistré par l'installateur.
+    install_package gnome-remote-desktop
+    rm -f -- "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/soundlive-vnc.desktop"
+    echo 'Ubuntu GNOME / Wayland détecté : TigerVNC Server X11 ne peut pas partager ce bureau.'
+    echo 'Active Paramètres > Système > Bureau à distance > Partage du bureau (et Contrôle à distance).'
+    echo 'Définis les identifiants RDP dans les paramètres Ubuntu, puis utilise le bouton MSRDP de la régie.'
+    echo 'La session utilisateur doit être ouverte pour le partage du bureau.'
 elif [[ $session == x11 ]]; then
     install_package tigervnc-scraping-server
     install_package tigervnc-tools
@@ -54,15 +65,41 @@ elif [[ $session == x11 ]]; then
     fi
     chmod 600 "$passfile"
     autostart="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
+    bindir="$HOME/.local/bin"
+    install -d -m 700 "$bindir"
+    launcher="$bindir/soundlive-vnc-x11"
+    cat > "$launcher" <<'LAUNCHER'
+#!/usr/bin/env bash
+set -euo pipefail
+exec /usr/bin/x0tigervncserver -fg -localhost no -SecurityTypes TLSVnc \
+    -PasswordFile "$HOME/.vnc/passwd" -rfbport 5900
+LAUNCHER
+    chmod 700 "$launcher"
     install -d "$autostart"
     cat > "$autostart/soundlive-vnc.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=SoundLive VNC
-Exec=/usr/bin/x0tigervncserver -fg -localhost no -PasswordFile "$passfile" -rfbport 5900
+Exec=$launcher
 Terminal=false
 DESKTOP
-    echo 'Le serveur TigerVNC démarrera à la prochaine ouverture de la session X11.'
+    if [[ -n ${DISPLAY:-} ]]; then
+        if [[ -n $(ss -H -ltn '( sport = :5900 )' 2>/dev/null || true) ]]; then
+            echo 'Le port TCP 5900 est déjà occupé : vérifie le serveur VNC existant.'
+        else
+            mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/soundlive-ndi"
+            logfile="${XDG_STATE_HOME:-$HOME/.local/state}/soundlive-ndi/vnc.log"
+            nohup "$launcher" > "$logfile" 2>&1 </dev/null &
+            sleep 2
+            if [[ -n $(ss -H -ltn '( sport = :5900 )' 2>/dev/null || true) ]]; then
+                echo 'TigerVNC actif sur TCP 5900 pour la session X11 courante.'
+            else
+                echo "TigerVNC n'écoute pas encore sur TCP 5900. Diagnostic : $logfile" >&2
+            fi
+        fi
+    else
+        echo 'Pas de DISPLAY X11 actif : TigerVNC sera lancé à la prochaine ouverture de session graphique.'
+    fi
 elif [[ $session == wayland ]] && viewer=$(command -v w0vncserver || command -v w0tigervncserver); then
     install_package tigervnc-tools
     passfile="$HOME/.config/tigervnc/passwd"
@@ -77,10 +114,11 @@ elif [[ $session == wayland ]] && viewer=$(command -v w0vncserver || command -v 
 [Desktop Entry]
 Type=Application
 Name=SoundLive VNC
-Exec="$viewer" -PasswordFile="$passfile" -rfbport=5900
+Exec=$viewer -PasswordFile=$passfile -rfbport=5900
 Terminal=false
 DESKTOP
-    echo 'VNC démarrera à la prochaine ouverture de la session Wayland. Autorise le partage si le bureau le demande.'
+    echo 'Serveur VNC Wayland configuré. Rouvre ta session et vérifie TCP 5900.'
 else
-    echo 'TigerVNC Viewer est installé. Pour partager ce bureau, relance ce script depuis une session X11 ou un environnement avec w0vncserver compatible.' >&2
+    echo "Aucun serveur VNC compatible n'a été configuré pour la session ${session:-inconnue}." >&2
+    echo 'Sur Ubuntu GNOME/Wayland, utilise le partage RDP intégré de GNOME.' >&2
 fi
