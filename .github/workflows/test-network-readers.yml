@@ -34,6 +34,7 @@ jobs:
           bash -n installer-bureau-distant-linux.sh
           python3 tests/test-vnc-routing.py
           bash tests/test-vnc-install.sh
+          python3 tests/test-desktop-remmina.py
   windows-no-wifi:
     runs-on: windows-latest
     steps:
