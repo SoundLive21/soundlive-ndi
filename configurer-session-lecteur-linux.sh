@@ -126,6 +126,7 @@ os.replace(temp, target)
 PY
     echo "GDM : ouverture de session automatique configurée pour $account."
 elif [[ $dm == *lightdm* || ( -z $dm && -d /etc/lightdm ) ]]; then
+    sudo install -d -m 755 /etc/lightdm/lightdm.conf.d
     printf '[Seat:*]\nautologin-user=%s\nautologin-user-timeout=0\n' "$account" |
         sudo tee /etc/lightdm/lightdm.conf.d/60-soundlive-autologin.conf >/dev/null
     echo "LightDM : ouverture de session automatique configurée pour $account."
