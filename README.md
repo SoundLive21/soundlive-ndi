@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.87** et le client **1.4.40**.
+Ce kit contient la régie **1.4.88** et le client **1.4.40**.
 
 ## Installer et lancer la régie
 
@@ -195,16 +195,46 @@ powershell -NoProfile -File .\compiler-lecteur-windows.ps1 -SdlSdk C:\SDK\SDL2
 SDK et runtime NDI sur [NDI](https://ndi.video/for-developers/ndi-sdk/download/).
 Paquets de développement [SDL2](https://www.libsdl.org/release/).
 
+### Lecteur Ethernet sans carte Wi-Fi (depuis la régie 1.4.88)
+
+Dans **Ajouter un écran → Préparer une IPv4 fixe et associer**, laisse
+**Nom du réseau Wi-Fi (SSID)** et **Interface Wi-Fi** vides.
+La commande générée n'inclut ni `--wifi` sous Linux, ni `-Wifi` sous Windows.
+L'installateur n'essaie alors ni de détecter ni d'utiliser de carte Wi-Fi,
+et le service de démarrage configure uniquement Ethernet.
+
+Exemple Linux, sans Wi-Fi :
+
+```bash
+bash installer-client.sh --plateforme ubuntu --preparer \
+  --hote ndi-player-04 --ip 192.168.56.20/24 \
+  --passerelle 192.168.56.1 --dns 1.1.1.1 \
+  --regie http://192.168.56.1:8765 --code CODE
+```
+
+Exemple Windows en **PowerShell administrateur**, sans Wi-Fi :
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\preparer-lecteur-windows.ps1 `
+  -Hote ndi-player-05 -Ip 192.168.56.21/24 `
+  -Passerelle 192.168.56.1 -Dns 1.1.1.1 `
+  -Regie http://192.168.56.1:8765 -Code CODE
+```
+
+Si le SSID est renseigné, le comportement Ethernet + Wi-Fi est conservé.
+Sur un lecteur Windows, **Associer uniquement** reste le choix par défaut
+pour éviter de changer involontairement la configuration IPv4.
+
 ### Préparer un lecteur avec une IPv4 fixe
 
-Dans le tableau, utilise **Ajouter un écran**, choisis Raspberry Pi ou PC
-Ubuntu et remplis **Préparer une IPv4 fixe et associer**. Après confirmation,
+Dans le tableau, utilise **Ajouter un écran**, choisis Raspberry Pi, PC
+Ubuntu ou PC Windows et remplis **Préparer une IPv4 fixe et associer**. Après confirmation,
 le bouton **Copier** récupère la commande avec le code d’association.
 
 Lance la préparation depuis la session locale du lecteur. Branche l'Ethernet
 sur un réseau qui fournit un bail DHCP et donne accès à Internet. Le script
 essaie d'obtenir ce bail pour télécharger les paquets, dont FFmpeg, et préparer
-le moteur NDI. Les profils fixes `SOUNDLIVE-ETHERNET` et `SOUNDLIVE-WIFI` ne sont
+le moteur NDI. Les profils fixes `SOUNDLIVE-ETHERNET` et, si un SSID est fourni, `SOUNDLIVE-WIFI` ne sont
 mis en service qu'après cette phase. Si le réseau d'installation est différent
 du réseau de diffusion, ajoute `--attendre-reseau-ecrans` ou
 `-AttendreReseauEcrans`. Le script attend alors que tu déplaces le câble
@@ -270,7 +300,8 @@ bash installer-client.sh --plateforme pi --preparer \
 
 Pour Ubuntu Desktop 64 bits, remplace `--plateforme pi` par
 `--plateforme ubuntu` et adapte le hostname et l'IP. NetworkManager doit
-gérer les deux cartes. Le SSID désigne le réseau Wi-Fi réel. Sans
+gérer la carte Ethernet. Le SSID désigne le réseau Wi-Fi réel lorsqu'il est
+configuré. Sans
 `--saisir-cle-wifi`, le script réutilise un profil enregistré du même SSID
 si possible ou demande la clé WPA2. Pour la fournir depuis un fichier privé
 contenant la clé sur la première ligne, remplace `--saisir-cle-wifi` par
@@ -293,8 +324,9 @@ administrateurs avec les permissions requises. Le script réutilise le profil
 Wi-Fi du SSID ou demande la clé WPA2. `-SaisirCleWifi` redemande la clé.
 `-CleWifiFichier` prend un fichier privé contenant la clé sur la première
 ligne, `-WifiOuvert` sélectionne un réseau ouvert et `-ProfilWifiXml`
-importe un profil pour le même SSID. Les deux cartes doivent être dédiées
-au lecteur. Le script renomme les cartes et remplace leur configuration IPv4.
+importe un profil pour le même SSID. Les cartes sélectionnées doivent être
+dédiées au lecteur. Le script renomme et configure seulement celles
+qui sont utilisées.
 Il installe Python avec Tcl/Tk et FFmpeg avec WinGet si nécessaire. Le moteur
 NDI Windows peut être déjà installé ou fourni avec `-Lecteur` et son
 `SDL2.dll` x64. Pour le compiler, fournis `-SdlSdk C:\SDK\SDL2` et dispose
