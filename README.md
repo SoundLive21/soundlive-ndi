@@ -496,10 +496,24 @@ clé publique SSH au compte du lecteur.
   un poste existant, exécute en administrateur
   `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\installer-bureau-distant-windows.ps1 -ActiverRdp`.
   Pour utiliser un MSI officiel déjà téléchargé, indique `-VncMsi C:\chemin\tightvnc.msi`.
-- Sous Ubuntu, le bouton TigerVNC suppose qu’un serveur VNC écoute sur le
-  port 5900. Le partage intégré à GNOME Wayland utilise RDP. Pour accéder
-  à la session affichée dans TigerVNC, utilise une session X11 ou un
-  environnement Wayland avec un w0vncserver compatible.
+- Sous Ubuntu GNOME/Wayland (notamment Ubuntu 26.04), TigerVNC Viewer
+  ne suffit pas à partager le bureau. Le partage intégré à GNOME utilise
+  **RDP** : ouvre **Paramètres → Système → Bureau à distance → Partage du
+  bureau**, active **Contrôle à distance** et relève les identifiants de
+  connexion RDP. Sur ces lecteurs, la régie affiche désormais **MSRDP**
+  au lieu de TigerVNC. GNOME peut choisir le port 3390 si l'accès RDP
+  de connexion à distance utilise déjà le 3389 : utilise le port indiqué
+  dans les paramètres Ubuntu.
+- Sous Ubuntu X11, l'installation prépare un serveur `x0tigervncserver`
+  avec authentification et TLS sur TCP 5900, le démarre dans la session
+  courante lorsqu'elle est accessible et le relance à chaque ouverture de
+  session X11. En cas d'échec, consulte
+  `~/.local/state/soundlive-ndi/vnc.log`. Le port 5900 doit être
+  autorisé sur le réseau local. Ne l'expose pas directement à Internet.
+- Pour connaître le protocole de ton lecteur, exécute
+  `echo "$XDG_SESSION_TYPE $XDG_CURRENT_DESKTOP"`, puis
+  `ss -lntp | grep -E ':(5900|3389|3390)\\b'`. Une application
+  TigerVNC Viewer installée ne prouve pas que le serveur est démarré.
 
 Les scripts d’installation du bureau distant fonctionnent aussi sur le PC
 de régie. Les postes doivent être joignables depuis le client VNC ou RDP
