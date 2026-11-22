@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.77** et le client **1.4.40**.
+Ce kit contient la régie **1.4.78** et le client **1.4.40**.
 
 ## Installer et lancer la régie
 
@@ -987,3 +987,27 @@ locaux, dont `ecrans.json` et `source-publications.json`, puis relance
 À partir de la 1.4.52, le lanceur vérifie la signature de la publication
 avant de lire sa liste de fichiers. Il peut ainsi installer les nouveaux
 fichiers du logiciel explicitement déclarés dans la publication signée.
+
+
+### Diagnostic Windows : partage Internet / WinNAT
+
+Le partage Internet Windows utilise `MSFT_NetNat` (`Get-NetNat` et `New-NetNat`).
+Dans la 1.4.78, le diagnostic distingue désormais la **classe WinNAT absente**
+d'une **ancienne configuration SoundLive restée dans le Registre** après
+un essai interrompu. Un état SoundLive sans NAT réel est restauré/nettoyé
+seulement au moment d'une nouvelle activation, une fois les contrôles passés.
+Cela n'affecte ni les baux ni le service DHCP SoundLive.
+
+Sur un PC Windows Pro où WinNAT n'est pas disponible, le diagnostic reste
+bloquant (pas de mode ICS automatique : ICS pourrait remplacer l'IP privée
+par `192.168.137.1` et perturber le DHCP). Dans PowerShell administrateur :
+
+```powershell
+Get-CimClass -Namespace root/StandardCimv2 -ClassName MSFT_NetNat -ErrorAction Stop
+Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V | Select-Object FeatureName,State
+Get-Service WinNat -ErrorAction SilentlyContinue
+```
+
+Si `Get-CimClass` échoue, réparer/activer les composants nécessaires sur Windows,
+redémarrer, puis relancer le diagnostic. Ne pas supprimer les règles NAT d'autres
+applications ni activer ICS sur le réseau écrans sans plan de reconfiguration.

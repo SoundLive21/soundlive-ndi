@@ -49,22 +49,41 @@ function Invoke-SoundLiveSharing {
         -not (Get-Command New-NetNat -ErrorAction SilentlyContinue)) {
         throw 'Les commandes WinNAT sont indisponibles sur ce poste.'
     }
-    $nats = @(Get-NetNat)
-    $current = $nats | Where-Object Name -eq $name
+    # Sur certains Windows, le module NetNat est installé mais la classe CIM n'existe pas.
+    # Ne jamais interpréter cette erreur comme « aucun NAT ».
+    try {
+        $null = Get-CimClass -Namespace 'root/StandardCimv2' -ClassName 'MSFT_NetNat' -ErrorAction Stop
+        $nats = @(Get-NetNat -ErrorAction Stop)
+    } catch {
+        $details = "WinNAT indisponible : la classe CIM MSFT_NetNat est absente ou inaccessible. $($_.Exception.Message). " +
+                   'Contrôle : Get-CimClass -Namespace root/StandardCimv2 -ClassName MSFT_NetNat. ' +
+                   'Vérifie les composants Windows/Hyper-V avant de réessayer ; aucune configuration réseau n’a été modifiée.'
+        throw $details
+    }
+    $current = @($nats | Where-Object Name -eq $name)
     foreach ($nat in $nats) {
         $notes.Add("NAT existant : $($nat.Name) · $($nat.InternalIPInterfaceAddressPrefix)")
     }
-    if (-not $nats.Count) { $notes.Add('WinNAT répond. Aucun NAT recensé.') }
+    if ($nats.Count -eq 0) { $notes.Add('WinNAT opérationnel : aucun NAT recensé.') }
 
     $script:stage = 'Lecture de la configuration SoundLive'
     $own = Get-SoundLiveState
+    if ($own) {
+        $notes.Add("État SoundLive enregistré : passerelle $($own.gateway), réseau $($own.network).")
+        if (-not $current.Count) {
+            $notes.Add('État résiduel détecté : aucun NAT SoundLive ne correspond à cet enregistrement.')
+        }
+    }
     if ($Action -eq 'desactiver') {
+        if ($current.Count -gt 0 -and -not $own) {
+            throw 'Un NAT SoundLive existe sans configuration locale de restauration : aucune suppression automatique pour préserver le réseau.'
+        }
         if ($own) {
             $script:stage = 'Retrait du NAT SoundLive'
-            if ($current) { $current | Remove-NetNat -Confirm:$false }
+            if ($current.Count -gt 0) { $current | Remove-NetNat -Confirm:$false -ErrorAction Stop }
             $script:stage = 'Restauration du routage IPv4'
             Restore-SoundLiveForwarding $own
-            Remove-Item -LiteralPath $stateKey -Force
+            Remove-Item -LiteralPath $stateKey -Force -ErrorAction Stop
         }
         $notes.Add('Partage SoundLive désactivé.')
         return
@@ -93,12 +112,21 @@ function Invoke-SoundLiveSharing {
     }
 
     $script:stage = 'Vérification des conflits NAT'
-    if ($current -and $own -and $own.gateway -eq $Gateway -and $own.uplink.guid -eq [string]$uplink.InterfaceGuid) {
+    if ($current.Count -gt 0 -and $own -and $own.gateway -eq $Gateway -and $own.uplink.guid -eq [string]$uplink.InterfaceGuid) {
         $notes.Add('Un partage SoundLive existe déjà avec ces interfaces.')
         return
     }
-    if ($nats.Count -or $own) {
-        throw 'Un NAT ou une configuration SoundLive existe déjà. Consulte la liste du diagnostic.'
+    if ($nats.Count -gt 0) {
+        throw 'Un NAT est déjà présent : Windows ne permet pas de créer sans risque un second préfixe NAT. Consulte le diagnostic.'
+    }
+    if ($own) {
+        # Un essai antérieur a pu enregistrer l'état avant que New-NetNat n'échoue.
+        # Le mode diagnostic ne modifie jamais les données du poste.
+        if ($Action -eq 'diagnostic') {
+            $notes.Add('Lors de l’activation, cet état résiduel sera nettoyé après les contrôles réseau.')
+        } else {
+            $notes.Add('Restauration de l’ancien routage et nettoyage de l’état SoundLive résiduel.')
+        }
     }
 
     $script:stage = 'Vérification du partage de connexion Windows'
@@ -136,6 +164,13 @@ function Invoke-SoundLiveSharing {
     if ($Action -eq 'diagnostic') {
         $notes.Add("Vérifications terminées. L'activation peut être essayée.")
         return
+    }
+
+    if ($own -and -not $current.Count -and $nats.Count -eq 0) {
+        $script:stage = 'Nettoyage de l’ancien état SoundLive sans NAT'
+        Restore-SoundLiveForwarding $own
+        Remove-Item -LiteralPath $stateKey -Force -ErrorAction Stop
+        $notes.Add('Ancienne configuration SoundLive nettoyée ; nouvelle tentative de partage.')
     }
 
     $script:stage = 'Lecture du routage IPv4'
