@@ -17,7 +17,7 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import messagebox, ttk
 import traceback
 import webbrowser
 
@@ -942,59 +942,22 @@ class Launcher:
         import versions_regie as versions
 
         root = self.tableau.ROOT
-        config = root / "source-publications.json"
-        trusted = root / "publication.pub"
-        try:
-            current = json.loads(config.read_text(encoding="utf-8"))
-            if not isinstance(current, dict):
-                current = {}
-        except (OSError, ValueError):
-            current = {}
         form = tk.Toplevel(self.window)
         form.title("Versions publiées")
         form.transient(self.window)
         pane = ttk.Frame(form, padding=18)
         pane.pack(fill="both", expand=True)
-        repo = tk.StringVar(form, value=current.get("repository") or versions.DEFAULT_REPOSITORY)
+
+        # Le dépôt est officiel et fixe : aucune saisie ni clé à importer.
+        repo = tk.StringVar(form, value=versions.DEFAULT_REPOSITORY)
         available = self.publication_status.read().get("version")
         outcome = tk.StringVar(form, value=f"Version installée · {self.tableau.SOFTWARE_VERSION}"
                                + (f"\nVersion {available} disponible." if available else "")
                                + ("\nArrête la régie avant d’installer une mise à jour." if self.regie else ""))
         selected = None
         answers = Queue()
-        ttk.Label(pane, text="Dépôt public GitHub · propriétaire/dépôt").pack(anchor="w")
-        ttk.Entry(pane, textvariable=repo, width=52).pack(fill="x", pady=(4, 10))
-
-        def select_key():
-            name = filedialog.askopenfilename(parent=form, title="Clé publique de l’éditeur",
-                                              filetypes=[("Clé publique OpenSSH", "*.pub")])
-            if name:
-                try:
-                    key = Path(name).read_bytes()
-                    if len(key) > 4096 or not key.startswith(b"ssh-ed25519 "):
-                        raise ValueError("Sélectionne une clé publique Ed25519.")
-                    trusted.write_bytes(key)
-                    refresh_key_button()
-                except (OSError, ValueError) as error:
-                    outcome.set(str(error))
-
-        def key_ready():
-            if trusted.is_file():
-                return True
-            try:
-                return versions.repository(repo.get()).lower() == versions.DEFAULT_REPOSITORY.lower()
-            except ValueError:
-                return False
-
-        def refresh_key_button():
-            label = ("Remplacer la clé publique de l’éditeur" if trusted.is_file() else
-                     "Clé officielle intégrée · Changer de clé" if key_ready() else
-                     "Importer la clé publique de l’éditeur")
-            key_button.configure(text=label)
-
-        key_button = ttk.Button(pane, command=select_key)
-        key_button.pack(anchor="w")
-        refresh_key_button()
+        ttk.Label(pane, text="Dépôt officiel GitHub").pack(anchor="w")
+        ttk.Entry(pane, textvariable=repo, width=52, state="disabled").pack(fill="x", pady=(4, 10))
         ttk.Label(pane, textvariable=outcome, wraplength=420).pack(anchor="w", pady=12)
         buttons = ttk.Frame(pane)
         buttons.pack(anchor="e")
@@ -1002,7 +965,6 @@ class Launcher:
         def task(callback, installing=False):
             check.configure(state="disabled")
             apply.configure(state="disabled")
-            key_button.configure(state="disabled")
             close.configure(state="disabled")
             form.protocol("WM_DELETE_WINDOW", lambda: None)
 
@@ -1021,7 +983,6 @@ class Launcher:
                     return
                 check.configure(state="normal")
                 close.configure(state="normal")
-                key_button.configure(state="normal")
                 form.protocol("WM_DELETE_WINDOW", form.destroy)
                 selected = value if ok and not installing else None
                 if not ok:
@@ -1033,10 +994,8 @@ class Launcher:
                     outcome.set(f"Version {selected[0]} disponible.")
                     if self.regie is not None:
                         outcome.set(f"Version {selected[0]} disponible. Ferme cette fenêtre et arrête la régie pour l’installer.")
-                    elif key_ready():
-                        apply.configure(state="normal")
                     else:
-                        outcome.set(f"Version {selected[0]} disponible. Importe la clé de l’éditeur puis vérifie de nouveau.")
+                        apply.configure(state="normal")
                 else:
                     outcome.set("La régie est à jour.")
 
@@ -1044,15 +1003,8 @@ class Launcher:
             form.after(120, receive)
 
         def check_release():
-            try:
-                name = versions.repository(repo.get())
-                config.write_text(json.dumps({"repository": name}), encoding="utf-8")
-                refresh_key_button()
-            except (ValueError, OSError) as error:
-                outcome.set(str(error))
-                return
             outcome.set("Vérification de la dernière version…")
-            task(lambda: self.publication_status.verify(name))
+            task(lambda: self.publication_status.verify(versions.DEFAULT_REPOSITORY))
 
         def apply_release():
             if not selected or self.regie is not None:
@@ -1061,7 +1013,7 @@ class Launcher:
                     f"Installer la version {selected[0]} et relancer le lanceur ?", parent=form):
                 return
             outcome.set("Téléchargement et vérification de la signature…")
-            task(lambda: versions.install(root, selected, trusted), installing=True)
+            task(lambda: versions.install(root, selected), installing=True)
 
         check = ttk.Button(buttons, text="Vérifier", command=check_release)
         apply = ttk.Button(buttons, text="Installer", command=apply_release, state="disabled")
