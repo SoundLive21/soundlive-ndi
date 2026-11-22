@@ -967,12 +967,19 @@ de régie existant.
 
 ## Mettre la régie à jour
 
-Arrête la régie dans le lanceur. Dans **Versions publiées**, saisis le dépôt
-sous la forme `propriétaire/dépôt` et importe la clé publique de publication
-obtenue auprès de l’éditeur. Le lanceur vérifie le dépôt mémorisé à l’ouverture,
-puis toutes les cinq minutes, même pendant la diffusion. Clique sur **Vérifier**, puis **Installer** si
-une version est proposée. Dès la version 1.4.11, le lanceur se rouvre
-automatiquement après l’installation d’une mise à jour. Si tu as lancé
+À partir de la régie **1.4.79**, le dépôt officiel
+`SoundLive21/soundlive-ndi` et sa clé publique Ed25519 sont préconfigurés
+automatiquement au premier démarrage du lanceur, sous Windows comme sous Linux.
+Les fichiers locaux `source-publications.json` et `publication.pub` sont créés
+uniquement s’ils n’existent pas : un dépôt ou une clé personnalisés ne sont
+jamais remplacés par la configuration par défaut. La clé privée de publication
+reste exclusivement chez l’éditeur et n’est jamais distribuée.
+
+Le lanceur vérifie le dépôt à l’ouverture, puis toutes les cinq minutes,
+même pendant la diffusion. Dans **Versions publiées**, clique sur **Vérifier**,
+puis **Installer** si une version est proposée. Le dépôt et la clé restent
+modifiables manuellement au besoin. Dès la version 1.4.11, le lanceur se
+rouvre automatiquement après l’installation d’une mise à jour. Si tu as lancé
 la mise à jour depuis une version antérieure, rouvre le lanceur une fois.
 Clique ensuite sur **Démarrer la régie**. Le tableau permet d’envoyer le
 paquet client signé aux récepteurs quand une version client est proposée.
