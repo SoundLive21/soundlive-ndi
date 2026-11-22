@@ -9,6 +9,8 @@ on:
       - 'soundlive-ndi-network-windows.ps1'
       - 'installation-lecteur-linux.sh'
       - 'installer-client.sh'
+      - 'installer-bureau-distant-linux.sh'
+      - 'tableau.py'
       - 'tableau.html'
       - 'tests/**'
       - '.github/workflows/test-network-readers.yml'
@@ -26,6 +28,11 @@ jobs:
       - name: Test génération commandes du tableau
         shell: bash
         run: node tests/test-pairing.js
+      - name: Test VNC/RDP Ubuntu et syntaxe installateur
+        shell: bash
+        run: |
+          bash -n installer-bureau-distant-linux.sh
+          python3 tests/test-vnc-routing.py
   windows-no-wifi:
     runs-on: windows-latest
     steps:
