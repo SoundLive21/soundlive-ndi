@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.85** et le client **1.4.40**.
+Ce kit contient la régie **1.4.86** et le client **1.4.40**.
 
 ## Installer et lancer la régie
 
@@ -340,6 +340,17 @@ un ou deux DNS. Le partage route l'IPv4 et le DHCP reste à la charge du réseau
 d'installation. Le réglage Ubuntu est valable jusqu'au redémarrage de la régie.
 Sous Windows, utilise **Désactiver** pour retirer le NAT SoundLive et restaurer
 les réglages de routage des deux interfaces.
+
+### Diagnostic automatique du port DHCP sous Windows (1.4.86)
+
+Si le démarrage du serveur DHCP échoue avec `WinError 10048` (UDP 67
+déjà occupé), SoundLive-NDI consulte les points de terminaison UDP de
+Windows et affiche, lorsqu'il est détectable, le processus, son PID,
+l'adresse d'écoute et les services associés. Le diagnostic est
+**non destructif** : aucun service réseau n'est arrêté automatiquement.
+Un NAT WinNAT SoundLive actif ne suffit pas à prouver que le port DHCP
+est disponible. Un autre serveur DHCP doit être désactivé sur le réseau
+dédié avant d'activer celui de la régie.
 
 ### Serveur DHCP du réseau écrans
 
@@ -993,7 +1004,7 @@ ce problème.
 ## Mettre la régie à jour
 
 À partir de la régie **1.4.83**, la fenêtre **Versions publiées** affiche le
-dépôt officiel `SoundLive21/soundlive-ndi` dans un champ en lecture seule (non modifiable, mais lisible et sélectionnable).
+dépôt officiel `SoundLive21/soundlive-ndi` dans un champ blanc en lecture seule (non modifiable, mais lisible et sélectionnable depuis la 1.4.86).
 Le bouton d'importation/remplacement de la clé publique est supprimé.
 La vérification des mises à jour utilise toujours ce dépôt et la clé publique
 Ed25519 intégrée au programme, y compris si des anciens fichiers
