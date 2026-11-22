@@ -975,6 +975,12 @@ uniquement s’ils n’existent pas : un dépôt ou une clé personnalisés ne s
 jamais remplacés par la configuration par défaut. La clé privée de publication
 reste exclusivement chez l’éditeur et n’est jamais distribuée.
 
+**Correctif 1.4.80 :** si le fichier `publication.pub` est absent, le lanceur
+utilise directement la clé publique intégrée pour vérifier les Releases du
+dépôt officiel, sans demander de l’importer. Cette solution de repli ne
+s’applique pas aux dépôts tiers : ils nécessitent leur propre clé.
+Le bouton de clé affiche alors **Clé officielle intégrée · Changer de clé**.
+
 Le lanceur vérifie le dépôt à l’ouverture, puis toutes les cinq minutes,
 même pendant la diffusion. Dans **Versions publiées**, clique sur **Vérifier**,
 puis **Installer** si une version est proposée. Le dépôt et la clé restent
