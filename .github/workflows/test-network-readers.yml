@@ -10,6 +10,12 @@ on:
       - 'installation-lecteur-linux.sh'
       - 'installer-client.sh'
       - 'installer-bureau-distant-linux.sh'
+      - 'installer-ubuntu.sh'
+      - 'installer-pi.sh'
+      - 'installer-client-windows.py'
+      - 'configurer-session-lecteur-linux.sh'
+      - 'configurer-session-lecteur-windows.ps1'
+      - 'versions_regie.py'
       - 'tableau.py'
       - 'diagnostic.py'
       - 'commun.py'
@@ -37,6 +43,7 @@ jobs:
           python3 tests/test-vnc-routing.py
           python3 tests/test-desktop-services.py
           bash tests/test-vnc-install.sh
+          bash tests/test-session-lecteur.sh
           python3 tests/test-desktop-remmina.py
   windows-no-wifi:
     runs-on: windows-latest
@@ -45,3 +52,6 @@ jobs:
       - name: Test PowerShell Windows sans Wi-Fi et analyse AST
         shell: powershell
         run: .\\tests\\test-network-no-wifi.ps1
+      - name: Vérifier autologin et veille Windows (sans modification)
+        shell: powershell
+        run: .\\tests\\test-session-lecteur-windows.ps1
