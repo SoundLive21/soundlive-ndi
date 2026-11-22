@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.82** et le client **1.4.40**.
+Ce kit contient la régie **1.4.83** et le client **1.4.40**.
 
 ## Installer et lancer la régie
 
@@ -992,28 +992,24 @@ ce problème.
 
 ## Mettre la régie à jour
 
-À partir de la régie **1.4.79**, le dépôt officiel
-`SoundLive21/soundlive-ndi` et sa clé publique Ed25519 sont préconfigurés
-automatiquement au premier démarrage du lanceur, sous Windows comme sous Linux.
-Les fichiers locaux `source-publications.json` et `publication.pub` sont créés
-uniquement s’ils n’existent pas : un dépôt ou une clé personnalisés ne sont
-jamais remplacés par la configuration par défaut. La clé privée de publication
-reste exclusivement chez l’éditeur et n’est jamais distribuée.
+À partir de la régie **1.4.83**, la fenêtre **Versions publiées** affiche le
+dépôt officiel `SoundLive21/soundlive-ndi` dans un champ grisé non modifiable.
+Le bouton d'importation/remplacement de la clé publique est supprimé.
+La vérification des mises à jour utilise toujours ce dépôt et la clé publique
+Ed25519 intégrée au programme, y compris si des anciens fichiers
+`source-publications.json` ou `publication.pub` contiennent d'autres valeurs.
+Ces fichiers locaux sont conservés pour compatibilité, mais ignorés pour la
+vérification et l'installation des nouvelles Releases officielles.
+La clé privée de signature reste exclusivement chez l'éditeur.
 
-**Correctif 1.4.80 :** si le fichier `publication.pub` est absent, le lanceur
-utilise directement la clé publique intégrée pour vérifier les Releases du
-dépôt officiel, sans demander de l’importer. Cette solution de repli ne
-s’applique pas aux dépôts tiers : ils nécessitent leur propre clé.
-Le bouton de clé affiche alors **Clé officielle intégrée · Changer de clé**.
-
-Le lanceur vérifie le dépôt à l’ouverture, puis toutes les cinq minutes,
+Le lanceur vérifie le dépôt à l'ouverture, puis toutes les cinq minutes,
 même pendant la diffusion. Dans **Versions publiées**, clique sur **Vérifier**,
-puis **Installer** si une version est proposée. Le dépôt et la clé restent
-modifiables manuellement au besoin. Dès la version 1.4.11, le lanceur se
-rouvre automatiquement après l’installation d’une mise à jour. Si tu as lancé
-la mise à jour depuis une version antérieure, rouvre le lanceur une fois.
-Clique ensuite sur **Démarrer la régie**. Le tableau permet d’envoyer le
-paquet client signé aux récepteurs quand une version client est proposée.
+puis **Installer** si une nouvelle version est proposée. La régie vérifie
+la signature de l'archive avant d'installer les fichiers.
+Depuis la version 1.4.11, le lanceur se rouvre automatiquement après une mise
+à jour. Sur une version antérieure, ouvre-le manuellement une fois.
+Clique ensuite sur **Démarrer la régie**. Le tableau permet d'envoyer
+le paquet client signé aux récepteurs lorsqu'une version client est proposée.
 
 Une régie antérieure à la 1.4.50 peut refuser un nouveau fichier avec le
 message « Entrée de publication inattendue ». Pour passer à la 1.4.52,
