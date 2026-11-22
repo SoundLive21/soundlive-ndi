@@ -388,14 +388,14 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
       <div class="pair-grid">
         <label>Nom d’hôte<input name="hostname" maxlength="63" placeholder="ndi-player-03" spellcheck="false" required></label>
         <label>IPv4 fixe avec préfixe<input name="address" maxlength="18" placeholder="10.10.2.105/24" spellcheck="false" required></label>
-        <label>Nom du réseau Wi-Fi (SSID)<input name="ssid" maxlength="32" placeholder="SOUNDLIVE" spellcheck="false" required></label>
+        <label>Nom du réseau Wi-Fi (SSID, facultatif : vide = Ethernet seul)<input name="ssid" maxlength="32" placeholder="SOUNDLIVE" spellcheck="false"></label>
         <label>Clé Wi-Fi<select name="wifi">
           <option value="prompt">La saisir sur le lecteur</option>
           <option value="saved">Réutiliser le profil enregistré</option>
           <option value="open">Réseau ouvert</option>
         </select></label>
-        <label>Interface Ethernet (facultative)<input name="ethernet" maxlength="15" placeholder="Automatique, ex. eth0" spellcheck="false"></label>
-        <label>Interface Wi-Fi (facultative)<input name="wifi_interface" maxlength="15" placeholder="Automatique, ex. wlan0" spellcheck="false"></label>
+        <label>Interface Ethernet (facultative)<input name="ethernet" maxlength="80" placeholder="Automatique, ex. eth0 / Ethernet" spellcheck="false"></label>
+        <label>Interface Wi-Fi (facultative)<input name="wifi_interface" maxlength="80" placeholder="Automatique, ex. wlan0 / Wi-Fi" spellcheck="false"></label>
         <label>Passerelle IPv4 (facultative)<input name="gateway" maxlength="15" inputmode="decimal" placeholder="10.10.2.87"></label>
         <label>DNS principal (facultatif)<input name="dns" maxlength="15" inputmode="decimal" placeholder="8.8.8.8"></label>
         <label>DNS secondaire (facultatif)<input name="dns2" maxlength="15" inputmode="decimal" placeholder="8.8.4.4"></label>
@@ -3266,10 +3266,14 @@ function fillPairAddresses() {
   pairAddressHelp.hidden = !pairAddressHelp.textContent;
 }
 function pairFields() {
-  const linux = pairForm.elements.namedItem("kind").value !== "windows";
   const mode = pairForm.elements.namedItem("installation");
-  pairMode.hidden = mode.disabled = !linux;
-  pairNetwork.hidden = pairNetwork.disabled = !linux || mode.value !== "static";
+  pairMode.hidden = mode.disabled = false;
+  pairNetwork.hidden = pairNetwork.disabled = mode.value !== "static";
+  const hasWifi = !!pairForm.elements.namedItem("ssid").value.trim();
+  pairForm.elements.namedItem("wifi").disabled = !hasWifi;
+  const wifiInterface = pairForm.elements.namedItem("wifi_interface");
+  if (!hasWifi) wifiInterface.value = "";
+  wifiInterface.disabled = !hasWifi;
 }
 function pairError(field, message) {
   const input = pairForm.elements.namedItem(field);
@@ -3296,17 +3300,25 @@ function validatePairSettings(values) {
   if (player === first || player === last || address[1] === values.regie) {
     return pairError("address", "Choisis une adresse utilisable et différente de celle de la régie.");
   }
-  if (!values.ssid || new TextEncoder().encode(values.ssid).length > 32 || /[\u0000-\u001f]/.test(values.ssid)) {
+  if (values.ssid && (new TextEncoder().encode(values.ssid).length > 32 || /[\u0000-\u001f]/.test(values.ssid))) {
     return pairError("ssid", "Le SSID doit contenir entre 1 et 32 octets, sans caractère de contrôle.");
   }
-  if (values.ssid.startsWith("--")) {
+  if (values.ssid && values.ssid.startsWith("--")) {
     return pairError("ssid", "Le script de préparation interprète un SSID commençant par deux tirets comme une option.");
+  }
+  if (!values.ssid && values.wifi_interface) {
+    return pairError("ssid", "Indique le SSID ou laisse aussi l’interface Wi-Fi vide.");
   }
   for (const field of ["ethernet", "wifi_interface"]) {
     const name = values[field];
-    if (name && (name.startsWith("--") || /[\s/:\u0000-\u001f]/.test(name) || new TextEncoder().encode(name).length > 15)) {
-      return pairError(field, "Indique le nom exact de l’interface affiché sur le lecteur par ip -br link.");
-    }
+    if (!name) continue;
+    const windows = values.kind === "windows";
+    const invalid = windows
+      ? /[\u0000-\u001f]/.test(name) || new TextEncoder().encode(name).length > 80
+      : name.startsWith("--") || /[\s/:\u0000-\u001f]/.test(name) || new TextEncoder().encode(name).length > 15;
+    if (invalid) return pairError(field, windows
+      ? "Indique le nom exact de la carte affiché par Get-NetAdapter."
+      : "Indique le nom exact de l’interface affiché par ip -br link.");
   }
   if (values.gateway) {
     const gateway = isIPv4(values.gateway) ? number(values.gateway) : -1;
@@ -3323,16 +3335,34 @@ function validatePairSettings(values) {
 function bashArg(value) {
   return /^[a-zA-Z0-9_./:@+-]+$/.test(value) ? value : "'" + value.replaceAll("'", "'\\''") + "'";
 }
+function powershellArg(value) {
+  return "'" + String(value).replaceAll("'", "''") + "'";
+}
 function installationCommand(values, port, code, fingerprint) {
   const address = "http://" + values.regie + ":" + port;
   const keys = fingerprint ? ["--empreinte-regie", fingerprint] : [];
-  if (values.kind === "windows") return [".\\installer-client.cmd", ...keys, address, code].join(" ");
+  if (values.kind === "windows") {
+    if (values.installation !== "static") return [".\\installer-client.cmd", ...keys, address, code].join(" ");
+    const ps = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                ".\\preparer-lecteur-windows.ps1", "-Hote", values.hostname, "-Ip", values.address];
+    if (values.ssid) ps.push("-Wifi", values.ssid);
+    if (values.ssid && values.wifi === "prompt") ps.push("-SaisirCleWifi");
+    if (values.ssid && values.wifi === "open") ps.push("-WifiOuvert");
+    for (const [field, flag] of [["ethernet", "-Ethernet"], ["wifi_interface", "-InterfaceWifi"],
+        ["gateway", "-Passerelle"], ["dns", "-Dns"], ["dns2", "-Dns2"]]) {
+      if (values[field]) ps.push(flag, values[field]);
+    }
+    if (fingerprint) ps.push("-EmpreinteRegie", fingerprint);
+    ps.push("-Regie", address, "-Code", code);
+    return ps.map(powershellArg).join(" ");
+  }
   const args = ["bash", "installer-client.sh", "--plateforme", values.kind];
   args.push(...keys);
   if (values.installation !== "static") return [...args, address, code].map(bashArg).join(" ");
-  args.push("--preparer", "--hote", values.hostname, "--ip", values.address, "--wifi", values.ssid);
-  if (values.wifi === "prompt") args.push("--saisir-cle-wifi");
-  if (values.wifi === "open") args.push("--wifi-ouvert");
+  args.push("--preparer", "--hote", values.hostname, "--ip", values.address);
+  if (values.ssid) args.push("--wifi", values.ssid);
+  if (values.ssid && values.wifi === "prompt") args.push("--saisir-cle-wifi");
+  if (values.ssid && values.wifi === "open") args.push("--wifi-ouvert");
   for (const [field, flag] of [["ethernet", "--ethernet"], ["wifi_interface", "--interface-wifi"],
       ["gateway", "--passerelle"], ["dns", "--dns"], ["dns2", "--dns2"]]) {
     if (values[field]) args.push(flag, values[field]);
@@ -3344,6 +3374,7 @@ pairForm.addEventListener("change", pairFields);
 pairForm.addEventListener("input", () => {
   for (const input of pairForm.querySelectorAll("input")) input.setCustomValidity("");
   if (pairRegie.value) pairAddressHelp.hidden = true;
+  pairFields();
 });
 document.querySelector("#add").onclick = () => {
   pairFields();
@@ -3354,7 +3385,7 @@ document.querySelector("#add").onclick = () => {
 document.querySelector("#close").onclick = () => dialog.close();
 pairForm.onsubmit = action(() => {
   const values = Object.fromEntries(new FormData(pairForm));
-  for (const field of ["name", "regie", "hostname", "address", "ethernet", "wifi_interface", "gateway", "dns", "dns2"]) {
+  for (const field of ["name", "regie", "hostname", "address", "ssid", "ethernet", "wifi_interface", "gateway", "dns", "dns2"]) {
     if (values[field] !== undefined) values[field] = values[field].trim();
   }
   if (!validatePairSettings(values)) return;
