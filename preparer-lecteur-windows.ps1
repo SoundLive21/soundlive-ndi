@@ -414,9 +414,12 @@ try {
     }
     $networkScript = Join-Path $profileFolder 'soundlive-ndi-network-windows.ps1'
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'soundlive-ndi-network-windows.ps1') -Destination $networkScript -Force
-    @{ address=$address; prefix=$prefix; gateway=$Passerelle; dns=@($dnsServers); ssid=($(if ($wifiEnabled) { $Wifi } else { '' }))
-       profile=($(if ($wifiEnabled) { $wifiName } else { '' }))
-       wired=[string]$wired.InterfaceGuid; wifi=($(if ($wifiEnabled) { [string]$wireless.InterfaceGuid } else { '' })) } |
+    $ssidForConfig = if ($wifiEnabled) { $Wifi } else { '' }
+    $profileForConfig = if ($wifiEnabled) { $wifiName } else { '' }
+    $wifiGuidForConfig = if ($wifiEnabled) { [string]$wireless.InterfaceGuid } else { '' }
+    @{ address=$address; prefix=$prefix; gateway=$Passerelle; dns=@($dnsServers);
+       ssid=$ssidForConfig; profile=$profileForConfig;
+       wired=[string]$wired.InterfaceGuid; wifi=$wifiGuidForConfig } |
         ConvertTo-Json | Set-Content -Encoding UTF8 -LiteralPath $configPath
 
     # An old static configuration on these two dedicated adapters must not reappear at boot.
