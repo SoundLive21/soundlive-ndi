@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.86** et le client **1.4.40**.
+Ce kit contient la régie **1.4.87** et le client **1.4.40**.
 
 ## Installer et lancer la régie
 
@@ -340,6 +340,26 @@ un ou deux DNS. Le partage route l'IPv4 et le DHCP reste à la charge du réseau
 d'installation. Le réglage Ubuntu est valable jusqu'au redémarrage de la régie.
 Sous Windows, utilise **Désactiver** pour retirer le NAT SoundLive et restaurer
 les réglages de routage des deux interfaces.
+
+### Mode de coexistence avec ICS (Windows, expérimental depuis 1.4.87)
+
+Sous Windows, le serveur DHCP essaie d'abord d'écouter en UDP 67 sur toutes
+les adresses, afin de recevoir les diffusions DHCP habituelles. Si cette
+ouverture échoue avec `WinError 10048` car un service comme `SharedAccess`
+utilise déjà le port sur une autre carte, SoundLive-NDI réessaie sur l'IPv4
+de la **carte des écrans uniquement**, sans arrêter le service Windows.
+
+**Limite importante :** les clients DHCP émettent leurs messages de découverte
+vers `255.255.255.255`. Selon la pile réseau, un socket lié à une IPv4
+précise peut ne pas recevoir ces broadcasts. Le mode de coexistence affiche
+donc un avertissement et doit être vérifié sur un véritable lecteur :
+une adresse IPv4 doit effectivement lui être attribuée, et son serveur DHCP
+doit correspondre à l'IPv4 SoundLive-NDI de la carte écrans. Un socket
+ouvert sans erreur ne suffit pas à valider le service.
+
+Ne désactive pas `SharedAccess` uniquement pour libérer le port : il peut être
+nécessaire au réseau virtuel de Windows. Il ne faut pas deux DHCP actifs sur
+la **même** interface écrans.
 
 ### Diagnostic automatique du port DHCP sous Windows (1.4.86)
 
