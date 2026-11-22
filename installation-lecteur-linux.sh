@@ -69,7 +69,7 @@ clean_reader_profiles() {
     local -a nm=(sudo env LC_ALL=C nmcli)
     local active profiles uuid kind name managed
     local uuid_pattern='^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'
-    [[ $ethernet =~ $uuid_pattern && $wifi =~ $uuid_pattern ]] || return 1
+    [[ $ethernet =~ $uuid_pattern && ( -z $wifi || $wifi =~ $uuid_pattern ) ]] || return 1
     active=$("${nm[@]}" -t -e no -f UUID connection show --active) || return 1
     profiles=$("${nm[@]}" -t -e no -f UUID,TYPE,NAME connection show) || return 1
     while IFS=: read -r uuid kind name; do
