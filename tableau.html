@@ -3285,8 +3285,13 @@ function validatePairSettings(values) {
   if (!values.name) return pairError("name", "Saisis un nom pour cet écran.");
   if (!isIPv4(values.regie)) return pairError("regie", "Saisis l’IPv4 de la régie.");
   if (values.installation !== "static") return true;
-  if (!/^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(values.hostname)) {
-    return pairError("hostname", "Utilise des lettres, des chiffres et des tirets, sans tiret aux extrémités.");
+  const hostnameValid = values.kind === "windows"
+    ? /^(?![0-9]+$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,13}[A-Za-z0-9])?$/.test(values.hostname)
+    : /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(values.hostname);
+  if (!hostnameValid) {
+    return pairError("hostname", values.kind === "windows"
+      ? "Sur Windows, utilise 1 à 15 caractères (lettres, chiffres et tirets), pas uniquement des chiffres."
+      : "Utilise des lettres, des chiffres et des tirets, sans tiret aux extrémités.");
   }
   const address = values.address.match(/^(.+)\/(0|[1-9]\d?)$/);
   if (!address || !isIPv4(address[1]) || address[1].startsWith("169.254.") || Number(address[2]) > 30) {
@@ -3370,7 +3375,14 @@ function installationCommand(values, port, code, fingerprint) {
   args.push("--regie", address, "--code", code);
   return args.map(bashArg).join(" ");
 }
-pairForm.addEventListener("change", pairFields);
+pairForm.addEventListener("change", event => {
+  if (event.target?.name === "kind") {
+    // Sur Windows, ne pas changer l'IPv4 d'un lecteur sans choix explicite.
+    pairForm.elements.namedItem("installation").value =
+      event.target.value === "windows" ? "basic" : "static";
+  }
+  pairFields();
+});
 pairForm.addEventListener("input", () => {
   for (const input of pairForm.querySelectorAll("input")) input.setCustomValidity("");
   if (pairRegie.value) pairAddressHelp.hidden = true;
