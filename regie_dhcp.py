@@ -313,6 +313,35 @@ def open_listener(settings):
     return open_listener_elevated(interface)
 
 
+def windows_dhcp_port_owner():
+    """Décrit l'occupation du port UDP 67 sans toucher aux services réseau."""
+    if sys.platform != "win32":
+        return ""
+    command = (
+        "$endpoints = @(Get-NetUDPEndpoint -LocalPort 67 -ErrorAction SilentlyContinue); "
+        "foreach ($endpoint in $endpoints) { "
+        "$process = Get-Process -Id $endpoint.OwningProcess -ErrorAction SilentlyContinue; "
+        "$name = if ($process) { $process.ProcessName } else { 'inconnu' }; "
+        "$services = @(Get-CimInstance Win32_Service "
+        "-Filter \"ProcessId = $($endpoint.OwningProcess)\" -ErrorAction SilentlyContinue "
+        "| Select-Object -ExpandProperty Name); "
+        "'{0} (PID {1}, {2}) ; services : {3}' -f "
+        "$name, $endpoint.OwningProcess, $endpoint.LocalAddress, ($services -join ', ') "
+        "}"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True, text=True, errors="replace", timeout=8,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if result.returncode:
+        return ""
+    return " ; ".join(line.strip() for line in result.stdout.splitlines() if line.strip())[:700]
+
+
 class Service:
     def __init__(self, path, interfaces):
         self.path = path
@@ -344,6 +373,15 @@ class Service:
             except PermissionError as error:
                 raise ValueError("Accès au port DHCP refusé. Vérifie les droits UDP 67 de la régie.") from error
             except OSError as error:
+                if sys.platform == "win32" and getattr(error, "winerror", None) == 10048:
+                    owner = windows_dhcp_port_owner()
+                    details = ("Processus utilisant le port : " + owner if owner else
+                               "Aucun propriétaire détecté automatiquement.")
+                    raise ValueError(
+                        "Le port DHCP UDP 67 est déjà occupé sous Windows. " + details +
+                        " Vérifie l'autre service DHCP (SharedAccess, HNS, VirtualBox, etc.) "
+                        "avant de réessayer ; ne désactive pas le partage Internet à l'aveugle."
+                    ) from error
                 raise ValueError(f"Impossible d’ouvrir DHCP UDP 67. Vérifie qu’il est libre et que l’interface est active. {error}") from error
             config = {**settings.fields(), "enabled": True}
             try:
