@@ -212,7 +212,16 @@ def main():
                         "SOUNDLIVE_ARGS":f'-B "{app / "lancer-client.py"}"', "SOUNDLIVE_WORK":str(app)},
                    check=True, timeout=10)
     (startup / "SoundLive-Ecran.lnk").unlink(missing_ok=True)
-    print("Lecteur installé. Rouvre la session Windows pour le démarrer.")
+    # Désactiver la veille et le verrouillage de la session lecteur.
+    # La configuration de l'autologin utilise l'outil Microsoft officiel :
+    # aucun mot de passe n'est lu ni conservé par SoundLive-NDI.
+    session = ROOT / "configurer-session-lecteur-windows.ps1"
+    if not session.is_file():
+        raise ValueError("Script de session manquant : configurer-session-lecteur-windows.ps1")
+    command = remote_access_command()
+    options = ["-SansAssistantAutologon"] if args.mettre_a_jour else []
+    subprocess.run([*command, str(session), *options], check=True)
+    print("Lecteur installé. Redémarre Windows après configuration de l'autologin.")
 
 
 if __name__ == "__main__":
