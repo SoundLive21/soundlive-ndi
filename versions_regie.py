@@ -176,13 +176,9 @@ class PublicationStatus:
         self.generation = 0
 
     def read(self):
-        try:
-            repo = repository(json.loads(self.config.read_text(encoding="utf-8"))["repository"])
-        except FileNotFoundError:
-            # Même si l'installation ne peut pas écrire le JSON, utiliser le dépôt officiel.
-            repo = DEFAULT_REPOSITORY
-        except (OSError, ValueError, KeyError, TypeError, AttributeError):
-            return {"state": "unavailable"}
+        # La régie officielle suit toujours son dépôt intégré. Les anciens
+        # fichiers source-publications.json sont conservés mais non utilisés.
+        repo = DEFAULT_REPOSITORY
         with self.lock:
             if not repo:
                 self.repo = None
@@ -307,23 +303,21 @@ def archive_files(archive, version, archive_name=ARCHIVE, *, signature_verified=
     return files
 
 
-def install(root, release, public):
+def install(root, release, public=None):
     version, url = release
-    archive_name = urlsplit(url).path.rsplit("/", 1)[-1]
+    parsed = urlsplit(url)
+    prefix = f"/{DEFAULT_REPOSITORY}/releases/download/"
+    # La signature est vérifiée exclusivement avec la clé officielle intégrée.
+    # Ne jamais accepter un téléchargement provenant d'un autre dépôt.
+    if (parsed.scheme != "https" or parsed.hostname != "github.com"
+            or not parsed.path.lower().startswith(prefix.lower())):
+        raise ValueError("La mise à jour doit provenir du dépôt officiel SoundLive-NDI.")
+    archive_name = parsed.path.rsplit("/", 1)[-1]
     if archive_name not in ARCHIVES:
         raise ValueError("Nom d’archive de publication invalide.")
     archive = download(url, MAX_ARCHIVE)
     signature = download(url + ".sig", 16 * 1024)
-    # N'utiliser la clé embarquée que pour le dépôt officiel, jamais pour
-    # un dépôt GitHub tiers. Une clé personnalisée existante reste prioritaire.
-    trusted = Path(public)
-    if not trusted.is_file():
-        parsed = urlsplit(url)
-        prefix = f"/{DEFAULT_REPOSITORY}/releases/download/"
-        if parsed.scheme != "https" or parsed.hostname != "github.com" or not parsed.path.lower().startswith(prefix.lower()):
-            raise ValueError("Importe la clé publique de l'éditeur de ce dépôt pour installer la mise à jour.")
-        trusted = DEFAULT_PUBLICATION_KEY
-    verify_release(trusted, archive, signature, archive_name)
+    verify_release(DEFAULT_PUBLICATION_KEY, archive, signature, archive_name)
     files = archive_files(archive, version, archive_name, signature_verified=True)
     with TemporaryDirectory(dir=root, prefix=".soundlive-publication-") as folder:
         stage = Path(folder)
