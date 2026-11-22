@@ -3,7 +3,7 @@
 param(
     [Parameter(Mandatory=$true)][ValidatePattern('^(?![0-9]+$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,13}[A-Za-z0-9])?$')][string]$Hote,
     [Parameter(Mandatory=$true)][string]$Ip,
-    [Parameter(Mandatory=$true)][string]$Wifi,
+    [string]$Wifi,
     [Parameter(Mandatory=$true)][uri]$Regie,
     [string]$Code,
     [string]$Ethernet,
@@ -32,8 +32,13 @@ $ErrorActionPreference = 'Stop'
 if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') { throw 'Utilise PowerShell Windows x64.' }
 $wifiName = 'SOUNDLIVE-WIFI'
 $wiredName = 'SOUNDLIVE-ETHERNET'
-if ([Text.Encoding]::UTF8.GetByteCount($Wifi) -notin (1..32) -or $Wifi -match '[\x00-\x1f]') {
+$wifiEnabled = -not [string]::IsNullOrWhiteSpace($Wifi)
+if ($wifiEnabled -and ([Text.Encoding]::UTF8.GetByteCount($Wifi) -notin (1..32) -or $Wifi -match '[\x00-\x1f]')) {
     throw 'Le SSID doit comporter 1 a 32 octets.'
+}
+if (-not $wifiEnabled -and ($InterfaceWifi -or $ProfilWifi -or $ProfilWifiXml -or
+        $WifiOuvert -or $CleWifiFichier -or $SaisirCleWifi)) {
+    throw 'Sans SSID, ne renseigne aucune option Wi-Fi : Ethernet seul sera configure.'
 }
 if (@($ProfilWifiXml, $CleWifiFichier, $WifiOuvert.IsPresent, $SaisirCleWifi.IsPresent).Where({ $_ }).Count -gt 1) {
     throw 'Choisis une seule methode de configuration du Wi-Fi.'
@@ -88,14 +93,18 @@ function Select-ReaderAdapter($Adapters, [int]$Type, [string]$Alias, [string]$Op
 
 $physical = @(Get-NetAdapter -Physical)
 $wired = Select-ReaderAdapter $physical 6 $Ethernet '-Ethernet'
-$wireless = Select-ReaderAdapter $physical 71 $InterfaceWifi '-InterfaceWifi'
+$wireless = if ($wifiEnabled) { Select-ReaderAdapter $physical 71 $InterfaceWifi '-InterfaceWifi' } else { $null }
 foreach ($adapter in Get-NetAdapter) {
     if (($adapter.Name -eq $wiredName -and $adapter.ifIndex -ne $wired.ifIndex) -or
-        ($adapter.Name -eq $wifiName -and $adapter.ifIndex -ne $wireless.ifIndex)) {
+        ($wifiEnabled -and $adapter.Name -eq $wifiName -and $adapter.ifIndex -ne $wireless.ifIndex)) {
         throw "Le nom $($adapter.Name) est deja pris par une autre interface."
     }
 }
-Write-Host "Lecteur $Hote, IPv4 $Ip, Ethernet $($wired.Name), Wi-Fi $($wireless.Name) ($Wifi)."
+if ($wifiEnabled) {
+    Write-Host "Lecteur $Hote, IPv4 $Ip, Ethernet $($wired.Name), Wi-Fi $($wireless.Name) ($Wifi)."
+} else {
+    Write-Host "Lecteur $Hote, IPv4 $Ip, Ethernet $($wired.Name), Wi-Fi non configure."
+}
 if ($Verifier) { Write-Host 'Parametres valides.'; return }
 
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -378,8 +387,10 @@ try {
         }
     }
 
-    $wlanService = Get-Service WlanSvc
-    if ($wlanService.Status -ne 'Running') { Start-Service WlanSvc }
+    if ($wifiEnabled) {
+        $wlanService = Get-Service WlanSvc
+        if ($wlanService.Status -ne 'Running') { Start-Service WlanSvc }
+    }
     if ($AttendreReseauEcrans) {
         $null = Read-Host 'Branche le cable au reseau ecrans, puis appuie sur Entree'
     }
@@ -389,22 +400,27 @@ try {
         Stop-ScheduledTask -TaskName $taskName
         $pausedTask = $true
     }
-    if ($wireless.Status -eq 'Disabled') { $wireless | Enable-NetAdapter -Confirm:$false }
-    Initialize-WifiProfile
+    if ($wifiEnabled) {
+        if ($wireless.Status -eq 'Disabled') { $wireless | Enable-NetAdapter -Confirm:$false }
+        Initialize-WifiProfile
+    }
     if ($wired.Name -cne $wiredName) { $wired | Rename-NetAdapter -NewName $wiredName -Confirm:$false }
-    if ($wireless.Name -cne $wifiName) { $wireless | Rename-NetAdapter -NewName $wifiName -Confirm:$false }
+    if ($wifiEnabled -and $wireless.Name -cne $wifiName) {
+        $wireless | Rename-NetAdapter -NewName $wifiName -Confirm:$false
+    }
     $configPath = Join-Path $profileFolder 'configuration.json'
     $previous = if (Test-Path -LiteralPath $configPath) {
         Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
     }
     $networkScript = Join-Path $profileFolder 'soundlive-ndi-network-windows.ps1'
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'soundlive-ndi-network-windows.ps1') -Destination $networkScript -Force
-    @{ address=$address; prefix=$prefix; gateway=$Passerelle; dns=@($dnsServers); ssid=$Wifi; profile=$wifiName
-       wired=[string]$wired.InterfaceGuid; wifi=[string]$wireless.InterfaceGuid } |
+    @{ address=$address; prefix=$prefix; gateway=$Passerelle; dns=@($dnsServers); ssid=($(if ($wifiEnabled) { $Wifi } else { '' }))
+       profile=($(if ($wifiEnabled) { $wifiName } else { '' }))
+       wired=[string]$wired.InterfaceGuid; wifi=($(if ($wifiEnabled) { [string]$wireless.InterfaceGuid } else { '' })) } |
         ConvertTo-Json | Set-Content -Encoding UTF8 -LiteralPath $configPath
 
     # An old static configuration on these two dedicated adapters must not reappear at boot.
-    foreach ($adapter in @($wired, $wireless)) {
+    foreach ($adapter in @($wired, $wireless) | Where-Object { $null -ne $_ }) {
         Set-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -Dhcp Disabled
         foreach ($store in @('PersistentStore', 'ActiveStore')) {
             Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -PolicyStore $store -ErrorAction SilentlyContinue |
