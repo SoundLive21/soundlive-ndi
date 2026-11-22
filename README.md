@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.89** et le client **1.4.40**.
+Ce kit contient la régie **1.4.90** et le client **1.4.40**.
 
 ## Installer et lancer la régie
 
