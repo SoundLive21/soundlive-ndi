@@ -131,24 +131,32 @@ def desktop_services():
     if not sys.platform.startswith("linux"):
         return {}
     listening = set()
-    try:
-        with open("/proc/net/tcp", encoding="ascii") as entries:
-            next(entries, None)
-            for line in entries:
-                fields = line.split()
-                if len(fields) < 4 or fields[3] != "0A":
-                    continue
-                ip_hex, port_hex = fields[1].split(":", 1)
-                port = int(port_hex, 16)
-                if port not in (3389, 3390, 5900):
-                    continue
-                octets = bytes.fromhex(ip_hex)[::-1]
-                address = socket.inet_ntoa(octets)
-                if address.startswith("127.") or address.startswith("169.254."):
-                    continue
-                listening.add(port)
-    except (OSError, ValueError, IndexError):
-        return {}
+    for filename in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(filename, encoding="ascii") as entries:
+                next(entries, None)
+                for line in entries:
+                    fields = line.split()
+                    if len(fields) < 4 or fields[3] != "0A":
+                        continue
+                    ip_hex, port_hex = fields[1].split(":", 1)
+                    port = int(port_hex, 16)
+                    if port not in (3389, 3390, 5900):
+                        continue
+                    octets = bytes.fromhex(ip_hex)
+                    if filename.endswith("tcp6"):
+                        # Accepte l'écoute IPv6 sur toutes les adresses (GNOME
+                        # peut ouvrir un socket double pile sur [::]:3389).
+                        # Une liaison à ::1 uniquement n'est pas joignable.
+                        if octets != bytes(16):
+                            continue
+                    else:
+                        address = socket.inet_ntoa(octets[::-1])
+                        if address.startswith("127.") or address.startswith("169.254."):
+                            continue
+                    listening.add(port)
+        except (OSError, ValueError, IndexError):
+            continue
     result = {}
     if 3389 in listening or 3390 in listening:
         result["rdp"] = 3389 if 3389 in listening else 3390
