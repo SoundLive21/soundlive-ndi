@@ -121,6 +121,42 @@ class OsUpdateCheck:
             self.next_check = time.monotonic() + (3600 if result["state"] == "unavailable" else 12 * 3600)
             self.running = False
 
+def desktop_services():
+    """Ports RDP/VNC TCP IPv4 en écoute sur le lecteur Linux.
+
+    Ne considère pas un service lié uniquement à 127.0.0.1, car il ne
+    serait pas joignable depuis la régie. N'effectue aucune connexion ni
+    modification du système.
+    """
+    if not sys.platform.startswith("linux"):
+        return {}
+    listening = set()
+    try:
+        with open("/proc/net/tcp", encoding="ascii") as entries:
+            next(entries, None)
+            for line in entries:
+                fields = line.split()
+                if len(fields) < 4 or fields[3] != "0A":
+                    continue
+                ip_hex, port_hex = fields[1].split(":", 1)
+                port = int(port_hex, 16)
+                if port not in (3389, 3390, 5900):
+                    continue
+                octets = bytes.fromhex(ip_hex)[::-1]
+                address = socket.inet_ntoa(octets)
+                if address.startswith("127.") or address.startswith("169.254."):
+                    continue
+                listening.add(port)
+    except (OSError, ValueError, IndexError):
+        return {}
+    result = {}
+    if 3389 in listening or 3390 in listening:
+        result["rdp"] = 3389 if 3389 in listening else 3390
+    if 5900 in listening:
+        result["vnc"] = 5900
+    return result
+
+
 def desktop_protocol():
     if sys.platform == "win32":
         import winreg
@@ -361,7 +397,7 @@ class Diagnostic:
         self.refresh_at = 0
 
     def sample_system(self, disk_path=None):
-        data = {"desktop_protocol": desktop_protocol()}
+        data = {"desktop_protocol": desktop_protocol(), "desktop_services": desktop_services()}
         try:
             total, idle = cpu_ticks()
             if self.last_ticks:
