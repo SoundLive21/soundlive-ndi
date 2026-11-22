@@ -58,11 +58,17 @@ while ($true) {
     try {
         $adapters = Get-NetAdapter -Physical
         $wired = $adapters | Where-Object { [string]$_.InterfaceGuid -eq $config.wired }
-        $wifi = $adapters | Where-Object { [string]$_.InterfaceGuid -eq $config.wifi }
-        if (-not $wired -or -not $wifi) {
-            throw 'Adaptateur Ethernet ou Wi-Fi introuvable.'
+        $wifiEnabled = -not [string]::IsNullOrWhiteSpace([string]$config.ssid)
+        $wifi = if ($wifiEnabled) {
+            $adapters | Where-Object { [string]$_.InterfaceGuid -eq $config.wifi }
+        } else { $null }
+        if (-not $wired -or ($wifiEnabled -and -not $wifi)) {
+            throw 'Adaptateur Ethernet ou Wi-Fi configure introuvable.'
         }
-        if ($wired.MediaConnectState -eq 1 -or $wired.Status -eq 'Up') {
+        if (-not $wifiEnabled) {
+            # Mode Ethernet seul : aucune gestion du Wi-Fi, aucune bascule.
+            Set-ReaderAddress $wired.ifIndex
+        } elseif ($wired.MediaConnectState -eq 1 -or $wired.Status -eq 'Up') {
             Remove-ReaderAddress $wifi.ifIndex
             if ($wifi.Status -ne 'Disabled') {
                 $wifi | Disable-NetAdapter -Confirm:$false
