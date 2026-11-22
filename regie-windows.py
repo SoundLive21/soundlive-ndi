@@ -957,7 +957,11 @@ class Launcher:
         selected = None
         answers = Queue()
         ttk.Label(pane, text="Dépôt officiel GitHub").pack(anchor="w")
-        ttk.Entry(pane, textvariable=repo, width=52, state="readonly").pack(fill="x", pady=(4, 10))
+        # Un champ réellement non modifiable, sans l'aspect grisé de ttk sous Windows.
+        tk.Entry(pane, textvariable=repo, width=52, state="readonly",
+                 readonlybackground="white", background="white", foreground="black",
+                 insertbackground="black", relief="solid", borderwidth=1
+                 ).pack(fill="x", pady=(4, 10), ipady=3)
         ttk.Label(pane, textvariable=outcome, wraplength=420).pack(anchor="w", pady=12)
         buttons = ttk.Frame(pane)
         buttons.pack(anchor="e")
