@@ -965,6 +965,26 @@ signés, lance `publier-version.py --compatibilite` avec ta clé habituelle.
 Tu peux également installer le nouveau ZIP manuellement dans le dossier
 de régie existant.
 
+## Correctif SSL sous Windows (depuis 1.4.81)
+
+La vérification des versions GitHub utilise HTTPS et continue à **vérifier les certificats TLS**.
+Depuis la version 1.4.81, le lanceur Windows utilise `truststore` lorsqu'il est
+disponible, afin de faire valider la chaîne du certificat avec le magasin
+de certificats Windows (y compris les intermédiaires manquants).
+Le nouvel installateur Windows installe automatiquement ce module.
+
+Une installation existante ayant déjà le module Python installé peut l'ajouter
+sans changer de configuration : `py -3 -m pip install --user truststore`.
+Cette commande doit cibler le même Python que le lanceur. La régie doit ensuite
+être redémarrée. Sur une ancienne version, mettre aussi à jour les fichiers du
+logiciel vers la 1.4.81 ou plus récente : installer `truststore` seul ne modifie
+pas l'ancien code de téléchargement.
+
+Si Windows ne fait pas non plus confiance au certificat, vérifier la date,
+les mises à jour des autorités racines, les proxy et les antivirus effectuant
+une inspection HTTPS. Ne jamais désactiver la vérification TLS pour contourner
+ce problème.
+
 ## Mettre la régie à jour
 
 À partir de la régie **1.4.79**, le dépôt officiel
