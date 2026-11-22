@@ -220,7 +220,7 @@ try {
             if ($pip.ExitCode -ne 0) { throw 'Impossible de mettre en place pip pour installer les modules de la régie.' }
         }
         Set-Status 'Installation des modules HTTPS et terminal SSH…'
-        $modules = Invoke-Hidden $python '-m pip --disable-pip-version-check --isolated install --user --no-input --timeout 20 --retries 2 --only-binary=:all: cryptography paramiko pyte'
+        $modules = Invoke-Hidden $python '-m pip --disable-pip-version-check --isolated install --user --no-input --timeout 20 --retries 2 --only-binary=:all: cryptography paramiko pyte truststore'
         if ($modules.ExitCode -ne 0) { throw 'Impossible de télécharger ou installer les modules Python. Vérifie la connexion Internet.' }
         $modules = Invoke-Hidden $python $check
         if ($modules.ExitCode -ne 0) { throw 'Les modules Python nécessaires sont introuvables après installation.' }
