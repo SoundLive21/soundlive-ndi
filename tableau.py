@@ -882,24 +882,28 @@ def local_addresses():
 
 
 def desktop_command(address, protocol):
+    if protocol not in ("rdp", "vnc"):
+        return None
+    if sys.platform != "win32":
+        # Remmina prend en charge RDP et VNC directement depuis une URI.
+        # Aucune authentification sensible n'est passée en argument.
+        if remmina := shutil.which("remmina"):
+            return [remmina, "-c", f"{protocol}://{address}:{3389 if protocol == 'rdp' else 5900}"]
+        if protocol == "rdp":
+            return None
+        if program := shutil.which("xtigervncviewer") or shutil.which("tigervncviewer"):
+            return [program, f"{address}::5900"]
+        return None
     if protocol == "rdp":
-        if sys.platform == "win32":
-            return ["mstsc.exe", f"/v:{address}:3389"]
-        return None
-    if protocol != "vnc":
-        return None
-    if sys.platform == "win32":
-        for folder in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"):
-            if programs := os.environ.get(folder):
-                viewer = Path(programs) / "TigerVNC" / "vncviewer.exe"
-                if viewer.is_file():
-                    return [str(viewer), f"{address}::5900"]
-        if viewer := shutil.which("vncviewer.exe"):
-            if "tigervnc" in {part.casefold() for part in Path(viewer).parts}:
-                return [viewer, f"{address}::5900"]
-        return None
-    if program := shutil.which("xtigervncviewer") or shutil.which("tigervncviewer"):
-        return [program, f"{address}::5900"]
+        return ["mstsc.exe", f"/v:{address}:3389"]
+    for folder in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"):
+        if programs := os.environ.get(folder):
+            viewer = Path(programs) / "TigerVNC" / "vncviewer.exe"
+            if viewer.is_file():
+                return [str(viewer), f"{address}::5900"]
+    if viewer := shutil.which("vncviewer.exe"):
+        if "tigervnc" in {part.casefold() for part in Path(viewer).parts}:
+            return [viewer, f"{address}::5900"]
     return None
 
 
