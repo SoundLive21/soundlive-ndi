@@ -125,6 +125,7 @@ if $client_only; then
     check_association "${@:2}"
     install_client
     install_autostart
+    bash "$here/configurer-session-lecteur-linux.sh" "$SOUNDLIVE_DEVICE_KIND"
     echo "Client Ubuntu et diagnostic.py mis à jour. Redémarre le portable ou rouvre sa session graphique."
     exit 0
 fi
@@ -284,6 +285,7 @@ sudo install -o root -g root -m 0440 "$rule" /etc/sudoers.d/soundlive-ecrans
 install_os_maintenance "$here"
 
 install_autostart
+bash "$here/configurer-session-lecteur-linux.sh" "$SOUNDLIVE_DEVICE_KIND"
 
 echo "Installation terminée. Pour tester depuis un terminal de la session Ubuntu :"
 echo "  $app/demarrer-ubuntu"
