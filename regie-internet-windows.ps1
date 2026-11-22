@@ -57,7 +57,7 @@ function Invoke-SoundLiveSharing {
     } catch {
         $details = "WinNAT indisponible : la classe CIM MSFT_NetNat est absente ou inaccessible. $($_.Exception.Message). " +
                    'Contrôle : Get-CimClass -Namespace root/StandardCimv2 -ClassName MSFT_NetNat. ' +
-                   'Vérifie les composants Windows/Hyper-V avant de réessayer ; aucune configuration réseau n’a été modifiée.'
+                   'Vérifie les composants Windows/Hyper-V avant de réessayer ; aucune configuration réseau n''a été modifiée.'
         throw $details
     }
     $current = @($nats | Where-Object Name -eq $name)
@@ -123,9 +123,9 @@ function Invoke-SoundLiveSharing {
         # Un essai antérieur a pu enregistrer l'état avant que New-NetNat n'échoue.
         # Le mode diagnostic ne modifie jamais les données du poste.
         if ($Action -eq 'diagnostic') {
-            $notes.Add('Lors de l’activation, cet état résiduel sera nettoyé après les contrôles réseau.')
+            $notes.Add('Lors de l''activation, cet état résiduel sera nettoyé après les contrôles réseau.')
         } else {
-            $notes.Add('Restauration de l’ancien routage et nettoyage de l’état SoundLive résiduel.')
+            $notes.Add('Restauration de l''ancien routage et nettoyage de l''état SoundLive résiduel.')
         }
     }
 
@@ -167,7 +167,7 @@ function Invoke-SoundLiveSharing {
     }
 
     if ($own -and -not $current.Count -and $nats.Count -eq 0) {
-        $script:stage = 'Nettoyage de l’ancien état SoundLive sans NAT'
+        $script:stage = 'Nettoyage de l''ancien état SoundLive sans NAT'
         Restore-SoundLiveForwarding $own
         Remove-Item -LiteralPath $stateKey -Force -ErrorAction Stop
         $notes.Add('Ancienne configuration SoundLive nettoyée ; nouvelle tentative de partage.')
