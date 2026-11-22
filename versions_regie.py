@@ -22,6 +22,10 @@ from commun import APP_NAME, release_number
 from mise_a_jour import ssh_keygen
 
 NAMESPACE = "soundlive-release"
+DEFAULT_REPOSITORY = "SoundLive21/soundlive-ndi"
+DEFAULT_PUBLICATION_KEY = (
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBG1cUgElZaDG/D0sEuXIhl1EaONYhPrl4N4sKHN5CZg"
+)
 ARCHIVE = f"{APP_NAME}.zip"
 LEGACY_ARCHIVE = "SoundLive-Ecrans.zip"
 ARCHIVES = (ARCHIVE, LEGACY_ARCHIVE)
@@ -51,6 +55,24 @@ REQUIRED = {"commun.py", "ecran.py", "diagnostic.py", "mise_a_jour.py", "tableau
             "tableau.html", "acces-refuse.html", "regie-windows.py", "versions_regie.py"}
 ADDITIONAL_FILE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}\.(?:py|html|css|js|c|h|sh|ps1|cmd|bat|exe|service|timer|txt|md)")
 WINDOWS_DEVICE = re.compile(r"(?:con|prn|aux|nul|com[0-9]|lpt[0-9])", re.IGNORECASE)
+
+
+def ensure_publication_defaults(config):
+    """Configure le dépôt officiel et sa clé publique sans modifier les choix existants."""
+    config = Path(config)
+    for path, content in (
+        (config, json.dumps({"repository": DEFAULT_REPOSITORY}) + "\n"),
+        (config.with_name("publication.pub"), DEFAULT_PUBLICATION_KEY + "\n"),
+    ):
+        try:
+            with path.open("x", encoding="utf-8") as output:
+                output.write(content)
+        except FileExistsError:
+            # Conserver le dépôt et la clé personnalisés, y compris sur une mise à jour.
+            pass
+        except OSError:
+            # Un dossier en lecture seule ne doit pas empêcher le lancement de la régie.
+            pass
 
 
 def required_files(version):
@@ -130,7 +152,8 @@ def latest(repo, installed):
 
 class PublicationStatus:
     def __init__(self, config, installed):
-        self.config = config
+        self.config = Path(config)
+        ensure_publication_defaults(self.config)
         self.installed = installed
         self.lock = Lock()
         self.repo = None
