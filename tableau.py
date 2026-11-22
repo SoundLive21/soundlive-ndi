@@ -35,7 +35,7 @@ from commun import (APP_NAME, MEDIA_CHUNK, MEDIA_COUNT_LIMIT, MEDIA_DISK_PERCENT
                     ORIENTATIONS, PREVIEW_LIMIT, SOFTWARE_VERSION as CLIENT_VERSION, SSH_PAIRING_PREFIX,
                     media_available, media_config, media_disk, media_name, media_revision, media_timing,
                     options, release_number, ssh_fingerprints, ssh_pairing_proof)
-from diagnostic import Diagnostic, NetworkRates, OsUpdateCheck, desktop_protocol, network_info, os_update_report
+from diagnostic import Diagnostic, NetworkRates, OsUpdateCheck, desktop_protocol, desktop_services, network_info, os_update_report
 from installation_lecteur import KEYS_PATH, installation_keys, prepare_installations, ssh_access_public
 from mise_a_jour import (CLIENT_UPDATE_ISSUES, ENGINE_ASSETS, OS_NAMESPACE, SAFE_ID, OpenSSHError, contents,
                          digest, engine_name, full_contents, maintenance_manifest, package, prepare_key, sign_manifest)
@@ -735,6 +735,13 @@ def diagnostic_report(payload):
     report = {}
     if payload.get("desktop_protocol") in ("vnc", "rdp"):
         report["desktop_protocol"] = payload["desktop_protocol"]
+    services = payload.get("desktop_services")
+    if isinstance(services, dict):
+        report["desktop_services"] = {
+            protocol: port for protocol, port in services.items()
+            if (protocol == "rdp" and type(port) is int and port in (3389, 3390))
+            or (protocol == "vnc" and type(port) is int and port == 5900)
+        }
     for field in ("hostname", "os", "architecture", "model", "cpu"):
         value = payload.get(field)
         if isinstance(value, str):
@@ -881,37 +888,44 @@ def local_addresses():
     return ordered
 
 
-def desktop_command(address, protocol):
+def desktop_command(address, protocol, port=None):
     if protocol not in ("rdp", "vnc"):
+        return None
+    if port is None:
+        port = 3389 if protocol == "rdp" else 5900
+    if type(port) is not int or not 1 <= port <= 65535:
         return None
     if sys.platform != "win32":
         # Remmina prend en charge RDP et VNC directement depuis une URI.
-        # Aucune authentification sensible n'est passée en argument.
         if remmina := shutil.which("remmina"):
-            return [remmina, "-c", f"{protocol}://{address}:{3389 if protocol == 'rdp' else 5900}"]
+            return [remmina, "-c", f"{protocol}://{address}:{port}"]
         if protocol == "rdp":
             return None
         if program := shutil.which("xtigervncviewer") or shutil.which("tigervncviewer"):
-            return [program, f"{address}::5900"]
+            return [program, f"{address}::{port}"]
         return None
     if protocol == "rdp":
-        return ["mstsc.exe", f"/v:{address}:3389"]
+        return ["mstsc.exe", f"/v:{address}:{port}"]
     for folder in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"):
         if programs := os.environ.get(folder):
             viewer = Path(programs) / "TigerVNC" / "vncviewer.exe"
             if viewer.is_file():
-                return [str(viewer), f"{address}::5900"]
+                return [str(viewer), f"{address}::{port}"]
     if viewer := shutil.which("vncviewer.exe"):
         if "tigervnc" in {part.casefold() for part in Path(viewer).parts}:
-            return [viewer, f"{address}::5900"]
+            return [viewer, f"{address}::{port}"]
     return None
 
 
-def support_methods(kind, desktop=None):
+def support_methods(kind, desktop=None, services=None):
     if kind == "windows":
         return ("rdp", "vnc")
     if kind == "ubuntu":
-        # GNOME Wayland partage le bureau en RDP. X11 utilise TigerVNC.
+        # Les clients récents indiquent les ports réellement ouverts.
+        # Un dictionnaire vide signifie qu'aucun serveur ne fonctionne.
+        if isinstance(services, dict):
+            return ("ssh", *(name for name in ("rdp", "vnc") if name in services))
+        # Compatibilité avec les lecteurs qui n'ont pas encore été mis à jour.
         return ("ssh", "rdp") if desktop == "rdp" else ("ssh", "vnc")
     if kind == "pi":
         return ("ssh", "vnc")
@@ -920,12 +934,16 @@ def support_methods(kind, desktop=None):
 
 def regie_support_methods():
     return support_methods("windows" if sys.platform == "win32" else "ubuntu",
-                           desktop_protocol())
+                           desktop_protocol(), desktop_services())
 
 
 def support_target(key):
     if key == "regie":
-        return dict(address="127.0.0.1", name="Régie", user=getuser(), support=regie_support_methods())
+        ports = desktop_services() if sys.platform != "win32" else {}
+        return dict(address="127.0.0.1", name="Régie", user=getuser(),
+                    support=support_methods("windows" if sys.platform == "win32" else "ubuntu",
+                                            desktop_protocol(), ports),
+                    desktop_ports=ports)
     with LOCK:
         row = SCREENS.get(key) if isinstance(key, str) else None
         report = row.get("report", {}) if row and row.get("token") else {}
@@ -934,8 +952,11 @@ def support_target(key):
         address = IPv4Address(report["ip"])
         if address.is_loopback or address.is_unspecified or address.is_multicast:
             raise ValueError("Adresse du lecteur invalide.")
+        diagnostics = report.get("diagnostic") or {}
+        ports = diagnostics.get("desktop_services")
         return dict(address=str(address), name=row["name"], user=row.get("ssh_user", "soundlive"),
-                    support=support_methods(row.get("kind"), report.get("desktop_protocol")),
+                    support=support_methods(row.get("kind"), diagnostics.get("desktop_protocol"), ports),
+                    desktop_ports=ports if isinstance(ports, dict) else {},
                     ssh_host_fingerprints=row.get("ssh_host_fingerprints", []))
 
 
@@ -1095,7 +1116,8 @@ class Request(BaseHTTPRequestHandler):
         elif path == "/api/network":
             self.reply(200, {"addresses": local_addresses(),
                              "port": getattr(self.server, "receiver_port", self.server.server_port),
-                             "desktop_protocol": desktop_protocol(), "support": regie_support_methods()})
+                             "desktop_protocol": desktop_protocol(), "support": regie_support_methods(),
+                             "desktop_ports": desktop_services() if sys.platform != "win32" else {}})
         elif path == "/api/interface-traffic":
             self.reply(200, self.server.interface_traffic.read())
         elif path == "/api/regie-network":
@@ -1146,7 +1168,10 @@ class Request(BaseHTTPRequestHandler):
                         pairing=row.get("pairing") if now < row.get("pairing_until", 0) else None,
                         installation_fingerprint=row.get("installation_fingerprint"),
                         paired="token" in row, version=row.get("version", 0), kind=row.get("kind"),
-                        support=support_methods(row.get("kind"), report.get("desktop_protocol")),
+                        support=support_methods(row.get("kind"),
+                                                (report.get("diagnostic") or {}).get("desktop_protocol"),
+                                                (report.get("diagnostic") or {}).get("desktop_services")),
+                        desktop_ports=(report.get("diagnostic") or {}).get("desktop_services", {}),
                         group=row.get("group"), identify=row.get("identify") is True,
                         resolution_limit=row.get("resolution_limit"),
                         group_order=group_order.get(group), screen_order=screen_order.get(group, {}).get(key),
@@ -1250,7 +1275,8 @@ class Request(BaseHTTPRequestHandler):
                     address = str(IPv4Address(value.get("address", "")))
                     if address not in {item["ip"] for item in local_addresses()}:
                         raise ValueError("Choisis une adresse du PC de régie.")
-                command = desktop_command(address, protocol)
+                port = target.get("desktop_ports", {}).get(protocol)
+                command = desktop_command(address, protocol, port)
                 if command:
                     subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 self.reply(200, {"opened": command is not None})
