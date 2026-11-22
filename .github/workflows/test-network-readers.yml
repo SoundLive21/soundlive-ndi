@@ -1,0 +1,35 @@
+name: Test lecteurs Ethernet sans Wi-Fi
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'preparer-lecteur-linux.sh'
+      - 'preparer-lecteur-windows.ps1'
+      - 'soundlive-ndi-network-static.sh'
+      - 'soundlive-ndi-network-windows.ps1'
+      - 'installation-lecteur-linux.sh'
+      - 'installer-client.sh'
+      - 'tableau.html'
+      - 'tests/**'
+      - '.github/workflows/test-network-readers.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux-no-wifi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test Linux sans Wi-Fi et syntaxe Bash
+        shell: bash
+        run: bash tests/test-network-no-wifi.sh
+      - name: Test génération commandes du tableau
+        shell: bash
+        run: node tests/test-pairing.js
+  windows-no-wifi:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test PowerShell Windows sans Wi-Fi et analyse AST
+        shell: powershell
+        run: .\\tests\\test-network-no-wifi.ps1
