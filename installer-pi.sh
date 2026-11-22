@@ -101,4 +101,5 @@ Name=SoundLive-NDI
 Exec=/usr/bin/python3 "$app/lancer-client.py"
 Terminal=false
 DESKTOP
+bash "$here/configurer-session-lecteur-linux.sh" pi
 echo "Configuration terminée. Redémarre avec sudo reboot pour charger le client."
