@@ -28,6 +28,8 @@ install_package() {
 
 install_package tigervnc-viewer
 session=${XDG_SESSION_TYPE:-}
+desktop=${XDG_CURRENT_DESKTOP:-}
+desktop=${desktop,,}
 if [[ $session != x11 && $session != wayland ]]; then
     while read -r id _; do
         [[ $(loginctl show-session "$id" -p Name --value 2>/dev/null) == "$(id -un)" ]] || continue
@@ -39,9 +41,7 @@ if [[ $mode == pi && $session != x11 ]] && command -v raspi-config >/dev/null; t
     install_package wayvnc
     sudo raspi-config nonint do_vnc 0
     echo 'VNC activé sur Raspberry Pi OS. Utilise les identifiants du Pi avec un client compatible WayVNC.'
-elif [[ $mode == ubuntu && $session == wayland &&
-        "${XDG_CURRENT_DESKTOP,,}" == *gnome* || $mode == ubuntu && $session == wayland &&
-        "${XDG_CURRENT_DESKTOP,,}" == *ubuntu* ]]; then
+elif [[ $mode == ubuntu && $session == wayland && ( $desktop == *gnome* || $desktop == *ubuntu* ) ]]; then
     # GNOME/Wayland (Ubuntu récent) partage l'écran via GNOME Remote Desktop (RDP).
     # Aucun mot de passe RDP ne doit être inventé ou enregistré par l'installateur.
     install_package gnome-remote-desktop
