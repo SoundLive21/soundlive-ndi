@@ -33,6 +33,7 @@ jobs:
         run: |
           bash -n installer-bureau-distant-linux.sh
           python3 tests/test-vnc-routing.py
+          python3 tests/test-desktop-services.py
           bash tests/test-vnc-install.sh
           python3 tests/test-desktop-remmina.py
   windows-no-wifi:
