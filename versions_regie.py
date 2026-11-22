@@ -10,7 +10,9 @@ import json
 import os
 from pathlib import Path
 import re
+import ssl
 import stat
+import sys
 from tempfile import TemporaryDirectory
 from threading import Lock, Thread
 from time import monotonic
@@ -120,7 +122,19 @@ def repository(value):
 
 def download(url, limit):
     req = Request(url, headers={"User-Agent": APP_NAME, "Accept": "application/vnd.github+json"})
-    with urlopen(req, timeout=12) as response:
+    # Sous Windows, le magasin système gère la chaîne de certificats
+    # et peut retrouver les certificats intermédiaires manquants.
+    # La validation TLS reste obligatoire.
+    if sys.platform == "win32":
+        try:
+            import truststore
+        except ImportError:
+            context = ssl.create_default_context()
+        else:
+            context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    else:
+        context = ssl.create_default_context()
+    with urlopen(req, timeout=12, context=context) as response:
         address = urlsplit(response.geturl())
         if address.scheme != "https" or address.hostname not in {
                 "api.github.com", "github.com", "release-assets.githubusercontent.com",
