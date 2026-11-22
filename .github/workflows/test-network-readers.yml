@@ -11,6 +11,8 @@ on:
       - 'installer-client.sh'
       - 'installer-bureau-distant-linux.sh'
       - 'tableau.py'
+      - 'diagnostic.py'
+      - 'commun.py'
       - 'tableau.html'
       - 'tests/**'
       - '.github/workflows/test-network-readers.yml'
