@@ -249,7 +249,7 @@ class Leases:
         return None
 
 
-def bind_listener(interface, index=None):
+def bind_listener(interface, index=None, address=None):
     listener = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     try:
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -263,7 +263,19 @@ def bind_listener(interface, index=None):
                                 interface.encode() + b"\0")
         else:
             raise ValueError("Le serveur DHCP intégré est disponible sous Windows et Linux.")
-        listener.bind(("", 67))
+        try:
+            # Mode normal : les broadcasts DHCP sont reçus sur l'adresse générique.
+            listener.bind(("", 67))
+        except OSError as error:
+            if (sys.platform != "win32" or getattr(error, "winerror", None) != 10048
+                    or not address):
+                raise
+            # Compatibilité avec ICS/HNS : ils peuvent occuper UDP 67
+            # sur une autre interface, même si l'IP des écrans reste libre.
+            # Attention : cette liaison peut NE PAS recevoir les DHCPDISCOVER
+            # diffusés vers 255.255.255.255. Elle doit être validée
+            # avec un véritable lecteur avant emploi en production.
+            listener.bind((str(IPv4Address(address)), 67))
         listener.settimeout(0.25)
     except BaseException:
         listener.close()
@@ -306,7 +318,7 @@ def open_listener_elevated(interface):
 def open_listener(settings):
     interface = settings.adapter["label"]
     try:
-        return bind_listener(interface, settings.adapter["index"])
+        return bind_listener(interface, settings.adapter["index"], str(settings.server))
     except PermissionError:
         if not sys.platform.startswith("linux") or os.geteuid() == 0:
             raise
@@ -390,7 +402,14 @@ class Service:
                 listener.close()
                 raise
             self.config, self.leases, self.listener = config, leases, listener
-            self.error = ""
+            bind_address = listener.getsockname()[0]
+            self.error = (
+                f"Mode coexistence DHCP/ICS : écoute sur {bind_address}:67 uniquement. "
+                "Les DHCPDISCOVER envoyés en broadcast vers 255.255.255.255 "
+                "peuvent ne pas être reçus. Vérifie qu'un véritable lecteur "
+                "obtient une adresse IPv4 avant d'utiliser ce mode en production."
+                if sys.platform == "win32" and bind_address != "0.0.0.0" else ""
+            )
             self.stopped.clear()
             self.worker = Thread(target=self.serve, args=(listener, leases), daemon=True)
             self.worker.start()
