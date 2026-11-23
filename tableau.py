@@ -2012,6 +2012,7 @@ class Regie:
         self.remote_url = None
         self.connections = None
         self.server = ThreadingHTTPServer(("0.0.0.0", port), Request)
+        self.server.receiver_port = self.server.server_port
         self.server.terminals = Terminals()
         self.server.os_update_check = OsUpdateCheck()
         self.server.network_control = network_control
