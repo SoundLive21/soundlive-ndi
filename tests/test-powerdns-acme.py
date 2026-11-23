@@ -50,7 +50,7 @@ with HTTPServer(("127.0.0.1", 0), PDNSHandler) as server:
     thread.start()
     pdns = PowerDNS(api_url, "test-api-key", "exemple.fr.")
     assert pdns.verify()["kind"] == "Native"
-    token = b64(b"abcdefghijklmnopqrstuvwxy012345")
+    token = b64(b"abcdefghijklmnopqrstuvwxy0123456")
     assert len(token) == 43
     pdns.txt("_acme-challenge.regie.exemple.fr", token, "EXTEND")
     pdns.txt("_acme-challenge.regie.exemple.fr", token, "PRUNE")
@@ -117,7 +117,9 @@ def fake_acme(method, url, body=None, headers=None):
         return {"status": "pending"}, reply_headers, 200
     if url.endswith("/finalize"):
         csr = base64.urlsafe_b64decode(json.loads(base64.urlsafe_b64decode(payload64 + "==="))["csr"] + "===")
-        assert b"regie.exemple.fr" in csr or csr
+        request = x509.load_der_x509_csr(csr)
+        assert "regie.exemple.fr" in request.extensions.get_extension_for_class(
+            x509.SubjectAlternativeName).value.get_values_for_type(x509.DNSName)
         return {"status": "processing"}, reply_headers, 200
     if url.endswith("/orders/1"):
         return {"status": "valid", "certificate": "https://acme.test/cert/1"}, reply_headers, 200
@@ -138,9 +140,8 @@ def remove(name, token):
     state["records"].append(("remove", name, token))
 def wait(name, token):
     assert state["records"][-1] == ("add", name, token)
-    expected = b64(sha256(("token-12345." + b64(sha256(encoded(
-        AcmeClient.__new__(AcmeClient).jwk if False else jwk
-    )).digest())).encode("ascii")).digest())
+    expected = b64(sha256(("token-12345." + b64(sha256(encoded(jwk)).digest())
+                           ).encode("ascii")).digest())
     assert token == expected
 
 numbers = account_key.public_key().public_numbers()
