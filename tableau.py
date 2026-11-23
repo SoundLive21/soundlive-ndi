@@ -1275,7 +1275,8 @@ class Request(BaseHTTPRequestHandler):
                     result = DEPLOYMENTS.start(
                         (self.client_address[0], getattr(self, "remote_session", None)),
                         identifier, host, value.get("user"), value.get("fingerprint"),
-                        kind, regie, self.server.receiver_port, code)
+                        kind, regie, self.server.receiver_port, code,
+                        value.get("sudo_password", ""))
                     # Un installateur Linux peut télécharger et compiler le SDK NDI.
                     # Le code reste valable pendant le déploiement, puis expirera.
                     with LOCK:
