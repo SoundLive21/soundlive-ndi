@@ -1182,13 +1182,6 @@ class Launcher:
         buttons.grid(row=11, column=0, columnspan=2, sticky="ew")
         running = [False]
 
-        def task():
-            try:
-                key = api_key.get()  # variable lue depuis l'interface avant le thread
-                raise AssertionError("L'accès Tk doit avoir lieu sur le thread UI")
-            except AssertionError:
-                pass
-
         def begin():
             if running[0]:
                 return
