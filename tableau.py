@@ -1266,6 +1266,13 @@ class Request(BaseHTTPRequestHandler):
                         if not row or "token" in row or time.time() >= row.get("pairing_until", 0):
                             raise ValueError("Ajoute un nouvel écran avec un code d'association encore valide.")
                         kind, code = row.get("kind"), row.get("pairing")
+                        install_fingerprint = row.get("installation_fingerprint")
+                    if not isinstance(install_fingerprint, str) or not SAFE_ID.fullmatch(install_fingerprint):
+                        raise ValueError("Empreinte de la régie absente. Recrée le code d'association.")
+                    with INSTALLATION_KEYS_LOCK:
+                        live_fingerprint = sha256(installation_keys(ROOT)).hexdigest()
+                    if not hmac.compare_digest(install_fingerprint, live_fingerprint):
+                        raise ValueError("Les clés d'installation ont changé. Recrée le code d'association.")
                     host = validate_ipv4(value.get("ip"))
                     regie = validate_ipv4(value.get("regie"))
                     if regie not in {a["ip"] for a in local_addresses()}:
@@ -1276,7 +1283,7 @@ class Request(BaseHTTPRequestHandler):
                         (self.client_address[0], getattr(self, "remote_session", None)),
                         identifier, host, value.get("user"), value.get("fingerprint"),
                         kind, regie, self.server.receiver_port, code,
-                        value.get("sudo_password", ""))
+                        install_fingerprint, value.get("sudo_password", ""))
                     # Un installateur Linux peut télécharger et compiler le SDK NDI.
                     # Le code reste valable pendant le déploiement, puis expirera.
                     with LOCK:
