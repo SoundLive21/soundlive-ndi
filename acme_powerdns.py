@@ -143,7 +143,8 @@ def json_http(method, url, body=None, headers=None):
     try:
         with urlopen(request, timeout=TIMEOUT) as response:
             raw = response.read(1_000_000)
-            return (json.loads(raw) if raw and response.headers.get_content_type() == "application/json"
+            content_type = response.headers.get_content_type()
+            return (json.loads(raw) if raw and ("json" in content_type)
                     else raw.decode("utf-8", "replace")), dict(response.headers), response.status
     except HTTPError as error:
         raw = error.read(4096)
