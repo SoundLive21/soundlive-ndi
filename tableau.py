@@ -36,6 +36,8 @@ from commun import (APP_NAME, MEDIA_CHUNK, MEDIA_COUNT_LIMIT, MEDIA_DISK_PERCENT
                     media_available, media_config, media_disk, media_name, media_revision, media_timing,
                     options, release_number, ssh_fingerprints, ssh_pairing_proof)
 from diagnostic import Diagnostic, NetworkRates, OsUpdateCheck, desktop_protocol, desktop_services, network_info, os_update_report
+from deploiement_lecteur import Deployments, validate_ipv4
+from page_ssh import render as render_ssh_page
 from installation_lecteur import KEYS_PATH, installation_keys, prepare_installations, ssh_access_public
 from mise_a_jour import (CLIENT_UPDATE_ISSUES, ENGINE_ASSETS, OS_NAMESPACE, SAFE_ID, OpenSSHError, contents,
                          digest, engine_name, full_contents, maintenance_manifest, package, prepare_key, sign_manifest)
@@ -72,6 +74,7 @@ LOGIN_NOTICES = {
 }
 LOCK = threading.Lock()
 INSTALLATION_KEYS_LOCK = threading.Lock()
+DEPLOYMENTS = Deployments()
 POWER_REQUEST_AGE = 25
 ONLINE_AGE = 12
 RESOLUTIONS = ("360p", "720p", "1080p", "4K")
@@ -1018,7 +1021,7 @@ class Request(BaseHTTPRequestHandler):
             return True
         address = self.client_address[0]
         connections = self.server.remote_connections
-        page = path in ("/", "/connexion", "/terminal")
+        page = path in ("/", "/connexion", "/terminal", "/addsshkey")
         if connections.is_blocked(address):
             self.refuse_blocked(page)
             return False
@@ -1108,6 +1111,14 @@ class Request(BaseHTTPRequestHandler):
             self.reply(200, PAGE.replace(b"__REMOTE_ONLY__", b"" if remote else b"hidden"))
         elif path == "/terminal":
             self.reply(200, TERMINAL_PAGE)
+        elif path == "/addsshkey":
+            try:
+                with INSTALLATION_KEYS_LOCK:
+                    prepare_installations(ROOT)
+                    public = ssh_access_public(ROOT)
+                self.reply(200, render_ssh_page(public), content_type="text/html; charset=utf-8")
+            except (OSError, RuntimeError, ValueError) as error:
+                self.reply(409, {"error": "Clé SSH de la régie indisponible. Vérifie les clés d'installation."})
         elif remote and path == "/connexion":
             notice = LOGIN_NOTICES.get(url.query.removeprefix("etat="), "")
             self.login_page(notice=notice)
@@ -1246,6 +1257,43 @@ class Request(BaseHTTPRequestHandler):
                         return
             if path.startswith("/api/ssh/"):
                 self.terminal_action(path.removeprefix("/api/ssh/"), value)
+                return
+            if path == "/api/deploy/start":
+                try:
+                    identifier = value.get("id")
+                    with LOCK:
+                        row = SCREENS.get(identifier) if isinstance(identifier, str) else None
+                        if not row or "token" in row or time.time() >= row.get("pairing_until", 0):
+                            raise ValueError("Ajoute un nouvel écran avec un code d'association encore valide.")
+                        kind, code = row.get("kind"), row.get("pairing")
+                    host = validate_ipv4(value.get("ip"))
+                    regie = validate_ipv4(value.get("regie"))
+                    if regie not in {a["ip"] for a in local_addresses()}:
+                        raise ValueError("Sélectionne une adresse IPv4 de ce PC de régie.")
+                    if host in {a["ip"] for a in local_addresses()}:
+                        raise ValueError("L'adresse cible appartient au PC de régie.")
+                    result = DEPLOYMENTS.start(
+                        (self.client_address[0], getattr(self, "remote_session", None)),
+                        identifier, host, value.get("user"), value.get("fingerprint"),
+                        kind, regie, self.server.receiver_port, code)
+                    # Un installateur Linux peut télécharger et compiler le SDK NDI.
+                    # Le code reste valable pendant le déploiement, puis expirera.
+                    with LOCK:
+                        current = SCREENS.get(identifier)
+                        if current and current.get("pairing") == code and "token" not in current:
+                            current["pairing_until"] = time.time() + 36 * 60
+                            save()
+                    self.reply(200, result)
+                except (OSError, ValueError, RuntimeError) as error:
+                    self.reply(400, {"error": str(error)})
+                return
+            if path == "/api/deploy/status":
+                try:
+                    self.reply(200, DEPLOYMENTS.status(
+                        (self.client_address[0], getattr(self, "remote_session", None)),
+                        value.get("job")))
+                except ValueError as error:
+                    self.reply(400, {"error": str(error)})
                 return
             if path == "/api/os-health/open":
                 if remote:
