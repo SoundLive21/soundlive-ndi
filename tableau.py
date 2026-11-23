@@ -36,6 +36,7 @@ from commun import (APP_NAME, MEDIA_CHUNK, MEDIA_COUNT_LIMIT, MEDIA_DISK_PERCENT
                     media_available, media_config, media_disk, media_name, media_revision, media_timing,
                     options, release_number, ssh_fingerprints, ssh_pairing_proof)
 from diagnostic import Diagnostic, NetworkRates, OsUpdateCheck, desktop_protocol, desktop_services, network_info, os_update_report
+from certificats_acme import configure_certificate, disable_certificate
 from deploiement_lecteur import Deployments, validate_ipv4
 from page_ssh import render as render_ssh_page
 from installation_lecteur import KEYS_PATH, installation_keys, prepare_installations, ssh_access_public
@@ -2053,8 +2054,10 @@ class Regie:
                 self.remote.terminals = self.server.terminals
                 self.remote.os_update_check = self.server.os_update_check
                 self.remote.network_control = self.server.network_control
-                self.server.waiting_qr = waiting_access(*self.remote.server_address)
-                self.remote_url = f"https://{self.remote.server_address[0]}:{self.remote.server_port}"
+                public_address = self.remote.certificate_name or self.remote.server_address[0]
+                self.server.waiting_qr = waiting_access(public_address, self.remote.server_port)
+                formatted = f"[{public_address}]" if ":" in public_address else public_address
+                self.remote_url = f"https://{formatted}:{self.remote.server_port}"
                 self.server.remote_connections = self.remote.remote_connections = self.connections
                 self.remote.publication_status = self.server.publication_status
         except BaseException:
@@ -2089,7 +2092,24 @@ def main():
                        help="préparer l’accès HTTPS sur l’IPv4 du PC de régie")
     setup.add_argument("--desactiver-acces-distant", action="store_true",
                        help="désactiver l’accès HTTPS au prochain démarrage")
+    setup.add_argument("--configurer-certificat-acme", nargs=3,
+                       metavar=("DNS_OU_IP_PUBLIQUE", "FULLCHAIN_PEM", "CLE_PRIVEE_PEM"),
+                       help="utiliser des fichiers PEM renouvelés par un client ACME externe")
+    setup.add_argument("--retirer-certificat-acme", action="store_true",
+                       help="revenir au certificat HTTPS local à la prochaine ouverture")
     args = parser.parse_args()
+    if args.configurer_certificat_acme:
+        try:
+            identifier = configure_certificate(REMOTE_ACCESS, *args.configurer_certificat_acme)
+        except (OSError, ValueError) as error:
+            sys.exit(f"Certificat ACME non configuré : {error}")
+        print(f"Certificat externe configuré pour {identifier}. Le port HTTPS reste {REMOTE_PORT}.")
+        print("Redémarre la régie une fois ; les renouvellements PEM seront ensuite chargés automatiquement.")
+        return
+    if args.retirer_certificat_acme:
+        disable_certificate(REMOTE_ACCESS)
+        print("Retour au certificat local au prochain démarrage de la régie.")
+        return
     if args.activer_acces_distant:
         try:
             password, certificate = prepare_access(REMOTE_ACCESS, args.activer_acces_distant, renew=True)
