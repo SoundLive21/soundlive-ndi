@@ -37,11 +37,11 @@ N'exécute pas ces commandes sur un ordinateur que tu ne souhaites pas administr
 <p class="small">Cette commande installe OpenSSH et Git, autorise la régie dans
 <code>~/.ssh/authorized_keys</code>, démarre le serveur SSH et affiche
 l'empreinte de la clé hôte du lecteur. Note le nom d'utilisateur, l'IPv4 et l'empreinte.</p>
-<p class="note">Pour une installation complètement automatique via SSH, le compte Linux
-doit pouvoir exécuter les opérations système de l'installateur sans demande de
-mot de passe (<code>sudo -n</code>). Sur un compte qui n'a pas cette autorisation,
-le déploiement s'arrêtera avec une erreur explicite. N'accorde pas des droits
-<code>NOPASSWD:ALL</code> à un compte personnel ou non dédié.</p></section>
+<p class="note">Dans le formulaire « Déployer », tu pourras renseigner le
+mot de passe <code>sudo</code> du compte Linux pour cette installation uniquement.
+Il n’est pas stocké par SoundLive-NDI. Tu peux aussi laisser ce champ vide
+si le compte dispose déjà de droits <code>sudo</code> sans saisie interactive.
+N'accorde pas des droits <code>NOPASSWD:ALL</code> à un compte personnel.</p></section>
 
 <section><h2>Windows 10 ou 11</h2>
 <p>Ouvre <strong>PowerShell en administrateur</strong> sur le nouveau lecteur,
