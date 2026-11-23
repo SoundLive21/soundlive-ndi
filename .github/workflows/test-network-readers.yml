@@ -16,6 +16,9 @@ on:
       - 'configurer-session-lecteur-linux.sh'
       - 'configurer-session-lecteur-windows.ps1'
       - 'versions_regie.py'
+      - 'deploiement_lecteur.py'
+      - 'page_ssh.py'
+      - 'addsshkey.html'
       - 'tableau.py'
       - 'diagnostic.py'
       - 'commun.py'
@@ -45,6 +48,7 @@ jobs:
           bash tests/test-vnc-install.sh
           bash tests/test-session-lecteur.sh
           python3 tests/test-autologin-gdm.py
+          python3 tests/test-deploiement.py
           python3 tests/test-desktop-remmina.py
   windows-no-wifi:
     runs-on: windows-latest
