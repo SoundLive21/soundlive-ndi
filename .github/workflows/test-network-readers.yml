@@ -49,6 +49,7 @@ jobs:
           bash tests/test-session-lecteur.sh
           python3 tests/test-autologin-gdm.py
           python3 tests/test-deploiement.py
+          python3 tests/test-sudo-ssh.py
           python3 tests/test-desktop-remmina.py
   windows-no-wifi:
     runs-on: windows-latest
