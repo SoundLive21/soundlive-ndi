@@ -50,7 +50,7 @@ def command_linux(kind, regie, port, code, password=False):
     ) if password else ""
     # Chaque déploiement repart d'un dossier temporaire distinct.
     return ("set -eu; " + auth
-            "command -v git >/dev/null || { echo 'Installe git sur ce lecteur.' >&2; exit 20; }; "
+            + "command -v git >/dev/null || { echo 'Installe git sur ce lecteur.' >&2; exit 20; }; "
             "sudo -n true >/dev/null 2>&1 || { "
             "echo 'Installation automatique : sudo sans demande de mot de passe nécessaire. "
             "Prépare les droits localement sur ce lecteur dédié.' >&2; exit 21; }; "
