@@ -10,12 +10,12 @@ from ipaddress import IPv4Address, IPv4Network
 import json
 from pathlib import Path
 import secrets
-import ssl
 from tempfile import NamedTemporaryFile
 from threading import Lock
 from time import monotonic, time
 
 from commun import APP_NAME
+from certificats_acme import ReloadableCertificate
 
 
 PORT = 8766
@@ -237,14 +237,11 @@ class RemoteDashboard(ThreadingHTTPServer):
         self.receiver_port = receiver_port
         self.credentials = settings["credentials"]
         self.auth_lock = Lock()
-        self.tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        self.tls.minimum_version = ssl.TLSVersion.TLSv1_2
-        with NamedTemporaryFile(dir=folder, delete=False) as certificate:
-            certificate.write(settings["pem"].encode("ascii"))
-        try:
-            self.tls.load_cert_chain(certificate.name)
-        finally:
-            Path(certificate.name).unlink()
+        # L'interface et les restrictions d'adresses LAN restent inchangées.
+        # Le certificat externe est rechargé à la prochaine connexion TLS
+        # quand son fichier PEM est renouvelé par le client ACME.
+        self.certificates = ReloadableCertificate(folder, settings["pem"])
+        self.certificate_name = self.certificates.identifier
         super().__init__((address, PORT), handler)
 
     def verify_request(self, request, client_address):
@@ -257,7 +254,7 @@ class RemoteDashboard(ThreadingHTTPServer):
     def finish_request(self, request, client_address):
         request.settimeout(8)
         try:
-            secured = self.tls.wrap_socket(request, server_side=True)
+            secured = self.certificates.current().wrap_socket(request, server_side=True)
         except OSError:
             return
         with secured:
