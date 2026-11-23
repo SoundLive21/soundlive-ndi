@@ -53,7 +53,7 @@ jobs.jobs["test"] = {
     "owner": ("127.0.0.1", None), "screen": "123", "state": "running",
     "stdout": "", "stderr": "", "finished": None,
 }
-command = deploy.command_linux("ubuntu", "192.168.56.1", 8765, "CODE_1234", True)
+command = deploy.command_linux("ubuntu", "192.168.56.1", 8765, "CODE_1234", "a" * 64, True)
 with patch.dict(sys.modules, {"paramiko": SimpleNamespace(SSHClient=lambda:fake)}):
     with patch.object(deploy, "connect_client", return_value=""):
         jobs._run("test", "192.168.56.21", "soundlive", "SHA256:example",
