@@ -33,6 +33,8 @@ def check_identifier(name):
         return str(address)
     ascii_name = name.removesuffix(".").lower()
     labels = ascii_name.split(".")
+    if ascii_name.endswith((".local", ".internal", ".localhost", ".test", ".invalid")):
+        raise ValueError("Les noms locaux ou réservés ne peuvent pas obtenir de certificat ACME public.")
     if len(labels) < 2 or any(not 1 <= len(label) <= 63 or
                                not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label)
                                for label in labels) or labels[-1].isdigit():
