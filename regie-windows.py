@@ -1122,8 +1122,129 @@ class Launcher:
                 return
             dialog.destroy()
         ttk.Button(actions, text="Appliquer", command=enable).pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="Automatiser via PowerDNS…",
+                   command=lambda: self.configure_powerdns_dialog(dialog)).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="Certificat local", command=disable).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="Fermer", command=dialog.destroy).pack(side="right")
+        dialog.grab_set()
+
+    def configure_powerdns_dialog(self, parent=None):
+        """Assistant d'obtention et de renouvellement Let's Encrypt par DNS PowerDNS."""
+        from gestion_acme_powerdns import (configure, get_config, public_config, read_status,
+                                           renew_once)
+        folder = self.tableau.REMOTE_ACCESS
+        current = public_config(folder) or {}
+        dialog = tk.Toplevel(self.window)
+        dialog.title("Let's Encrypt · PowerDNS API · certificat automatique")
+        dialog.transient(parent or self.window)
+        content = ttk.Frame(dialog, padding=18)
+        content.pack(fill="both", expand=True)
+        content.columnconfigure(1, weight=1)
+        info = ("SoundLive-NDI peut obtenir et renouveler un certificat Let's Encrypt "
+                "en créant un enregistrement TXT temporaire dans PowerDNS. "
+                "L'interface HTTPS reste sur le réseau privé TCP 8766.")
+        ttk.Label(content, text=info, wraplength=600).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 12))
+
+        fields = (
+            ("Nom DNS du certificat", "domain", "regie.exemple.fr"),
+            ("Zone PowerDNS", "zone", "exemple.fr"),
+            ("Adresse API PowerDNS", "api_url", "https://dns.exemple.fr:8081"),
+            ("Identifiant serveur PowerDNS", "server_id", "localhost"),
+            ("Adresse e-mail Let's Encrypt", "email", "admin@exemple.fr"),
+        )
+        variables = {}
+        for index, (label, key, placeholder) in enumerate(fields, start=1):
+            variables[key] = tk.StringVar(value=current.get(key, "localhost" if key == "server_id" else ""))
+            ttk.Label(content, text=label).grid(row=index, column=0, sticky="w", pady=5, padx=(0, 8))
+            ttk.Entry(content, textvariable=variables[key], width=58).grid(
+                row=index, column=1, sticky="ew", pady=5)
+        api_key = tk.StringVar()
+        ttk.Label(content, text="Clé API PowerDNS (X-API-Key)").grid(
+            row=6, column=0, sticky="w", pady=5, padx=(0, 8))
+        ttk.Entry(content, textvariable=api_key, show="•", width=58).grid(
+            row=6, column=1, sticky="ew", pady=5)
+        ttk.Label(content, text=("La clé n'est jamais transmise au navigateur de la régie. "
+                "Sur Windows, elle est chiffrée avec DPAPI pour ce compte utilisateur. "
+                "Si la configuration existe, laisse ce champ vide pour conserver la clé."),
+                  wraplength=605).grid(row=7, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        staging = tk.BooleanVar(value=current.get("environment") == "staging")
+        ttk.Checkbutton(content, text="Environnement de test Let's Encrypt (certificat NON reconnu)",
+                        variable=staging).grid(row=8, column=0, columnspan=2, sticky="w")
+        terms = tk.BooleanVar()
+        ttk.Checkbutton(content,
+            text="J'accepte les conditions d'utilisation de Let's Encrypt (letsencrypt.org/repository/)",
+            variable=terms).grid(row=9, column=0, columnspan=2, sticky="w", pady=(4, 10))
+        status = tk.StringVar(value=(read_status(folder).get("message") or "Configuration non démarrée."))
+        ttk.Label(content, textvariable=status, wraplength=605).grid(
+            row=10, column=0, columnspan=2, sticky="w", pady=10)
+        buttons = ttk.Frame(content)
+        buttons.grid(row=11, column=0, columnspan=2, sticky="ew")
+        running = [False]
+
+        def task():
+            try:
+                key = api_key.get()  # variable lue depuis l'interface avant le thread
+                raise AssertionError("L'accès Tk doit avoir lieu sur le thread UI")
+            except AssertionError:
+                pass
+
+        def begin():
+            if running[0]:
+                return
+            if not terms.get():
+                status.set("Accepte les conditions de Let's Encrypt pour continuer.")
+                return
+            params = {name: entry.get().strip() for name, entry in variables.items()}
+            secret = api_key.get()
+            environment = "staging" if staging.get() else "production"
+            running[0] = True
+            launch_button.configure(state="disabled")
+            status.set("Vérification de l'API PowerDNS, puis demande de certificat…")
+            output = Queue()
+
+            def work():
+                try:
+                    configure(folder, params["domain"], params["zone"], params["api_url"],
+                              secret, params["email"], params["server_id"], environment,
+                              accept_terms=True)
+                    renew_once(folder, force=True)
+                    output.put((True, "Certificat obtenu et installé. Le renouvellement automatique "
+                                "sera actif lorsque la régie fonctionne."))
+                except Exception as error:
+                    # Les erreurs système non prévues ne doivent pas exposer une clé API
+                    # dans les dialogues et journaux.
+                    output.put((False, str(error) if isinstance(error, ValueError)
+                                else "Émission impossible. Vérifie PowerDNS, les DNS publics "
+                                     "et le statut de l'opération."))
+
+            threading.Thread(target=work, daemon=True, name="acme-powerdns-setup").start()
+
+            def update():
+                state = read_status(folder)
+                if running[0] and state.get("state") in ("running", "failed"):
+                    status.set(state.get("message", ""))
+                try:
+                    ok, message = output.get_nowait()
+                except Empty:
+                    if dialog.winfo_exists():
+                        dialog.after(500, update)
+                    return
+                running[0] = False
+                if dialog.winfo_exists():
+                    launch_button.configure(state="normal")
+                    status.set(message if ok else state.get("message") or message)
+                    if ok:
+                        messagebox.showinfo("Let's Encrypt",
+                            "Certificat obtenu. Démarre ou redémarre la régie pour afficher "
+                            "le nom DNS dans son QR code. Les renouvellements seront automatiques.",
+                            parent=dialog)
+            dialog.after(500, update)
+
+        launch_button = ttk.Button(buttons, text="Vérifier PowerDNS et obtenir le certificat",
+                                   command=begin)
+        launch_button.pack(side="left", padx=(0, 8))
+        ttk.Button(buttons, text="Fermer", command=dialog.destroy).pack(side="right")
         dialog.grab_set()
 
     def open_certificate_folder(self):
