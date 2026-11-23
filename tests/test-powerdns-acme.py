@@ -61,6 +61,60 @@ with HTTPServer(("127.0.0.1", 0), PDNSHandler) as server:
     thread.join(timeout=5)
 print("OK: API PowerDNS GET et TXT EXTEND/PRUNE sans effacer le reste de la zone.")
 
+# Anciennes API : lecture, conservation des valeurs et du TTL, nettoyage ciblé.
+from acme_powerdns import PowerDNSRejected, AcmeFailure
+from copy import deepcopy
+
+legacy = PowerDNS("http://127.0.0.1:8081", "test-api-key", "exemple.fr.")
+name = "_acme-challenge.regie.exemple.fr."
+other = {"content": '"autre-valeur"', "disabled": False}
+disabled = {"content": '"valeur-desactivee"', "disabled": True}
+record = {"content": '"' + token + '"', "disabled": False}
+zone = {"name": "exemple.fr.", "kind": "Native", "rrsets": [
+    {"name": name, "type": "TXT", "ttl": 300, "records": [other, disabled]}
+]}
+actions = []
+
+def legacy_request(method, body=None):
+    if method == "GET":
+        return deepcopy(zone)
+    rr = deepcopy(body["rrsets"][0])
+    actions.append(rr["changetype"])
+    if rr["changetype"] in ("EXTEND", "PRUNE"):
+        raise PowerDNSRejected("HTTP 422")
+    if rr["changetype"] == "DELETE":
+        zone["rrsets"] = []
+    else:
+        assert rr["changetype"] == "REPLACE"
+        rr.pop("changetype")
+        zone["rrsets"] = [rr]
+    return {}
+
+with patch.object(legacy, "request", side_effect=legacy_request):
+    legacy.txt(name, token, "EXTEND")
+    assert zone["rrsets"][0]["records"] == [other, disabled, record]
+    assert zone["rrsets"][0]["ttl"] == 300
+    legacy.txt(name, token, "EXTEND")
+    legacy.txt(name, token, "PRUNE")
+    assert zone["rrsets"][0]["records"] == [other, disabled]
+    legacy.txt(name, token, "PRUNE")
+    assert actions == ["EXTEND", "REPLACE", "REPLACE"]
+    zone["rrsets"] = []
+    legacy.txt(name, token, "EXTEND")
+    assert zone["rrsets"][0]["ttl"] == 60
+    legacy.txt(name, token, "PRUNE")
+    assert not zone["rrsets"] and actions[-1] == "DELETE"
+    del zone["rrsets"]
+    before = list(actions)
+    try:
+        legacy.txt(name, token, "EXTEND")
+    except AcmeFailure:
+        pass
+    else:
+        raise AssertionError("Une réponse GET incomplète a été acceptée")
+    assert actions == before
+print("OK: ancienne API PowerDNS, conservation des TXT et TTL, nettoyage ciblé.")
+
 assert validate_zone("exemple.fr", "regie.exemple.fr") == "exemple.fr."
 try:
     validate_zone("autre.fr", "regie.exemple.fr")
