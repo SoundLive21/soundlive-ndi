@@ -1102,6 +1102,8 @@ class Launcher:
             try:
                 name = configure_certificate(folder, identifier.get().strip(),
                                              chain.get().strip(), key.get().strip())
+                from gestion_acme_powerdns import disable_automatic
+                disable_automatic(folder)
             except (OSError, ValueError) as error:
                 messagebox.showerror("Certificat ACME", str(error), parent=dialog)
                 return
@@ -1117,6 +1119,8 @@ class Launcher:
                 return
             try:
                 disable_certificate(folder)
+                from gestion_acme_powerdns import disable_automatic
+                disable_automatic(folder)
             except OSError as error:
                 messagebox.showerror("Certificat ACME", str(error), parent=dialog)
                 return
@@ -1207,7 +1211,8 @@ class Launcher:
                 except Exception as error:
                     # Les erreurs système non prévues ne doivent pas exposer une clé API
                     # dans les dialogues et journaux.
-                    output.put((False, str(error) if isinstance(error, ValueError)
+                    from acme_powerdns import AcmeFailure
+                    output.put((False, str(error) if isinstance(error, (ValueError, AcmeFailure))
                                 else "Émission impossible. Vérifie PowerDNS, les DNS publics "
                                      "et le statut de l'opération."))
 
