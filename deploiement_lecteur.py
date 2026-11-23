@@ -13,6 +13,7 @@ import time
 from installation_lecteur import ssh_identity
 from terminal_ssh import HostKeyCheck, USER, connect_client
 from commun import SSH_FINGERPRINT
+from mise_a_jour import SAFE_ID
 
 REPOSITORY = "https://github.com/SoundLive21/soundlive-ndi.git"
 MAX_JOBS = 2
@@ -60,9 +61,11 @@ def validate_ipv4(text):
     return str(address)
 
 
-def command_linux(kind, regie, port, code, password=False):
+def command_linux(kind, regie, port, code, installation_fingerprint, password=False):
     if kind not in ("ubuntu", "pi"):
         raise ValueError("Type de lecteur Linux invalide.")
+    if not isinstance(installation_fingerprint, str) or not SAFE_ID.fullmatch(installation_fingerprint):
+        raise ValueError("Empreinte des clés d'installation manquante ou invalide.")
     server = f"http://{regie}:{port}"
     # Le mot de passe sudo éventuel est transmis par le canal SSH après
     # désactivation de l'écho terminal, jamais dans les arguments de commande.
@@ -87,10 +90,13 @@ def command_linux(kind, regie, port, code, password=False):
             + shlex.quote(REPOSITORY) + ' "$folder/kit"; '
             'cd "$folder/kit"; '
             'SOUNDLIVE_DEPLOY_REMOTE=1 bash installer-client.sh --plateforme '
-            + shlex.quote(kind) + ' ' + shlex.quote(server) + ' ' + shlex.quote(code))
+            + shlex.quote(kind) + ' --empreinte-regie ' + shlex.quote(installation_fingerprint)
+            + ' ' + shlex.quote(server) + ' ' + shlex.quote(code))
 
 
-def command_windows(regie, port, code):
+def command_windows(regie, port, code, installation_fingerprint):
+    if not isinstance(installation_fingerprint, str) or not SAFE_ID.fullmatch(installation_fingerprint):
+        raise ValueError("Empreinte des clés d'installation manquante ou invalide.")
     server = f"http://{regie}:{port}"
     # Dans Windows SSH, on utilise PowerShell sans paramètres interpolés
     # depuis l'hôte utilisateur. Les valeurs ont été validées au serveur.
@@ -114,7 +120,7 @@ try {
     $kit = Join-Path $temporary 'kit'
     Push-Location $kit
     try {
-        & (Join-Path $kit 'installer-client.cmd') """+ps(server)+" "+ps(code)+"""
+        & (Join-Path $kit 'installer-client.cmd') '--empreinte-regie' """+ps(installation_fingerprint)+" "+ps(server)+" "+ps(code)+"""
         if ($LASTEXITCODE -ne 0) { throw ('Installation Windows échouée (code ' + $LASTEXITCODE + ').') }
     } finally { Pop-Location }
 } finally { Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue }
@@ -123,10 +129,10 @@ try {
     return "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + encoded
 
 
-def install_command(kind, regie, port, code, password=False):
+def install_command(kind, regie, port, code, installation_fingerprint, password=False):
     if kind == "windows":
-        return command_windows(regie, port, code)
-    return command_linux(kind, regie, port, code, password)
+        return command_windows(regie, port, code, installation_fingerprint)
+    return command_linux(kind, regie, port, code, installation_fingerprint, password)
 
 
 class Deployments:
@@ -135,7 +141,8 @@ class Deployments:
         self.executor = ThreadPoolExecutor(max_workers=MAX_JOBS, thread_name_prefix="deploy-ndi")
         self.jobs = {}
 
-    def start(self, owner, screen, host, user, fingerprint, kind, regie, port, code, sudo_password=""):
+    def start(self, owner, screen, host, user, fingerprint, kind, regie, port, code,
+              installation_fingerprint, sudo_password=""):
         host, regie = validate_ipv4(host), validate_ipv4(regie)
         if host == regie:
             raise ValueError("Le lecteur ne peut pas utiliser l'adresse de la régie.")
@@ -149,6 +156,8 @@ class Deployments:
             raise ValueError("Code d'association invalide.")
         if kind not in ("windows", "ubuntu", "pi"):
             raise ValueError("Type de lecteur invalide.")
+        if not isinstance(installation_fingerprint, str) or not SAFE_ID.fullmatch(installation_fingerprint):
+            raise ValueError("Empreinte de l'installation absente. Recrée un code d'association depuis la régie.")
         if not isinstance(sudo_password, str) or len(sudo_password) > 256 or any(
                 ord(char) < 32 for char in sudo_password):
             raise ValueError("Mot de passe sudo invalide.")
@@ -157,7 +166,7 @@ class Deployments:
         key = ssh_identity()
         if not key.is_file():
             raise ValueError("La clé SSH privée de la régie est introuvable.")
-        command = install_command(kind, regie, port, code, bool(sudo_password))
+        command = install_command(kind, regie, port, code, installation_fingerprint, bool(sudo_password))
         import secrets
         identifier = secrets.token_urlsafe(22)
         with self.lock:
