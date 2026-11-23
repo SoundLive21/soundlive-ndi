@@ -54,8 +54,9 @@ def request_reboot(client, kind):
                 return "failed"
             time.sleep(0.1)
         return "unconfirmed"
-    except (OSError, EOFError, RuntimeError):
+    except Exception:
         # Linux peut fermer SSH immédiatement lorsque systemd redémarre.
+        # Paramiko peut remonter une SSHException sans héritage de RuntimeError.
         # Si l'appel a été envoyé, ne pas traiter la coupure comme un échec
         # avéré, mais ne pas prétendre non plus que le reboot est confirmé.
         return "unconfirmed" if sent else "failed"
