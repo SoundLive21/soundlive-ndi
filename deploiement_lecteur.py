@@ -70,6 +70,7 @@ if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
 $temporary = Join-Path $env:TEMP ('soundlive-ndi-deploy-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temporary -Force | Out-Null
 try {
+    $env:SOUNDLIVE_DEPLOY_REMOTE = '1'
     & git.exe clone --depth 1 --single-branch """+ps(REPOSITORY)+""" (Join-Path $temporary 'kit')
     if ($LASTEXITCODE -ne 0) { throw 'Clonage du dépôt GitHub impossible.' }
     $kit = Join-Path $temporary 'kit'
