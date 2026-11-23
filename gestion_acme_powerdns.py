@@ -151,6 +151,13 @@ def configure(folder, domain, zone, api_url, api_key, email,
     return domain
 
 
+def disable_automatic(folder):
+    """Arrête les prochaines émissions ACME sans effacer les certificats existants."""
+    folder = Path(folder)
+    (folder / FILE).unlink(missing_ok=True)
+    update_status(folder, "disabled", "Renouvellement automatique PowerDNS désactivé.")
+
+
 def public_config(folder):
     config = get_config(folder)
     if not config:
