@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.92** et le client **1.4.41**.
+Ce kit contient la régie **1.4.93** et le client **1.4.41**.
 
 ## Installer et lancer la régie
 
@@ -498,6 +498,54 @@ Les commandes modifient les mêmes réglages que le lanceur. Tu peux retirer
 l’autorisation depuis le lanceur. Elle expire à sa fermeture. L’arrêt de la régie coupe
 l’accès à la console web. Le DHCP déjà démarré continue de servir les écrans
 tant que le lanceur reste ouvert.
+
+### Déployer un nouveau lecteur depuis la régie (1.4.93)
+
+Cette procédure évite de recopier manuellement le ZIP et l'intégralité de la
+commande d'installation sur chaque nouveau PC. Elle nécessite une **première
+préparation SSH locale** sur le nouveau lecteur, puis le déploiement se lance
+depuis le tableau.
+
+1. Sur la régie, active l'**accès distant HTTPS** (port TCP **8766**). Depuis
+   le nouveau lecteur, ouvre `https://IP_DE_LA_REGIE:8766/addsshkey` et
+   connecte-toi au tableau avec les identifiants de la régie. Le nom
+   `/addsshkey` est disponible uniquement aux utilisateurs authentifiés.
+2. Sur la page, sélectionne les instructions Ubuntu/Raspberry Pi OS ou
+   Windows. Copie et exécute la commande **localement sur le lecteur**.
+   Elle installe OpenSSH et autorise uniquement la **clé publique** de la
+   régie. La clé privée reste exclusivement sur le PC de régie.
+3. Sur le lecteur, relève son IPv4, le compte SSH utilisé et l'empreinte
+   **SHA256 de sa clé hôte**. Pour Linux :
+   `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`. Pour Windows,
+   regarde dans `C:\ProgramData\ssh`.
+4. Dans la console SoundLive-NDI, **Ajouter un écran**, choisis Windows,
+   Ubuntu ou Raspberry Pi, puis crée le code d'association. Dans la fiche
+   de ce nouvel écran (statut **En attente**), clique sur
+   **Déployer via SSH**. Saisis l'IPv4 du lecteur, le compte SSH,
+   l'empreinte vérifiée et l'IPv4 locale de la régie utilisée par les écrans.
+5. Clique **Déployer**. La régie ouvre une connexion SSH avec **vérification
+   obligatoire de l'empreinte**, clone le dépôt public officiel
+   `https://github.com/SoundLive21/soundlive-ndi.git` dans un répertoire
+   temporaire sur le lecteur, puis lance l'installation de ce système.
+   La console affiche le journal et le code de retour.
+   Pour les installations Linux, tu peux fournir temporairement le mot de
+   passe sudo dans la fenêtre : il est envoyé par HTTPS et SSH, n'est ni
+   sauvegardé ni ajouté aux arguments de la commande. Le rafraîchissement
+   de l'autorisation sudo est limité à la durée du déploiement.
+
+**Prérequis :** Internet et Git sur le nouveau lecteur, le port SSH TCP 22
+accessible depuis la régie, et un compte autorisé à installer des logiciels.
+Sous Windows, le compte SSH doit être administrateur, Git/Python/Tcl-Tk et le
+runtime NDI/SDL2 sont nécessaires. L'installation Windows lancée par SSH
+n'ouvre pas les assistants VNC et Autologon : configure ces interfaces
+localement après déploiement si nécessaire. Sur Linux, le serveur VNC
+peut également demander une configuration locale initiale.
+
+Le code d'association est créé pour 15 minutes avant le lancement du
+déploiement et prolongé pendant une installation SSH en cours, car
+l'installation du SDK NDI sur un Pi peut être longue. Il ne faut pas
+publier le code, le mot de passe sudo, ni la clé privée SSH. La page
+`/addsshkey` ne transmet qu'une clé publique.
 
 ### Lancer une commande SSH sur plusieurs lecteurs
 
