@@ -17,7 +17,7 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 import traceback
 import webbrowser
 
@@ -465,6 +465,9 @@ class Launcher:
             row=3, column=0, columnspan=3, sticky="w", pady=(2, 0))
         self.generate = ttk.Button(setup, text="Générer un nouveau mot de passe", command=self.generate_password)
         self.generate.grid(row=4, column=1, sticky="w", pady=(8, 0))
+        self.acme_button = ttk.Button(setup, text="Certificat ACME / DNS / IP publique…",
+                                      command=self.configure_acme_dialog)
+        self.acme_button.grid(row=5, column=1, sticky="w", pady=(8, 0))
 
         actions = ttk.Frame(panel)
         actions.grid(row=3, sticky="ew", pady=12)
@@ -669,7 +672,7 @@ class Launcher:
         editable = stopped and self.remote.get()
         self.enabled.configure(state="normal" if stopped else "disabled")
         self.selector.configure(state="readonly" if editable else "disabled")
-        for widget in (self.reload, self.entry, self.reveal, self.generate):
+        for widget in (self.reload, self.entry, self.reveal, self.generate, self.acme_button):
             widget.configure(state="normal" if editable else "disabled")
         self.start_button.configure(state="normal" if stopped else "disabled")
         self.stop_button.configure(state="normal" if self.regie and not self.busy else "disabled")
@@ -1050,6 +1053,78 @@ class Launcher:
         ttk.Button(panel, text="Fermer", command=box.destroy).pack(side="right")
         box.grab_set()
         self.window.wait_window(box)
+
+    def configure_acme_dialog(self):
+        """Configurer le chargement des PEM obtenus par un client ACME externe."""
+        if self.regie is not None or self.busy:
+            return
+        from certificats_acme import (certificate_configuration, configure_certificate,
+                                       disable_certificate)
+        folder = self.tableau.REMOTE_ACCESS
+        try:
+            current = certificate_configuration(folder) or {}
+        except (OSError, ValueError) as error:
+            messagebox.showerror("Certificat ACME", str(error), parent=self.window)
+            return
+        dialog = tk.Toplevel(self.window)
+        dialog.title("Certificat public ACME · accès régie")
+        dialog.transient(self.window)
+        panel = ttk.Frame(dialog, padding=18)
+        panel.pack(fill="both", expand=True)
+        ttk.Label(panel, text="Certificat délivré et renouvelé par un client ACME externe.",
+                  wraplength=600).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 12))
+        ttk.Label(panel, text="Le serveur reste accessible uniquement sur le LAN (port 8766).",
+                  wraplength=600).grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        identifier = tk.StringVar(value=current.get("identifier", ""))
+        chain = tk.StringVar(value=current.get("fullchain", ""))
+        key = tk.StringVar(value=current.get("private_key", ""))
+        panel.columnconfigure(1, weight=1)
+        for row, label, var in (
+                (2, "Nom DNS public ou IPv4/IPv6 publique", identifier),
+                (3, "Chaîne certificat fullchain.pem", chain),
+                (4, "Clé privée privkey.pem", key)):
+            ttk.Label(panel, text=label).grid(row=row, column=0, sticky="w", pady=5, padx=(0, 8))
+            ttk.Entry(panel, width=58, textvariable=var).grid(row=row, column=1, sticky="ew", pady=5)
+            if row in (3, 4):
+                def browse(target=var):
+                    filename = filedialog.askopenfilename(parent=dialog, title="Choisir le PEM",
+                                      filetypes=[("Certificats PEM", "*.pem"), ("Tous les fichiers", "*")])
+                    if filename:
+                        target.set(filename)
+                ttk.Button(panel, text="Parcourir…", command=browse).grid(
+                    row=row, column=2, padx=(8, 0), pady=5)
+        ttk.Label(panel, text="Pour les IP privées (192.168.x.x / 10.x.x.x), utilise plutôt un nom DNS public validé par DNS-01. "
+                  "Le certificat doit déjà être émis et ses PEM renouvelés automatiquement.",
+                  wraplength=620).grid(row=5, column=0, columnspan=3, sticky="w", pady=(6, 12))
+        actions = ttk.Frame(panel)
+        actions.grid(row=6, column=0, columnspan=3, sticky="ew")
+        def enable():
+            try:
+                name = configure_certificate(folder, identifier.get().strip(),
+                                             chain.get().strip(), key.get().strip())
+            except (OSError, ValueError) as error:
+                messagebox.showerror("Certificat ACME", str(error), parent=dialog)
+                return
+            dialog.destroy()
+            messagebox.showinfo("Certificat ACME",
+                f"Certificat configuré pour {name}. Démarre la régie pour l'activer. "
+                "Les renouvellements de ces PEM seront ensuite chargés automatiquement.",
+                parent=self.window)
+        def disable():
+            if not messagebox.askyesno("Revenir au certificat local",
+                        "Revenir à l’autorité locale SoundLive au prochain démarrage ?",
+                        parent=dialog):
+                return
+            try:
+                disable_certificate(folder)
+            except OSError as error:
+                messagebox.showerror("Certificat ACME", str(error), parent=dialog)
+                return
+            dialog.destroy()
+        ttk.Button(actions, text="Appliquer", command=enable).pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="Certificat local", command=disable).pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="Fermer", command=dialog.destroy).pack(side="right")
+        dialog.grab_set()
 
     def open_certificate_folder(self):
         folder = self.tableau.REMOTE_ACCESS
