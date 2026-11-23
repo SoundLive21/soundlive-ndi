@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.97** et le client **1.4.41**.
+Ce kit contient la régie **1.4.98** et le client **1.4.41**.
 
 ## Installer et lancer la régie
 
@@ -191,6 +191,77 @@ l'écoute sur l'interface privée du réseau écrans. Il ne suffit pas qu'un
 fichier PEM comporte le bon DNS pour être publiquement approuvé : il doit
 provenir d'une AC reconnue par les navigateurs. Ne publie jamais les clés
 privées PEM ni les identifiants API DNS dans GitHub.
+
+### ACME automatique avec l'API PowerDNS (régie 1.4.98)
+
+La régie peut maintenant **obtenir et renouveler elle-même** un certificat
+Let's Encrypt pour un **nom DNS public**, avec l'API HTTP JSON du serveur
+PowerDNS faisant autorité sur la zone. Ce fonctionnement est distinct du
+mode PEM externe décrit ci-dessus. La validation DNS-01 ne demande aucune
+ouverture des ports Internet 80, 443 ou 8766 sur la régie.
+
+Sur Windows :
+1. Dans le lanceur, active l'accès distant HTTPS sur l'**IPv4 privée**
+   de la régie et initialise-le une première fois si nécessaire. Arrête
+   ensuite la régie.
+2. Clique **Certificat ACME / DNS / IP publique…**, puis
+   **Automatiser via PowerDNS…**.
+3. Renseigne le **nom DNS** du certificat (p. ex. `regie.exemple.fr`),
+   la **zone** PowerDNS (`exemple.fr`), l'URL HTTPS de l'API Authoritative
+   (`https://serveur-dns:8081`), l'identifiant serveur (généralement
+   `localhost`), la clé API **X-API-Key** et l'adresse e-mail ACME.
+4. Accepte les conditions de Let's Encrypt, puis clique
+   **Vérifier PowerDNS et obtenir le certificat**. La régie vérifie la zone,
+   crée temporairement le TXT `_acme-challenge.regie.exemple.fr`,
+   attend sa visibilité dans le DNS public, fait valider le challenge et
+   installe la chaîne et la clé TLS.
+5. Démarre la régie. Son HTTPS sur le port privé **8766** présente le
+   certificat public et utilise le nom DNS pour le lien et le QR code.
+   Les écrans et téléphones du LAN doivent **résoudre ce DNS vers l'IPv4
+   privée de la régie** via le DNS local ou un DNS partagé.
+
+**Prérequis DNS :** la zone PowerDNS doit être réellement **autoritaire
+dans les DNS publics** pour le domaine utilisé, ou le TXT doit être
+délégué correctement. L'API ne fonctionne pas avec un simple résolveur
+PowerDNS Recursor. La clé API doit avoir l'autorisation de consulter et
+modifier la zone concernée. Les commandes `EXTEND` et `PRUNE` ne sont
+disponibles qu'à partir de PowerDNS Authoritative **4.9.12 / 5.0.2** :
+ces opérations ajoutent et retirent le seul enregistrement TXT du
+challenge sans écraser les autres enregistrements.
+
+**Protection des secrets :** sous Windows, la clé d'API PowerDNS est
+chiffrée via **DPAPI, liée au compte Windows qui lance la régie**.
+La clé et les clés privées ACME/TLS sont conservées dans
+`.soundlive-acces/` (exclu de Git). Sous Linux, l'accès aux fichiers
+est restreint au compte utilisateur. Ne déplace pas le fichier DPAPI
+vers un autre compte Windows : la clé API ne serait plus déchiffrable.
+N'indique jamais cette clé dans les messages ni sur GitHub.
+
+**Renouvellement :** lorsque la régie HTTPS fonctionne, elle vérifie
+son certificat environ toutes les **6 heures** et renouvelle s'il
+expire dans moins de **25 jours**. Elle charge les nouveaux PEM à la
+prochaine connexion HTTPS, sans couper les sessions en cours.
+Si la demande échoue, le dernier certificat TLS chargé reste en service
+et le statut de l'opération est conservé dans
+`.soundlive-acces/acme-powerdns-status.json`. Pour un certificat valide
+sans interruption, laisse la régie en fonctionnement ou relance-la
+suffisamment souvent avant l'expiration.
+
+**Mise en garde :** ne donne pas à la clé PowerDNS plus de droits
+que nécessaire ; restreins l'accès à son API par pare-feu ou VPN.
+La régie n'expose toujours pas le port 8766 à Internet.
+Le certificat de test (staging), si tu l'actives, n'est pas reconnu
+par les navigateurs ; laisse ce réglage désactivé en production.
+
+### Fenêtre « Identifier les écrans » (régie 1.4.98)
+
+Dans **Informations réseau de la régie**, clique sur
+**Identifier les écrans…**. Une fenêtre liste tous les lecteurs associés
+avec leur état ; coche ceux à repérer, puis clique
+**Afficher sur la sélection**. Le nom et le groupe apparaissent sur
+chaque écran physique. Tu peux ensuite cliquer **Masquer sur la sélection**
+ou **Tout masquer**. Cette fenêtre utilise le même affichage intégré
+que le bouton d'identification individuel de chaque écran.
 
 ### Piloter depuis un autre PC, une tablette ou un téléphone
 
