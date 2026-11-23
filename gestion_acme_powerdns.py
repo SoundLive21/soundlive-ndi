@@ -123,8 +123,16 @@ def configure(folder, domain, zone, api_url, api_key, email,
         raise ValueError("La validation PowerDNS DNS-01 exige un nom de domaine, pas une adresse IP.")
     zone = validate_zone(zone, domain)
     api_url = validate_powerdns_url(api_url)
-    if not isinstance(api_key, str) or not api_key or len(api_key) > 2048:
-        raise ValueError("Renseigne une clé API PowerDNS valide.")
+    if not isinstance(api_key, str) or len(api_key) > 2048:
+        raise ValueError("Clé API PowerDNS invalide.")
+    previous = get_config(folder) if Path(folder).is_dir() else None
+    if not api_key:
+        if not previous:
+            raise ValueError("Renseigne une clé API PowerDNS pour la première activation.")
+        if (previous["api_url"] != api_url or previous["zone"] != zone
+                or previous["server_id"] != server_id):
+            raise ValueError("Renseigne de nouveau la clé API si tu changes de serveur ou de zone.")
+        api_key = _restore_secret(previous["secret"])
     if (not isinstance(email, str) or len(email) > 250 or
             not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)):
         raise ValueError("Adresse e-mail Let's Encrypt invalide.")
@@ -257,7 +265,13 @@ class RenewalService:
                     renew_once(self.folder)
                 except Exception:
                     # Aucun secret ou trace brute d'API ne doit apparaître.
-                    pass
+                    try:
+                        state = read_status(self.folder)
+                        if state.get("state") != "failed":
+                            update_status(self.folder, "failed",
+                                "Renouvellement interrompu. Vérifie le réseau et PowerDNS.")
+                    except OSError:
+                        pass
                 self.stop_event.wait(CHECK_SECONDS)
         self.thread = threading.Thread(target=worker, name="soundlive-acme-powerdns",
                                        daemon=True)
