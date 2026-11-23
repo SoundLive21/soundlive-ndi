@@ -182,9 +182,12 @@ def main():
     if player != installed:
         shutil.copy2(player, installed)
     subprocess.run([str(installed), "--sources"], check=True, timeout=15)
-    if not args.acces_deja_prepare and (not args.mettre_a_jour or args.empreinte_regie):
+    remote_deploy = os.environ.get("SOUNDLIVE_DEPLOY_REMOTE") == "1"
+    if not remote_deploy and not args.acces_deja_prepare and (not args.mettre_a_jour or args.empreinte_regie):
         command = remote_access_command()
         subprocess.run([*command, str(ROOT / "installer-bureau-distant-windows.ps1"), "-ActiverRdp"], check=True)
+    elif remote_deploy:
+        print("Déploiement SSH : configuration interactive VNC/RDP à finaliser localement si nécessaire.")
     if args.empreinte_regie:
         install_regie_access(args.serveur, args.empreinte_regie, app)
     command = ["verifier"] if args.mettre_a_jour else ["associer"]
@@ -219,7 +222,7 @@ def main():
     if not session.is_file():
         raise ValueError("Script de session manquant : configurer-session-lecteur-windows.ps1")
     command = remote_access_command()
-    options = ["-SansAssistantAutologon"] if args.mettre_a_jour else []
+    options = ["-SansAssistantAutologon"] if args.mettre_a_jour or remote_deploy else []
     subprocess.run([*command, str(session), *options], check=True)
     print("Lecteur installé. Redémarre Windows après configuration de l'autologin.")
 
