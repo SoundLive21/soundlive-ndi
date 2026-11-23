@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>SoundLive-NDI · Préparer un lecteur SSH</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,Arial,sans-serif;background:#11151d;color:#f1f5fa}
+body{max-width:950px;margin:3rem auto;padding:0 1rem;line-height:1.6}
+h1,h2{line-height:1.2}h1{font-size:2rem;color:#b3cfff}
+section{background:#1d2430;padding:1.25rem;border:1px solid #48566c;border-radius:12px;margin:1.25rem 0}
+button{background:#3864b7;color:white;padding:.7rem 1.2rem;border:0;border-radius:7px;cursor:pointer;margin-bottom:.6rem}
+button:hover{background:#507ed0}
+pre{background:#101720;border:1px solid #36445e;border-radius:8px;padding:1rem;white-space:pre-wrap;overflow-wrap:anywhere;overflow-x:auto}
+code{overflow-wrap:anywhere}p{max-width:80ch}
+.note{color:#ffda89} .small{font-size:.93rem;color:#c5d1df} a{color:#b3d5ff}
+</style>
+</head>
+<body>
+<h1>Préparer un nouveau lecteur SoundLive-NDI</h1>
+<p>Cette page transmet uniquement <strong>la clé SSH publique</strong> de ta régie.
+Elle ne donne pas accès à sa clé privée. Exécute la préparation <strong>sur le nouveau lecteur</strong>,
+puis clique sur <strong>Déployer</strong> dans la fiche de l'écran créé dans la régie.</p>
+<p class="note">Il faut être connecté à la régie en HTTPS pour consulter cette page.
+N'exécute pas ces commandes sur un ordinateur que tu ne souhaites pas administrer.</p>
+
+<section><h2>Clé publique de la régie</h2>
+<pre id="key">__SSH_PUBLIC_KEY__</pre>
+<button data-copy="key">Copier la clé</button></section>
+
+<section><h2>Ubuntu Desktop et Raspberry Pi OS</h2>
+<p>Dans le terminal du <strong>nouveau lecteur</strong>, avec le compte qui affichera les vidéos :</p>
+<pre id="linux">__LINUX_COMMAND__</pre>
+<button data-copy="linux">Copier la préparation Linux</button>
+<p class="small">Cette commande installe OpenSSH et Git, autorise la régie dans
+<code>~/.ssh/authorized_keys</code>, démarre le serveur SSH et affiche
+l'empreinte de la clé hôte du lecteur. Note le nom d'utilisateur, l'IPv4 et l'empreinte.</p>
+<p class="note">Pour une installation complètement automatique via SSH, le compte Linux
+doit pouvoir exécuter les opérations système de l'installateur sans demande de
+mot de passe (<code>sudo -n</code>). Sur un compte qui n'a pas cette autorisation,
+le déploiement s'arrêtera avec une erreur explicite. N'accorde pas des droits
+<code>NOPASSWD:ALL</code> à un compte personnel ou non dédié.</p></section>
+
+<section><h2>Windows 10 ou 11</h2>
+<p>Ouvre <strong>PowerShell en administrateur</strong> sur le nouveau lecteur,
+puis exécute :</p>
+<pre id="windows">__WINDOWS_COMMAND__</pre>
+<button data-copy="windows">Copier la préparation Windows</button>
+<p class="small">Cette commande installe le serveur OpenSSH, ajoute la clé au fichier
+<code>administrators_authorized_keys</code>, applique les permissions nécessaires et ouvre
+le pare-feu Windows sur TCP 22. Le compte choisi doit être administrateur pour
+l'installation distante. <strong>Git for Windows</strong>, Python et le runtime NDI
+peuvent être nécessaires pour la suite.</p></section>
+
+<section><h2>Finaliser depuis la régie</h2>
+<ol>
+<li>Dans la régie, clique sur <strong>Ajouter un écran</strong> puis crée le lecteur
+Raspberry Pi, Ubuntu ou Windows. L'écran apparaît en attente avec un code valable 15 minutes.</li>
+<li>Sur le nouveau lecteur, exécute la préparation SSH ci-dessus et relève son adresse IPv4
+et l'empreinte <code>SHA256:…</code> de la clé SSH hôte.</li>
+<li>Depuis la fiche <strong>En attente</strong> du tableau, clique sur <strong>Déployer via SSH</strong>.</li>
+<li>Indique l'IPv4 du lecteur, son utilisateur SSH, l'empreinte vérifiée et
+l'IPv4 du réseau écrans de la régie.</li>
+<li>La régie vérifie l'empreinte SSH, clone le dépôt GitHub officiel sur le lecteur
+et exécute l'installateur. L'association utilise le code du tableau.</li>
+</ol>
+<p class="note">Le nouveau lecteur doit pouvoir accéder à GitHub pour cloner le dépôt.
+Un Raspberry Pi neuf peut devoir télécharger et compiler le SDK NDI.
+Sous Windows, l'installation exige les prérequis du moteur NDI et un compte SSH
+administrateur. Cette préparation donne à la régie un accès SSH à ce compte :
+n'utilise cette méthode que pour des lecteurs que tu administres.</p>
+</section>
+<p><a href="/">Retour à la régie</a></p>
+<script>
+for (const button of document.querySelectorAll("button[data-copy]")) {
+  button.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(document.getElementById(button.dataset.copy).textContent);
+      button.textContent = "Copié";
+      setTimeout(() => button.textContent = "Copier " + ({key:"la clé",linux:"la préparation Linux",
+        windows:"la préparation Windows"}[button.dataset.copy]), 2000);
+    } catch {
+      button.textContent = "Sélectionne puis copie le texte manuellement";
+    }
+  });
+}
+</script>
+</body>
+</html>
