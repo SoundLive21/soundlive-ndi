@@ -34,22 +34,23 @@ assert "administrators_authorized_keys" in page
 assert "Déployer" in page
 print("OK: page de préparation SSH pour Ubuntu/Pi/Windows.")
 
-linux = command_linux("ubuntu", "192.168.56.1", 8765, "CODE_1234")
+FINGERPRINT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+linux = command_linux("ubuntu", "192.168.56.1", 8765, "CODE_1234", FINGERPRINT)
 assert "git clone --depth 1" in linux
 assert "SoundLive21/soundlive-ndi.git" in linux
-assert "--plateforme ubuntu http://192.168.56.1:8765 CODE_1234" in linux
+assert "--plateforme ubuntu --empreinte-regie " + FINGERPRINT + " http://192.168.56.1:8765 CODE_1234" in linux
 assert "sudo -n" in linux
 assert 'mktemp -d' in linux
-pi = command_linux("pi", "192.168.56.1", 8765, "CODE_1234")
+pi = command_linux("pi", "192.168.56.1", 8765, "CODE_1234", FINGERPRINT)
 assert "--plateforme pi" in pi
 for kind in ("windows", "invalid"):
     try:
-        command_linux(kind, "192.168.56.1", 8765, "CODE_1234")
+        command_linux(kind, "192.168.56.1", 8765, "CODE_1234", FINGERPRINT)
     except ValueError:
         pass
     else:
         raise AssertionError("Plateforme Linux inattendue acceptée")
-linux_sudo = command_linux("ubuntu", "192.168.56.1", 8765, "CODE_1234", True)
+linux_sudo = command_linux("ubuntu", "192.168.56.1", 8765, "CODE_1234", FINGERPRINT, True)
 assert "__SOUNDLIVE_SUDO_READY__" in linux_sudo
 assert "stty -echo" in linux_sudo
 assert "sudo -S -p '' -v" in linux_sudo
@@ -59,15 +60,30 @@ assert "secret-NEVER-IN-COMMAND" not in linux_sudo
 print("OK: sudo ponctuel par SSH, sans mot de passe dans la commande distante.")
 print("OK: commande de déploiement Linux avec clonage Git officiel.")
 
-encoded = command_windows("192.168.56.1", 8765, "CODE_1234").split()[-1]
+encoded = command_windows("192.168.56.1", 8765, "CODE_1234", FINGERPRINT).split()[-1]
 powershell = b64decode(encoded).decode("utf-16le")
 assert "Git for Windows requis" in powershell
 assert "soundlive-ndi.git" in powershell
 assert "installer-client.cmd" in powershell
 assert "CODE_1234" in powershell
+assert "'--empreinte-regie' '" + FINGERPRINT + "'" in powershell
 assert "192.168.56.1:8765" in powershell
 assert "Administrateur" not in powershell or "administrateur" in powershell
-print("OK: commande de déploiement Windows PowerShell encodée.")
+print("OK: commande de déploiement Windows PowerShell encodée avec empreinte.")
+for invalid in ("", "a" * 63, "z" * 64):
+    try:
+        command_linux("ubuntu", "192.168.56.1", 8765, "CODE_1234", invalid)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Empreinte Linux invalide acceptée")
+    try:
+        command_windows("192.168.56.1", 8765, "CODE_1234", invalid)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Empreinte Windows invalide acceptée")
+print("OK: les empreintes manquantes ou malformées sont refusées.")
 
 for filename in ("tableau.py", "versions_regie.py", "page_ssh.py",
                  "deploiement_lecteur.py"):
