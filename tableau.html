@@ -294,6 +294,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
     <div class="regie-details">
       <button type="button" id="regie-system-open">Informations système de la régie</button>
       <button type="button" id="network-open">Gestion réseau</button>
+      <button type="button" id="identify-manager-open" aria-haspopup="dialog" disabled>Identifier les écrans…</button>
       <button type="button" id="identify-all" aria-pressed="false" disabled>Identifier tous les écrans</button>
       <button type="button" id="ssh-group-open" aria-haspopup="dialog" disabled>SSH groupé</button>
     </div>
@@ -308,6 +309,26 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
   <div id="screens"></div>
 </main>
 <footer class="project-credits">© 2026 Société SoundLive · Auteur : DUVERNOY Matthieu &amp; ChatGPT · <a href="mailto:contact@soundlive.fr">contact@soundlive.fr</a></footer>
+<dialog id="identify-manager" aria-labelledby="identify-manager-title">
+  <div class="dialog-body">
+    <h2 id="identify-manager-title">Identifier les écrans</h2>
+    <p>Affiche le nom et le groupe sur les écrans physiques pour les repérer dans la salle.
+       L’identification reste visible tant qu’elle est activée.</p>
+    <div class="actions">
+      <button type="button" id="identify-select-all">Tout sélectionner</button>
+      <button type="button" id="identify-unselect-all">Tout désélectionner</button>
+    </div>
+    <div id="identify-manager-list" role="group" aria-label="Liste des écrans"
+         style="display:grid;gap:8px;max-height:45vh;overflow:auto;margin:12px 0"></div>
+    <p id="identify-manager-message" class="small" role="status"></p>
+    <div class="actions">
+      <button type="button" class="primary" id="identify-selected-show">Afficher sur la sélection</button>
+      <button type="button" id="identify-selected-hide">Masquer sur la sélection</button>
+      <button type="button" id="identify-hide-all">Tout masquer</button>
+      <button type="button" id="identify-manager-close">Fermer</button>
+    </div>
+  </div>
+</dialog>
 <dialog id="remote-connections" aria-labelledby="connections-title">
   <form method="dialog" class="dialog-body">
     <h2 id="connections-title">Connexions à la régie distante</h2>
@@ -800,12 +821,18 @@ const connectionsDialog = document.querySelector("#remote-connections");
 const dialog = document.querySelector("#pair");
 const cards = new Map();
 const identifyAll = document.querySelector("#identify-all");
+const identifyManagerOpen = document.querySelector("#identify-manager-open");
+const identifyManager = document.querySelector("#identify-manager");
+const identifyManagerList = document.querySelector("#identify-manager-list");
+const identifyManagerMessage = document.querySelector("#identify-manager-message");
 let identifyBusy = false;
 let identifyRows = [];
 function identifyControls() {
   const active = identifyRows.filter(row => row.identify).length;
   const all = identifyRows.length > 0 && active === identifyRows.length;
   identifyAll.disabled = identifyBusy || !identifyRows.length;
+  identifyManagerOpen.disabled = identifyBusy || !identifyRows.length;
+  if (identifyManager.open) renderIdentifyManager();
   identifyAll.setAttribute("aria-pressed", all ? "true" : active ? "mixed" : "false");
   identifyAll.textContent = all ? "Masquer toutes les identifications" : "Identifier tous les écrans";
   for (const card of cards.values()) {
@@ -826,6 +853,68 @@ async function changeIdentification(enabled, id) {
   }
 }
 identifyAll.onclick = action(() => changeIdentification(!identifyControls()));
+function renderIdentifyManager() {
+  const selected = new Set([...identifyManagerList.querySelectorAll('input[type="checkbox"]:checked')].map(x => x.value));
+  const firstOpen = !identifyManagerList.hasChildNodes();
+  identifyManagerList.replaceChildren(...identifyRows.map(row => {
+    const wrapper = document.createElement("label");
+    wrapper.className = "check";
+    wrapper.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:14px;padding:8px 12px;border:1px solid #526076;border-radius:7px";
+    const left = document.createElement("span");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = row.id;
+    checkbox.checked = firstOpen || selected.has(row.id);
+    checkbox.disabled = identifyBusy;
+    const name = document.createElement("strong");
+    name.textContent = row.name;
+    left.append(checkbox, " ", name);
+    const state = document.createElement("small");
+    state.textContent = !row.online ? "Hors ligne" : row.identify ? "Identification activée" : "En ligne";
+    state.style.color = row.identify ? "#a1e8b4" : "#c5d1df";
+    wrapper.append(left,state);
+    return wrapper;
+  }));
+  identifyManager.querySelectorAll("button").forEach(button => {
+    button.disabled = identifyBusy;
+  });
+}
+identifyManagerOpen.onclick = () => {
+  identifyManagerList.replaceChildren();
+  identifyManagerMessage.textContent = "";
+  identifyManager.showModal();
+  renderIdentifyManager();
+};
+document.querySelector("#identify-manager-close").onclick = () => identifyManager.close();
+document.querySelector("#identify-select-all").onclick = () =>
+  identifyManagerList.querySelectorAll('input[type="checkbox"]').forEach(input => input.checked = true);
+document.querySelector("#identify-unselect-all").onclick = () =>
+  identifyManagerList.querySelectorAll('input[type="checkbox"]').forEach(input => input.checked = false);
+async function identifySelection(enabled, all = false) {
+  if (identifyBusy) return;
+  const ids = all ? identifyRows.map(row => row.id)
+    : [...identifyManagerList.querySelectorAll('input[type="checkbox"]:checked')].map(input => input.value);
+  if (!ids.length) {
+    identifyManagerMessage.textContent = "Sélectionne au moins un écran.";
+    return;
+  }
+  identifyBusy = true;
+  identifyControls();
+  try {
+    const response = await call("/api/identify", {enabled,ids});
+    identifyManagerMessage.textContent = response.count + " écran(s) modifié(s).";
+    await refresh(true);
+  } catch (error) {
+    identifyManagerMessage.textContent = error.message;
+  } finally {
+    identifyBusy = false;
+    identifyControls();
+  }
+}
+document.querySelector("#identify-selected-show").onclick = () => identifySelection(true);
+document.querySelector("#identify-selected-hide").onclick = () => identifySelection(false);
+document.querySelector("#identify-hide-all").onclick = () => identifySelection(false, true);
+
 const previewGrid = document.querySelector("#preview-grid");
 const previewCards = new Map();
 const previewAuto = document.querySelector("#preview-auto");
