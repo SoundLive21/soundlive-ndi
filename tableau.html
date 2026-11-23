@@ -3146,9 +3146,13 @@ deployForm.onsubmit = action(async () => {
       deployOutput.textContent = [result.stdout, result.stderr].filter(Boolean).join("\n");
       deployStatus.textContent = result.message || "Installation en cours…";
       if (result.state !== "running") {
-        deployStatus.textContent += result.state === "done"
-          ? " Le lecteur devrait maintenant s’associer à la régie."
-          : " Consulte le journal ci-dessous.";
+        if (result.state === "done" && result.reboot === "requested") {
+          deployStatus.textContent += " Le lecteur devrait se reconnecter automatiquement après redémarrage.";
+        } else if (result.state === "done" && result.reboot === "unconfirmed") {
+          deployStatus.textContent += " Vérifie que le lecteur redémarre et revient en ligne.";
+        } else if (result.state !== "done") {
+          deployStatus.textContent += " Consulte le journal ci-dessous.";
+        }
         await refresh(true);
         break;
       }
