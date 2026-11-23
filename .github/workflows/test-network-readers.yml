@@ -63,6 +63,7 @@ jobs:
           python3 tests/test-sudo-ssh.py
           python3 tests/test-certificats-acme.py
           python3 tests/test-powerdns-acme.py
+          python3 tests/test-identify-popup.py
           python3 tests/test-desktop-remmina.py
   windows-no-wifi:
     runs-on: windows-latest
