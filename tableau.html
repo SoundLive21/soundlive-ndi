@@ -414,11 +414,15 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
       <label>IPv4 de la régie sur le LAN écrans<input name="regie" placeholder="192.168.56.1" inputmode="decimal" required></label>
       <label>Compte SSH du lecteur<input name="user" value="soundlive" maxlength="64" required spellcheck="false"></label>
       <label>Empreinte SSH du lecteur (SHA256)<input name="fingerprint" placeholder="SHA256:..." maxlength="64" required spellcheck="false"></label>
+      <label id="deploy-sudo-label">Mot de passe sudo du lecteur Linux (facultatif)
+        <input name="sudo_password" type="password" maxlength="256" autocomplete="off" placeholder="Demandé une seule fois si sudo nécessite un mot de passe"></label>
     </div>
     <p class="small">Sur le lecteur Ubuntu/Pi, relève l’empreinte via
       <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code>.
       Windows : consulte <code>C:\ProgramData\ssh</code>.</p>
-    <p class="small">Git et Internet sont requis. Linux demande un accès sudo non interactif.
+    <p class="small">Git et Internet sont requis. Sur Linux, le mot de passe sudo peut
+      être fourni pour cette seule installation ; il transite via HTTPS puis SSH,
+      n’est pas enregistré et ne sera pas affiché dans le journal.
       Windows requiert un compte SSH administrateur et les composants NDI.</p>
     <div class="actions">
       <button type="submit" class="primary">Déployer</button>
@@ -3114,6 +3118,7 @@ function openDeployReader(row, regieAddress) {
   deployingScreen = row.id;
   select(deployReader, "#deploy-reader-title").textContent = "Déployer « " + row.name + " » via SSH";
   deployForm.reset();
+  select(deployReader, "#deploy-sudo-label").hidden = row.kind === "windows";
   deployForm.elements.namedItem("regie").value = regieAddress || "";
   deployStatus.textContent = "Relève l’IPv4 et l’empreinte SHA256 sur le nouveau lecteur.";
   deployOutput.hidden = true;
