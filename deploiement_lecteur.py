@@ -34,17 +34,29 @@ def validate_ipv4(text):
     return str(address)
 
 
-def command_linux(kind, regie, port, code):
+def command_linux(kind, regie, port, code, password=False):
     if kind not in ("ubuntu", "pi"):
         raise ValueError("Type de lecteur Linux invalide.")
     server = f"http://{regie}:{port}"
+    # Le mot de passe sudo éventuel est transmis par le canal SSH après
+    # désactivation de l'écho terminal, jamais dans les arguments de commande.
+    auth = (
+        "stty -echo; printf '__SOUNDLIVE_SUDO_READY__\\n'; "
+        "IFS= read -r soundlive_sudo_password; stty echo; "
+        "printf '%s\\n' \"$soundlive_sudo_password\" | sudo -S -p '' -v >/dev/null; "
+        "unset soundlive_sudo_password; "
+        "(while sleep 45; do sudo -n -v >/dev/null 2>&1 || break; done) >/dev/null 2>&1 & "
+        "SOUNDLIVE_SUDO_REFRESH=$!; "
+    ) if password else ""
     # Chaque déploiement repart d'un dossier temporaire distinct.
-    return ("set -eu; "
+    return ("set -eu; " + auth
             "command -v git >/dev/null || { echo 'Installe git sur ce lecteur.' >&2; exit 20; }; "
             "sudo -n true >/dev/null 2>&1 || { "
             "echo 'Installation automatique : sudo sans demande de mot de passe nécessaire. "
             "Prépare les droits localement sur ce lecteur dédié.' >&2; exit 21; }; "
-            "folder=$(mktemp -d); trap 'rm -rf -- \"$folder\"' EXIT; "
+            "folder=$(mktemp -d); trap 'rm -rf -- \"$folder\"; "
+            "[ -z \"${SOUNDLIVE_SUDO_REFRESH:-}\" ] || "
+            "kill \"$SOUNDLIVE_SUDO_REFRESH\" 2>/dev/null || true' EXIT; "
             "GIT_TERMINAL_PROMPT=0 git clone --depth 1 --single-branch "
             + shlex.quote(REPOSITORY) + ' "$folder/kit"; '
             'cd "$folder/kit"; '
@@ -85,10 +97,10 @@ try {
     return "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + encoded
 
 
-def install_command(kind, regie, port, code):
+def install_command(kind, regie, port, code, password=False):
     if kind == "windows":
         return command_windows(regie, port, code)
-    return command_linux(kind, regie, port, code)
+    return command_linux(kind, regie, port, code, password)
 
 
 class Deployments:
@@ -97,7 +109,7 @@ class Deployments:
         self.executor = ThreadPoolExecutor(max_workers=MAX_JOBS, thread_name_prefix="deploy-ndi")
         self.jobs = {}
 
-    def start(self, owner, screen, host, user, fingerprint, kind, regie, port, code):
+    def start(self, owner, screen, host, user, fingerprint, kind, regie, port, code, sudo_password=""):
         host, regie = validate_ipv4(host), validate_ipv4(regie)
         if host == regie:
             raise ValueError("Le lecteur ne peut pas utiliser l'adresse de la régie.")
@@ -111,10 +123,15 @@ class Deployments:
             raise ValueError("Code d'association invalide.")
         if kind not in ("windows", "ubuntu", "pi"):
             raise ValueError("Type de lecteur invalide.")
+        if not isinstance(sudo_password, str) or len(sudo_password) > 256 or any(
+                ord(char) < 32 for char in sudo_password):
+            raise ValueError("Mot de passe sudo invalide.")
+        if kind == "windows" and sudo_password:
+            raise ValueError("Le mot de passe sudo ne concerne que Linux.")
         key = ssh_identity()
         if not key.is_file():
             raise ValueError("La clé SSH privée de la régie est introuvable.")
-        command = install_command(kind, regie, port, code)
+        command = install_command(kind, regie, port, code, bool(sudo_password))
         import secrets
         identifier = secrets.token_urlsafe(22)
         with self.lock:
@@ -128,7 +145,7 @@ class Deployments:
                 finished = [k for k,v in self.jobs.items() if v["state"] != "running"]
                 if finished:
                     del self.jobs[finished[0]]
-        self.executor.submit(self._run, identifier, host, user, fingerprint, key, command)
+        self.executor.submit(self._run, identifier, host, user, fingerprint, key, command, sudo_password)
         return {"job": identifier}
 
     def status(self, owner, identifier):
@@ -144,7 +161,7 @@ class Deployments:
             field = "stdout" if stream == "out" else "stderr"
             job[field] = (job[field] + raw.decode("utf-8", "replace"))[-MAX_OUTPUT:]
 
-    def _run(self, identifier, host, user, fingerprint, key, command):
+    def _run(self, identifier, host, user, fingerprint, key, command, sudo_password):
         client = None
         outcome = dict(state="failed", message="Échec de connexion ou d'installation.", code=None)
         try:
@@ -155,14 +172,34 @@ class Deployments:
             with self.lock:
                 self.jobs[identifier]["message"] = "Connecté. Téléchargement Git et installation en cours…"
             channel = client.get_transport().open_session(timeout=12)
+            if sudo_password:
+                channel.get_pty(term="xterm", width=120, height=40)
             channel.exec_command(command)
             started = time.monotonic()
+            marker = b"__SOUNDLIVE_SUDO_READY__"
+            buffered = b""
             while True:
                 if channel.recv_ready():
-                    self._append(identifier, "out", channel.recv(8192))
+                    received = channel.recv(8192)
+                    if sudo_password:
+                        buffered += received
+                        if marker in buffered:
+                            before, after = buffered.split(marker, 1)
+                            if before or after:
+                                self._append(identifier, "out", before + after)
+                            channel.sendall((sudo_password + "\\n").encode("utf-8"))
+                            sudo_password = ""
+                            buffered = b""
+                        elif len(buffered) > len(marker):
+                            self._append(identifier, "out", buffered[:-len(marker)])
+                            buffered = buffered[-len(marker):]
+                    else:
+                        self._append(identifier, "out", received)
                 if channel.recv_stderr_ready():
                     self._append(identifier, "err", channel.recv_stderr(8192))
                 if channel.exit_status_ready() and not channel.recv_ready() and not channel.recv_stderr_ready():
+                    if buffered:
+                        self._append(identifier, "out", buffered)
                     code = channel.recv_exit_status()
                     outcome = dict(state="done" if code == 0 else "failed", code=code,
                                    message="Installation terminée." if code == 0
