@@ -17,6 +17,8 @@ on:
       - 'configurer-session-lecteur-windows.ps1'
       - 'versions_regie.py'
       - 'certificats_acme.py'
+      - 'acme_powerdns.py'
+      - 'gestion_acme_powerdns.py'
       - 'acces_regie.py'
       - 'regie-windows.py'
       - 'deploiement_lecteur.py'
@@ -60,6 +62,7 @@ jobs:
           python3 tests/test-deploiement.py
           python3 tests/test-sudo-ssh.py
           python3 tests/test-certificats-acme.py
+          python3 tests/test-powerdns-acme.py
           python3 tests/test-desktop-remmina.py
   windows-no-wifi:
     runs-on: windows-latest
@@ -68,6 +71,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Installer la dépendance ACME sous Windows
+        shell: powershell
+        run: python -m pip install cryptography
       - name: Test PowerShell Windows sans Wi-Fi et analyse AST
         shell: powershell
         run: .\\tests\\test-network-no-wifi.ps1
@@ -77,3 +83,6 @@ jobs:
       - name: Vérifier les commandes Windows de préparation et déploiement SSH
         shell: powershell
         run: .\\tests\\test-page-ssh-windows.ps1
+      - name: Vérifier la protection DPAPI de la clé API PowerDNS
+        shell: powershell
+        run: python tests/test-powerdns-dpapi.py
