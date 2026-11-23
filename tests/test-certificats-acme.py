@@ -64,7 +64,8 @@ with TemporaryDirectory() as directory:
     assert ctx is not None and expiry > datetime.now(timezone.utc)
     assert configure_certificate(root, "regie.exemple.fr", chain, private) == "regie.exemple.fr"
     assert certificate_configuration(root)["fullchain"] == str(chain.resolve())
-    reloadable = ReloadableCertificate(root, "unused")
+    fallback_pem = chain.read_text(encoding="ascii") + private.read_text(encoding="ascii")
+    reloadable = ReloadableCertificate(root, fallback_pem)
     assert reloadable.identifier == "regie.exemple.fr"
     initial_context = reloadable.current()
     print("OK: certificat DNS PEM chargé sans modifier le certificat local.")
@@ -96,7 +97,7 @@ with TemporaryDirectory() as directory:
         raise AssertionError("Certificat SAN différent accepté")
     ipchain, ipkey = generate("1.1.1.1", root, "ip")
     assert configure_certificate(root, "1.1.1.1", ipchain, ipkey) == "1.1.1.1"
-    assert ReloadableCertificate(root, "unused").identifier == "1.1.1.1"
+    assert ReloadableCertificate(root, fallback_pem).identifier == "1.1.1.1"
     print("OK: SAN de certificat IP publique.")
     disable_certificate(root)
     assert certificate_configuration(root) is None
