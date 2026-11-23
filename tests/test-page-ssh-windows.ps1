@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path -Parent $PSScriptRoot)
-$generated = & python -c 'from page_ssh import windows_command, render; print(windows_command("192.168.56.1",8765,"CODE_1234"))'
+$generated = & python -c "from page_ssh import windows_command; print(windows_command('192.168.56.1',8765,'CODE_1234'))"
 if ($LASTEXITCODE -ne 0) { throw 'Génération de la commande Windows impossible.' }
 if ($generated -notmatch '-EncodedCommand ([A-Za-z0-9+/=]+)$') {
     throw 'La commande de déploiement n’utilise pas PowerShell EncodedCommand.'
@@ -14,7 +14,7 @@ if ($errors.Count) {
 }
 Write-Host 'OK: commande de déploiement SSH Windows valide.'
 
-$source = & python -c 'from page_ssh import windows_command; print(windows_command("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAQAB"))'
+$source = & python -c "from page_ssh import windows_command; print(windows_command('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAQAB'))"
 if ($LASTEXITCODE -ne 0) { throw 'Génération de la préparation SSH Windows impossible.' }
 [void][Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$errors)
 if ($errors.Count) {
