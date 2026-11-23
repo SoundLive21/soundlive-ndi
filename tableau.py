@@ -37,6 +37,7 @@ from commun import (APP_NAME, MEDIA_CHUNK, MEDIA_COUNT_LIMIT, MEDIA_DISK_PERCENT
                     options, release_number, ssh_fingerprints, ssh_pairing_proof)
 from diagnostic import Diagnostic, NetworkRates, OsUpdateCheck, desktop_protocol, desktop_services, network_info, os_update_report
 from certificats_acme import configure_certificate, disable_certificate
+from gestion_acme_powerdns import RenewalService, get_config
 from deploiement_lecteur import Deployments, validate_ipv4
 from page_ssh import render as render_ssh_page
 from installation_lecteur import KEYS_PATH, installation_keys, prepare_installations, ssh_access_public
@@ -2037,6 +2038,7 @@ class Regie:
             ROOT / "source-publications.json", SOFTWARE_VERSION)
         self.local_url = f"http://127.0.0.1:{self.server.server_port}"
         self.remote = None
+        self.acme_renewal = None
 
     def start(self, remote_enabled=False):
         try:
@@ -2075,9 +2077,14 @@ class Regie:
             raise
         if self.remote is not None:
             threading.Thread(target=self.remote.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True).start()
+            if get_config(REMOTE_ACCESS):
+                self.acme_renewal = RenewalService(REMOTE_ACCESS)
+                self.acme_renewal.start()
         threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True).start()
 
     def close(self):
+        if self.acme_renewal is not None:
+            self.acme_renewal.stop()
         self.server.terminals.close()
         for server in (self.remote, self.server):
             if server is not None:
