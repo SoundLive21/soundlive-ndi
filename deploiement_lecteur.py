@@ -187,7 +187,7 @@ class Deployments:
                             before, after = buffered.split(marker, 1)
                             if before or after:
                                 self._append(identifier, "out", before + after)
-                            channel.sendall((sudo_password + "\\n").encode("utf-8"))
+                            channel.sendall((sudo_password + "\n").encode("utf-8"))
                             sudo_password = ""
                             buffered = b""
                         elif len(buffered) > len(marker):
