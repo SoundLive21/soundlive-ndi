@@ -131,7 +131,12 @@ def disable_certificate(folder):
 
 
 class ReloadableCertificate:
-    """Retient le dernier contexte TLS valide si un renouvellement échoue."""
+    """Recharge à chaud les PEM, y compris après première émission ACME.
+
+    Le contexte TLS actuellement valide est conservé pendant une rotation
+    incomplète. Si les fichiers expirent et ne sont pas renouvelés, le contexte
+    local SoundLive demeure utilisable comme solution de secours.
+    """
 
     def __init__(self, folder, fallback_pem):
         self.folder = Path(folder)
@@ -141,13 +146,10 @@ class ReloadableCertificate:
         self.identifier = None
         self.expires = None
         self.error = None
-        self.config = certificate_configuration(folder)
-        if self.config is None:
-            self.context = self._fallback_context(fallback_pem)
-        else:
-            self.context, self.expires = check_certificate(**self.config)
-            self.identifier = self.config["identifier"]
-            self.signature = self._signature()
+        self.config = None
+        self.fallback = self._fallback_context(fallback_pem)
+        self.context = self.fallback
+        self.current(force=True)
 
     def _fallback_context(self, pem):
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -160,31 +162,41 @@ class ReloadableCertificate:
             Path(certificate.name).unlink(missing_ok=True)
         return ctx
 
-    def _signature(self):
+    def _signature(self, config):
         def info(filename):
             path = Path(filename)
             stat = path.stat()
             return (stat.st_mtime_ns, stat.st_size)
-        return tuple(info(self.config[key]) for key in ("fullchain", "private_key"))
+        return tuple(info(config[key]) for key in ("fullchain", "private_key"))
 
-    def current(self):
-        if self.config is None:
-            return self.context
-        if monotonic() - self.last_checked < RELOAD_INTERVAL:
+    def current(self, force=False):
+        if not force and monotonic() - self.last_checked < RELOAD_INTERVAL:
             return self.context
         with self.lock:
-            if monotonic() - self.last_checked < RELOAD_INTERVAL:
+            if not force and monotonic() - self.last_checked < RELOAD_INTERVAL:
                 return self.context
             self.last_checked = monotonic()
             try:
-                signature = self._signature()
-                if signature != self.signature:
-                    context, expiry = check_certificate(**self.config)
+                config = certificate_configuration(self.folder)
+                if config is None:
+                    if self.config is not None:
+                        self.context = self.fallback
+                        self.identifier = None
+                        self.expires = None
+                        self.signature = None
+                    self.config = None
+                    self.error = None
+                    return self.context
+                signature = self._signature(config)
+                if config != self.config or signature != self.signature:
+                    context, expiry = check_certificate(**config)
                     self.context = context
                     self.expires = expiry
                     self.signature = signature
+                    self.config = config
+                    self.identifier = config["identifier"]
                     self.error = None
-                    LOGGER.info("Certificat TLS ACME renouvelé et chargé pour %s", self.identifier)
+                    LOGGER.info("Certificat TLS ACME chargé pour %s", self.identifier)
             except (OSError, ValueError, ssl.SSLError) as error:
                 message = str(error)
                 if self.error != message:
