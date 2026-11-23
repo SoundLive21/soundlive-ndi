@@ -65,4 +65,28 @@ assert jobs.jobs["test"]["state"] == "done", jobs.jobs["test"]
 assert PASSWORD not in jobs.jobs["test"]["stdout"] + jobs.jobs["test"]["stderr"]
 print("OK: mot de passe sudo transmis uniquement après marqueur et PTY sans écho.")
 print("OK: secret absent du journal et de la commande distante.")
+
+# Une RuntimeError métier doit être expliquée, jamais masquée par son seul type.
+for detail in deploy.SAFE_SSH_RUNTIME_ERRORS:
+    failure = deploy.deployment_error(RuntimeError(detail), "Authentification SSH")
+    assert detail in failure, failure
+assert "SECRET-NOT-FOR-LOGS" not in deploy.deployment_error(
+    RuntimeError("SECRET-NOT-FOR-LOGS"), "Authentification SSH")
+print("OK: cause SSH lisible, RuntimeError arbitraires masquées.")
+
+# Vérifie que les nouvelles erreurs de connexion sont remontées dans le statut.
+fake_failed = Client()
+jobs.jobs["failed"] = {
+    "owner": ("127.0.0.1", None), "screen": "321", "state": "running",
+    "stdout": "", "stderr": "", "finished": None,
+}
+with patch.dict(sys.modules, {"paramiko": SimpleNamespace(SSHClient=lambda:fake_failed)}):
+    with patch.object(deploy, "connect_client", side_effect=RuntimeError(
+            "Clé refusée. Vérifie le compte SSH et autorise la clé de la régie.")):
+        jobs._run("failed", "192.168.56.21", "soundlive", "SHA256:example",
+                  Path("/unused/private"), "echo hello", "")
+failed = jobs.status(("127.0.0.1", None), "failed")
+assert failed["phase"] == "Authentification SSH"
+assert "Clé refusée" in failed["message"], failed
+print("OK: erreur de clé refusée identifiée avant le lancement de l'installateur.")
 jobs.executor.shutdown(wait=False, cancel_futures=True)
