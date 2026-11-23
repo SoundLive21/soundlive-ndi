@@ -16,6 +16,9 @@ on:
       - 'configurer-session-lecteur-linux.sh'
       - 'configurer-session-lecteur-windows.ps1'
       - 'versions_regie.py'
+      - 'certificats_acme.py'
+      - 'acces_regie.py'
+      - 'regie-windows.py'
       - 'deploiement_lecteur.py'
       - 'page_ssh.py'
       - 'addsshkey.html'
@@ -33,6 +36,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Installer la dépendance de validation des certificats ACME
+        shell: bash
+        run: python3 -m pip install cryptography
       - name: Test Linux sans Wi-Fi et syntaxe Bash
         shell: bash
         run: bash tests/test-network-no-wifi.sh
@@ -50,6 +59,7 @@ jobs:
           python3 tests/test-autologin-gdm.py
           python3 tests/test-deploiement.py
           python3 tests/test-sudo-ssh.py
+          python3 tests/test-certificats-acme.py
           python3 tests/test-desktop-remmina.py
   windows-no-wifi:
     runs-on: windows-latest
