@@ -404,6 +404,30 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
     <div class="actions"><button type="submit" class="primary">Créer l’écran et générer la commande</button><button type="button" id="close">Fermer</button></div>
   </form>
 </dialog>
+<dialog id="deploy-reader" aria-labelledby="deploy-reader-title">
+  <form class="dialog-body">
+    <h2 id="deploy-reader-title">Déployer un lecteur via SSH</h2>
+    <p>Prépare d’abord la clé SSH sur le nouveau lecteur avec la page HTTPS
+      <strong>/addsshkey</strong> (port 8766). Le déploiement vérifie l’empreinte SSH hôte.</p>
+    <div class="pair-grid">
+      <label>IPv4 du nouveau lecteur<input name="ip" placeholder="192.168.56.21" inputmode="decimal" required></label>
+      <label>IPv4 de la régie sur le LAN écrans<input name="regie" placeholder="192.168.56.1" inputmode="decimal" required></label>
+      <label>Compte SSH du lecteur<input name="user" value="soundlive" maxlength="64" required spellcheck="false"></label>
+      <label>Empreinte SSH du lecteur (SHA256)<input name="fingerprint" placeholder="SHA256:..." maxlength="64" required spellcheck="false"></label>
+    </div>
+    <p class="small">Sur le lecteur Ubuntu/Pi, relève l’empreinte via
+      <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code>.
+      Windows : consulte <code>C:\ProgramData\ssh</code>.</p>
+    <p class="small">Git et Internet sont requis. Linux demande un accès sudo non interactif.
+      Windows requiert un compte SSH administrateur et les composants NDI.</p>
+    <div class="actions">
+      <button type="submit" class="primary">Déployer</button>
+      <button type="button" id="deploy-close">Fermer</button>
+    </div>
+    <p id="deploy-status" role="status" class="small"></p>
+    <pre id="deploy-output" tabindex="0" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:18rem;overflow:auto" hidden></pre>
+  </form>
+</dialog>
 <dialog id="screen-groups" aria-labelledby="screen-groups-title">
   <form class="dialog-body">
     <h2 id="screen-groups-title">Organiser les écrans</h2>
@@ -930,6 +954,22 @@ function renderPairing(card) {
   });
   if (interfaces) panel.append(label);
   panel.append(manualLabel, code, help);
+  const sshLink = document.createElement("a");
+  sshLink.target = "_blank";
+  sshLink.rel = "noopener noreferrer";
+  sshLink.textContent = "Préparer la clé SSH (/addsshkey)";
+  const deployment = document.createElement("button");
+  deployment.type = "button";
+  deployment.textContent = "Déployer via SSH";
+  deployment.onclick = () => openDeployReader(row, card.pairingAddress || input.value);
+  function updateSshLink() {
+    const address = (interfaces?.value || input.value).trim();
+    sshLink.href = isIPv4(address) ? "https://" + address + ":8766/addsshkey" : "/addsshkey";
+  }
+  input.addEventListener("input", updateSshLink);
+  interfaces?.addEventListener("change", updateSshLink);
+  updateSshLink();
+  panel.append(sshLink, deployment);
   updateCommand();
 }
 function notice(text, error=false) {
@@ -3063,6 +3103,60 @@ function bindScreenSelectionControls(dialog, list, changed) {
     };
   }
 }
+const deployReader = document.querySelector("#deploy-reader");
+const deployForm = select(deployReader, "form");
+const deployStatus = select(deployReader, "#deploy-status");
+const deployOutput = select(deployReader, "#deploy-output");
+let deployingScreen = null;
+let deployBusy = false;
+function openDeployReader(row, regieAddress) {
+  if (deployBusy) return;
+  deployingScreen = row.id;
+  select(deployReader, "#deploy-reader-title").textContent = "Déployer « " + row.name + " » via SSH";
+  deployForm.reset();
+  deployForm.elements.namedItem("regie").value = regieAddress || "";
+  deployStatus.textContent = "Relève l’IPv4 et l’empreinte SHA256 sur le nouveau lecteur.";
+  deployOutput.hidden = true;
+  deployOutput.textContent = "";
+  deployReader.showModal();
+}
+select(deployReader, "#deploy-close").onclick = () => { if (!deployBusy) deployReader.close(); };
+deployForm.onsubmit = action(async () => {
+  if (deployBusy || !deployingScreen) return;
+  const data = Object.fromEntries(new FormData(deployForm));
+  for (const field of ["ip", "regie", "user", "fingerprint"]) data[field] = data[field].trim();
+  if (!isIPv4(data.ip) || !isIPv4(data.regie)) {
+    deployStatus.textContent = "Indique deux adresses IPv4 privées valides.";
+    return;
+  }
+  deployBusy = true;
+  select(deployForm, '[type="submit"]').disabled = true;
+  select(deployReader, "#deploy-close").disabled = true;
+  deployStatus.textContent = "Connexion SSH et vérification de l’empreinte…";
+  try {
+    const {job} = await call("/api/deploy/start", {id:deployingScreen, ...data}, 20000);
+    while (true) {
+      const result = await call("/api/deploy/status", {job}, 20000);
+      deployOutput.hidden = false;
+      deployOutput.textContent = [result.stdout, result.stderr].filter(Boolean).join("\n");
+      deployStatus.textContent = result.message || "Installation en cours…";
+      if (result.state !== "running") {
+        deployStatus.textContent += result.state === "done"
+          ? " Le lecteur devrait maintenant s’associer à la régie."
+          : " Consulte le journal ci-dessous.";
+        await refresh(true);
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 1200));
+    }
+  } catch (error) {
+    deployStatus.textContent = error.message;
+  } finally {
+    deployBusy = false;
+    select(deployForm, '[type="submit"]').disabled = false;
+    select(deployReader, "#deploy-close").disabled = false;
+  }
+});
 const sshGroupOpen = document.querySelector("#ssh-group-open");
 const sshGroup = document.querySelector("#ssh-group");
 const sshForm = select(sshGroup, "form");
