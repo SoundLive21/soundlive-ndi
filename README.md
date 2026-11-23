@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.95** et le client **1.4.41**.
+Ce kit contient la régie **1.4.96** et le client **1.4.41**.
 
 ## Installer et lancer la régie
 
@@ -527,7 +527,15 @@ depuis le tableau.
    obligatoire de l'empreinte**, clone le dépôt public officiel
    `https://github.com/SoundLive21/soundlive-ndi.git` dans un répertoire
    temporaire sur le lecteur, puis lance l'installation de ce système.
-   La console affiche le journal et le code de retour.
+   La console affiche le journal et le code de retour. Depuis la régie
+   **1.4.96**, dès qu'un déploiement SSH se termine avec le code `0`,
+   la régie demande automatiquement le redémarrage du lecteur :
+   `sudo -n /usr/bin/systemctl reboot` pour Ubuntu et Raspberry Pi,
+   ou `shutdown.exe /r /t 10` pour Windows. Le résultat de l'installation
+   est enregistré avant cette commande et le tableau indique si le reboot
+   a été demandé, refusé ou n'a pas pu être confirmé. **Aucun reboot n'est
+   déclenché si l'installation a échoué.** Les installations exécutées
+   manuellement sur le lecteur ne sont pas concernées.
    Pour les installations Linux, tu peux fournir temporairement le mot de
    passe sudo dans la fenêtre : il est envoyé par HTTPS et SSH, n'est ni
    sauvegardé ni ajouté aux arguments de la commande. Le rafraîchissement
