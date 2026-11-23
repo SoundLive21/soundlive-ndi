@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path -Parent $PSScriptRoot)
-$generated = & python -c "from page_ssh import windows_command; print(windows_command('192.168.56.1',8765,'CODE_1234'))"
+$generated = & python -c "from deploiement_lecteur import command_windows; print(command_windows('192.168.56.1',8765,'CODE_1234'))"
 if ($LASTEXITCODE -ne 0) { throw 'Génération de la commande Windows impossible.' }
 if ($generated -notmatch '-EncodedCommand ([A-Za-z0-9+/=]+)$') {
     throw 'La commande de déploiement n’utilise pas PowerShell EncodedCommand.'
