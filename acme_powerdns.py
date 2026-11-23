@@ -12,6 +12,7 @@ import secrets
 import socket
 import ssl
 import time
+from threading import RLock
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
@@ -31,6 +32,10 @@ TIMEOUT = 25
 
 class AcmeFailure(RuntimeError):
     """Erreur d'émission résumée, sans données d'authentification."""
+
+
+class PowerDNSRejected(AcmeFailure):
+    """Requête DNS refusée par le serveur (HTTP 400/422)."""
 
 
 def b64(data):
@@ -88,6 +93,8 @@ class PowerDNS:
             raise ValueError("Clé API PowerDNS invalide.")
         if not isinstance(server_id, str) or not server_id or len(server_id) > 128:
             raise ValueError("Identifiant de serveur PowerDNS invalide.")
+        self._legacy = False
+        self._lock = RLock()
         self.api_key = api_key
         self.zone = zone
         self.endpoint = (self.api_url + "/api/v1/servers/" + quote(server_id, safe="")
@@ -108,7 +115,7 @@ class PowerDNS:
             if error.code == 404:
                 raise AcmeFailure("API PowerDNS : zone ou identifiant de serveur introuvable.") from None
             if error.code in (400, 422):
-                raise AcmeFailure("API PowerDNS : modification TXT refusée. La version PowerDNS doit supporter EXTEND/PRUNE (4.9.12 ou 5.0.2+).") from None
+                raise PowerDNSRejected(f"API PowerDNS : requête {method} refusée (HTTP {error.code}).") from None
             raise AcmeFailure(f"API PowerDNS : erreur HTTP {error.code}.") from None
         except (OSError, URLError) as error:
             raise AcmeFailure("API PowerDNS inaccessible. Vérifie l'adresse, le réseau et son certificat TLS.") from error
@@ -129,10 +136,63 @@ class PowerDNS:
             raise ValueError("Seuls les TXT ACME de la zone configurée peuvent être modifiés.")
         if not isinstance(value, str) or len(value) != 43 or any(c not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" for c in value):
             raise ValueError("Valeur du challenge DNS-01 invalide.")
-        self.request("PATCH", {"rrsets": [{
-            "name": fqdn, "type": "TXT", "changetype": action, "ttl": 60,
-            "records": [{"content": '"' + value + '"', "disabled": False}],
-        }]})
+        record = {"content": '"' + value + '"', "disabled": False}
+        with self._lock:
+            if not self._legacy:
+                try:
+                    self.request("PATCH", {"rrsets": [{
+                        "name": fqdn, "type": "TXT", "changetype": action,
+                        "ttl": 60, "records": [record],
+                    }]})
+                    return
+                except PowerDNSRejected:
+                    # Les anciennes versions ne connaissent pas EXTEND/PRUNE.
+                    # Ne pas basculer sur erreur réseau ou d'authentification.
+                    pass
+            self._legacy_txt(fqdn, record, action)
+            self._legacy = True
+
+    def _legacy_txt(self, fqdn, record, action):
+        # GET doit réussir et retourner une liste complète avant toute écriture.
+        # Le verrou protège cette instance, pas les autres clients DNS.
+        payload = self.verify()
+        rrsets = payload.get("rrsets")
+        if not isinstance(rrsets, list):
+            raise AcmeFailure("API PowerDNS : liste des RRsets absente, modification annulée.")
+        matches = [rr for rr in rrsets
+                   if rr.get("name", "").lower() == fqdn and rr.get("type") == "TXT"]
+        if len(matches) > 1:
+            raise AcmeFailure("API PowerDNS : plusieurs RRsets TXT identiques, modification annulée.")
+        existing = matches[0] if matches else None
+        records = existing.get("records") if existing else []
+        if not isinstance(records, list) or any(
+                not isinstance(row, dict) or not isinstance(row.get("content"), str)
+                or not isinstance(row.get("disabled"), bool) for row in records):
+            raise AcmeFailure("API PowerDNS : enregistrements TXT invalides, modification annulée.")
+        ttl = existing.get("ttl") if existing else 60
+        if not isinstance(ttl, int) or ttl < 0:
+            raise AcmeFailure("API PowerDNS : TTL invalide, modification annulée.")
+        if action == "EXTEND":
+            if record in records:
+                return
+            if any(row["content"] == record["content"] for row in records):
+                raise AcmeFailure("API PowerDNS : le TXT du challenge existe mais est désactivé.")
+            updated = records + [record]
+        else:
+            updated = [row for row in records if row != record]
+            if updated == records:
+                return
+        rrset = {"name": fqdn, "type": "TXT",
+                 "changetype": "REPLACE" if updated else "DELETE"}
+        if updated:
+            rrset.update(ttl=ttl, records=updated)
+        try:
+            self.request("PATCH", {"rrsets": [rrset]})
+        except PowerDNSRejected as error:
+            raise AcmeFailure(
+                "API PowerDNS : modification TXT refusée également en mode compatible "
+                "(REPLACE/DELETE). " + str(error)) from None
+
 
 
 def json_http(method, url, body=None, headers=None):
