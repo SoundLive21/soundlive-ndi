@@ -8,7 +8,7 @@ SoundLive-NDI pilote des lecteurs NDI sur un réseau local depuis une régie
 Windows ou Ubuntu Desktop. Chaque écran reçoit la vidéo et le son directement
 du PC qui publie la source. La régie choisit ce que chaque écran affiche.
 
-Ce kit contient la régie **1.4.96** et le client **1.4.41**.
+Ce kit contient la régie **1.4.97** et le client **1.4.41**.
 
 ## Installer et lancer la régie
 
@@ -117,6 +117,80 @@ doivent être joignables.
 
 Pour consulter les dernières opérations sur un lecteur Linux, lance
 `sudo journalctl -u 'soundlive-ndi-maintenance@*.service' -n 100`.
+
+### Certificat HTTPS public ACME / Let's Encrypt (régie 1.4.97)
+
+La régie propose deux modes HTTPS sur le **même port TCP 8766** :
+
+- Le certificat **local SoundLive** existant, pour accéder directement à une
+  IPv4 privée et installer `.soundlive-acces/autorite-soundlive.cer` sur les
+  appareils de commande.
+- Un certificat **externe ACME** signé par une autorité publique : la régie
+  charge une chaîne PEM et sa clé privée depuis le disque. **L'émission et les
+  renouvellements sont réalisés par le client ACME installé séparément.**
+  Aucun jeton DNS ni compte ACME n'est enregistré dans SoundLive-NDI.
+
+**Attention aux IP :** Let's Encrypt accepte les **adresses IP publiques**
+depuis janvier 2026, jamais les adresses privées `192.168.x.x`,
+`172.16–31.x.x` ou `10.x.x.x`. Les certificats d'IP sont
+**courte durée (160 heures)** et nécessitent une validation sur les ports
+publics TCP **80 (HTTP-01)** ou **443 (TLS-ALPN-01)** et des renouvellements
+très fréquents. Le port `8766` ne sert pas aux challenges ACME.
+
+**Régie sur réseau local isolé :** utilise un nom de domaine public dont tu
+contrôles le DNS, par exemple `regie.exemple.fr`, et une validation
+**DNS-01** automatique avec l'API de ton hébergeur DNS. La régie elle-même
+n'a pas besoin d'être joignable depuis Internet et **ne doit pas être
+exposée publiquement**. Fais résoudre ce nom DNS par les appareils du réseau
+écrans vers l'**IPv4 privée du PC de régie** (DNS local / DNS partagé /
+fichier hosts). Le nom DNS doit être exactement inclus dans le certificat.
+
+**Sous Windows (méthode recommandée) :**
+1. Installe un client ACME Windows tel que **win-acme** depuis
+   `https://www.win-acme.com/`. Choisis la validation **DNS-01 avec l'API
+   de ton fournisseur DNS**, et le magasin **PemFiles**. Il faut que ce
+   client configure son propre renouvellement automatique.
+2. Règle son dossier de sortie PEM. win-acme crée généralement
+   `<nom>-chain.pem` (certificat avec chaîne) et
+   `<nom>-key.pem` (clé privée). Le compte Windows qui lance la
+   régie doit avoir le **droit de lecture** sur ces deux fichiers ;
+   limite les autres accès à la clé privée.
+3. Active d'abord l'**accès distant HTTPS** dans le lanceur SoundLive-NDI,
+   puis arrête la régie. Clique **Certificat ACME / DNS / IP publique…**,
+   saisis le nom DNS et les chemins complets de `-chain.pem` et
+   `-key.pem`, et clique **Appliquer**.
+4. Redémarre la régie. Le bouton Copier l’adresse et le QR code affichent
+   désormais `https://regie.exemple.fr:8766`. Vérifie le DNS local et
+   l'absence d'alerte certificat dans le navigateur.
+
+Sur Ubuntu ou dans un terminal sur Windows, la même opération est possible :
+
+```bash
+python3 tableau.py --configurer-certificat-acme regie.exemple.fr /chemin/vers/fullchain.pem /chemin/vers/privkey.pem
+```
+
+Pour revenir au certificat local SoundLive (après avoir arrêté la régie) :
+
+```bash
+python3 tableau.py --retirer-certificat-acme
+```
+
+**Renouvellement :** le serveur contrôle les changements de fichiers PEM et
+recharge automatiquement une nouvelle paire de certificats valide à la
+prochaine connexion, dans un délai habituel de **10 secondes**, sans
+interrompre les sessions HTTPS en cours. Si le renouvellement produit une
+paire incompatible, le serveur conserve temporairement le dernier contexte
+TLS valide et signale l'erreur côté régie. Le client ACME **doit réellement
+mettre à jour les fichiers PEM**, renouveler à temps et rester opérationnel ;
+SoundLive-NDI ne renouvelle pas les certificats à sa place. À la création
+d'une configuration ACME invalide, l'activation est refusée afin de ne pas
+casser l'accès HTTPS existant.
+
+**Sécurité :** ce mode ne change ni l'authentification de la régie ni
+l'écoute sur l'interface privée du réseau écrans. Il ne suffit pas qu'un
+fichier PEM comporte le bon DNS pour être publiquement approuvé : il doit
+provenir d'une AC reconnue par les navigateurs. Ne publie jamais les clés
+privées PEM ni les identifiants API DNS dans GitHub.
 
 ### Piloter depuis un autre PC, une tablette ou un téléphone
 
