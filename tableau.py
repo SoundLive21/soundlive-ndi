@@ -1755,7 +1755,14 @@ class Request(BaseHTTPRequestHandler):
             enabled = data.get("enabled")
             if type(enabled) is not bool:
                 raise ValueError("Indique si l’identification doit être affichée.")
-            if "id" in data:
+            if "ids" in data:
+                ids = data["ids"]
+                if not isinstance(ids, list) or len(ids) > 500 or any(
+                        not isinstance(key, str) or key not in SCREENS or
+                        not SCREENS[key].get("token") for key in ids):
+                    raise ValueError("La sélection doit contenir uniquement des écrans associés.")
+                targets = [SCREENS[key] for key in dict.fromkeys(ids)]
+            elif "id" in data:
                 key = data["id"]
                 row = SCREENS.get(key) if isinstance(key, str) else None
                 if not row or not row.get("token"):
