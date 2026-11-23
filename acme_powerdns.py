@@ -145,7 +145,9 @@ def json_http(method, url, body=None, headers=None):
             raw = response.read(1_000_000)
             content_type = response.headers.get_content_type()
             return (json.loads(raw) if raw and ("json" in content_type)
-                    else raw.decode("utf-8", "replace")), dict(response.headers), response.status
+                    else raw.decode("utf-8", "replace")), {
+                        key.lower(): value for key, value in response.headers.items()
+                    }, response.status
     except HTTPError as error:
         raw = error.read(4096)
         try:
@@ -187,7 +189,7 @@ class AcmeClient:
     def get_nonce(self):
         url = self.directory["newNonce"]
         response, headers, _ = json_http("HEAD", url)
-        self.nonce = headers.get("Replay-Nonce")
+        self.nonce = headers.get("replay-nonce")
         if not self.nonce:
             raise AcmeFailure("Serveur ACME : nonce manquant.")
         return self.nonce
@@ -211,7 +213,7 @@ class AcmeClient:
                     "POST", url, {"protected": protected64, "payload": payload64,
                                   "signature": b64(signature)},
                     {"Content-Type": "application/jose+json", "Accept": "application/json"})
-                self.nonce = headers.get("Replay-Nonce")
+                self.nonce = headers.get("replay-nonce")
                 return result, headers, status
             except BadNonce:
                 self.get_nonce()
@@ -224,9 +226,9 @@ class AcmeClient:
             "termsOfServiceAgreed": True,
             "contact": ["mailto:" + self.email],
         })
-        if result.get("status") != "valid" or not headers.get("Location"):
+        if result.get("status") != "valid" or not headers.get("location"):
             raise AcmeFailure("Let's Encrypt : compte ACME non créé.")
-        self.account_url = headers["Location"]
+        self.account_url = headers["location"]
 
     def post_as_get(self, url):
         return self.sign(url, None)[0]
@@ -239,7 +241,7 @@ class AcmeClient:
                .sign(private_key, hashes.SHA256()))
         order, headers, _ = self.sign(self.directory["newOrder"],
                                       {"identifiers": [{"type": "dns", "value": identifier}]})
-        order_url = headers.get("Location")
+        order_url = headers.get("location")
         if not order_url:
             raise AcmeFailure("Let's Encrypt : commande ACME sans identifiant.")
         for authorization_url in order.get("authorizations", []):
