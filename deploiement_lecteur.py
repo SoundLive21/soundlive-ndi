@@ -19,6 +19,32 @@ MAX_JOBS = 2
 MAX_OUTPUT = 24000
 INSTALL_TIMEOUT = 35 * 60
 
+# Ces messages proviennent de terminal_ssh.connect_client. Tous les autres
+# RuntimeError restent masqués pour ne pas divulguer de données de session.
+SAFE_SSH_RUNTIME_ERRORS = frozenset((
+    "La clé privée nécessite sa phrase secrète.",
+    "Mot de passe refusé. Vérifie les identifiants et que le serveur autorise cette méthode.",
+    "Clé refusée. Vérifie le compte SSH et autorise la clé de la régie.",
+    "Connexion SSH impossible. Vérifie le service et l’adresse.",
+))
+
+
+def deployment_error(error, phase):
+    """Message lisible sans exposer les commandes, les clés ou le mot de passe."""
+    if isinstance(error, HostKeyCheck):
+        return "Empreinte SSH du lecteur inconnue ou différente. Vérifie-la directement sur le lecteur."
+    if isinstance(error, RuntimeError) and str(error) in SAFE_SSH_RUNTIME_ERRORS:
+        return f"{phase} : {error}"
+    if isinstance(error, ImportError):
+        return "Paramiko indisponible sur la régie : installe sa dépendance Python."
+    if phase == "Authentification SSH":
+        return "Authentification SSH interrompue. Vérifie le compte, la clé autorisée et le service sshd."
+    if phase == "Ouverture du canal SSH":
+        return "Connexion SSH établie, mais impossible d'ouvrir une commande distante. Vérifie sshd et le shell du compte."
+    if phase == "Exécution de l'installateur":
+        return "Exécution SSH interrompue. Consulte le journal du lecteur et vérifie le service SSH."
+    return "Échec de la connexion SSH. Vérifie l'adresse IPv4 et le port TCP 22."
+
 
 def validate_ipv4(text):
     if not isinstance(text, str):
@@ -139,7 +165,8 @@ class Deployments:
             if len(active) >= MAX_JOBS or any(j["screen"] == screen for j in active):
                 raise ValueError("Un déploiement est déjà en cours. Attends sa fin.")
             job = dict(owner=owner, screen=screen, state="running", stdout="", stderr="",
-                       code=None, started=time.time(), finished=None, message="Connexion SSH…")
+                       code=None, started=time.time(), finished=None, phase="Connexion SSH",
+                       message="Connexion SSH…")
             self.jobs[identifier] = job
             if len(self.jobs) > 30:
                 finished = [k for k,v in self.jobs.items() if v["state"] != "running"]
@@ -164,17 +191,25 @@ class Deployments:
     def _run(self, identifier, host, user, fingerprint, key, command, sudo_password):
         client = None
         outcome = dict(state="failed", message="Échec de connexion ou d'installation.", code=None)
+        phase = "Connexion SSH"
         try:
             import paramiko
             client = paramiko.SSHClient()
+            phase = "Authentification SSH"
+            with self.lock:
+                self.jobs[identifier]["phase"] = phase
             connect_client(paramiko, client, host, user,
                            {"key_filename": str(key)}, (fingerprint,))
+            phase = "Ouverture du canal SSH"
             with self.lock:
-                self.jobs[identifier]["message"] = "Connecté. Téléchargement Git et installation en cours…"
+                self.jobs[identifier].update(phase=phase, message="SSH authentifié. Ouverture du canal…")
             channel = client.get_transport().open_session(timeout=12)
             if sudo_password:
                 channel.get_pty(term="xterm", width=120, height=40)
             channel.exec_command(command)
+            phase = "Exécution de l'installateur"
+            with self.lock:
+                self.jobs[identifier].update(phase=phase, message="Connecté. Téléchargement Git et installation en cours…")
             started = time.monotonic()
             marker = b"__SOUNDLIVE_SUDO_READY__"
             buffered = b""
@@ -210,13 +245,10 @@ class Deployments:
                     break
                 time.sleep(0.2)
             channel.close()
-        except HostKeyCheck as error:
-            outcome["message"] = str(error) + " Vérifie l'empreinte locale du lecteur."
         except Exception as error:
-            # On n'expose pas les secrets ou les commandes internes dans la réponse.
-            outcome["message"] = f"Connexion SSH / installation impossible ({type(error).__name__})."
+            outcome["message"] = deployment_error(error, phase)
         finally:
             if client:
                 client.close()
             with self.lock:
-                self.jobs[identifier].update(outcome, finished=time.time())
+                self.jobs[identifier].update(outcome, phase=phase, finished=time.time())
