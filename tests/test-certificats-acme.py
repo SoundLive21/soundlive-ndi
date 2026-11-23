@@ -5,7 +5,10 @@ from ipaddress import ip_address
 from pathlib import Path
 import ast
 import os
+import sys
 from tempfile import TemporaryDirectory
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
