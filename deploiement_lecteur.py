@@ -48,7 +48,7 @@ def command_linux(kind, regie, port, code):
             "GIT_TERMINAL_PROMPT=0 git clone --depth 1 --single-branch "
             + shlex.quote(REPOSITORY) + ' "$folder/kit"; '
             'cd "$folder/kit"; '
-            'bash installer-client.sh --plateforme '
+            'SOUNDLIVE_DEPLOY_REMOTE=1 bash installer-client.sh --plateforme '
             + shlex.quote(kind) + ' ' + shlex.quote(server) + ' ' + shlex.quote(code))
 
 
