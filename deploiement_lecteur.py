@@ -19,6 +19,53 @@ REPOSITORY = "https://github.com/SoundLive21/soundlive-ndi.git"
 MAX_JOBS = 2
 MAX_OUTPUT = 24000
 INSTALL_TIMEOUT = 35 * 60
+REBOOT_WAIT = 8
+
+# Redémarrage demandé seulement après le code de sortie 0 de l'installateur.
+# Le serveur SSH est déjà actif, et les installateurs Linux ont posé la règle
+# sudoers limitée à "/usr/bin/systemctl reboot".
+REBOOT_COMMANDS = {
+    "ubuntu": "sudo -n /usr/bin/systemctl reboot",
+    "pi": "sudo -n /usr/bin/systemctl reboot",
+    "windows": 'shutdown.exe /r /t 10 /c "SoundLive-NDI : installation terminee"',
+}
+
+
+def request_reboot(client, kind):
+    """Envoie le redémarrage après installation sans le confondre avec sa réussite.
+
+    Le canal de l'installateur a déjà rendu son code 0 et a été fermé.
+    On utilise un nouveau canal SSH, puis on attend brièvement le résultat
+    pour distinguer une commande refusée d'une commande acceptée.
+    """
+    command = REBOOT_COMMANDS[kind]
+    channel = None
+    sent = False
+    try:
+        channel = client.get_transport().open_session(timeout=10)
+        channel.exec_command(command)
+        sent = True
+        until = time.monotonic() + REBOOT_WAIT
+        while time.monotonic() < until:
+            if channel.exit_status_ready():
+                code = channel.recv_exit_status()
+                if code == 0:
+                    return "requested"
+                return "failed"
+            time.sleep(0.1)
+        return "unconfirmed"
+    except (OSError, EOFError, RuntimeError):
+        # Linux peut fermer SSH immédiatement lorsque systemd redémarre.
+        # Si l'appel a été envoyé, ne pas traiter la coupure comme un échec
+        # avéré, mais ne pas prétendre non plus que le reboot est confirmé.
+        return "unconfirmed" if sent else "failed"
+    finally:
+        if channel is not None:
+            try:
+                channel.close()
+            except (OSError, EOFError):
+                pass
+
 
 # Ces messages proviennent de terminal_ssh.connect_client. Tous les autres
 # RuntimeError restent masqués pour ne pas divulguer de données de session.
@@ -173,8 +220,8 @@ class Deployments:
             active = [j for j in self.jobs.values() if j["state"] == "running"]
             if len(active) >= MAX_JOBS or any(j["screen"] == screen for j in active):
                 raise ValueError("Un déploiement est déjà en cours. Attends sa fin.")
-            job = dict(owner=owner, screen=screen, state="running", stdout="", stderr="",
-                       code=None, started=time.time(), finished=None, phase="Connexion SSH",
+            job = dict(owner=owner, screen=screen, kind=kind, state="running", stdout="", stderr="",
+                       code=None, reboot="pending", started=time.time(), finished=None, phase="Connexion SSH",
                        message="Connexion SSH…")
             self.jobs[identifier] = job
             if len(self.jobs) > 30:
@@ -189,7 +236,7 @@ class Deployments:
             job = self.jobs.get(identifier)
             if not job or job["owner"] != owner:
                 raise ValueError("Déploiement inconnu ou session expirée.")
-            return {key:value for key,value in job.items() if key != "owner"}
+            return {key:value for key,value in job.items() if key not in ("owner", "kind")}
 
     def _append(self, identifier, stream, raw):
         with self.lock:
@@ -245,9 +292,26 @@ class Deployments:
                     if buffered:
                         self._append(identifier, "out", buffered)
                     code = channel.recv_exit_status()
-                    outcome = dict(state="done" if code == 0 else "failed", code=code,
-                                   message="Installation terminée." if code == 0
-                                   else "L'installateur a signalé une erreur. Consulte le journal.")
+                    if code == 0:
+                        # Enregistrer la réussite AVANT d'envoyer un reboot, car
+                        # la machine distante peut couper SSH immédiatement.
+                        with self.lock:
+                            self.jobs[identifier].update(
+                                code=0, phase="Redémarrage du lecteur",
+                                message="Installation réussie. Demande de redémarrage automatique…")
+                        channel.close()
+                        reboot = request_reboot(client, self.jobs[identifier]["kind"])
+                        outcome = dict(
+                            state="done", code=0, reboot=reboot,
+                            message={
+                                "requested": "Installation réussie. Redémarrage automatique demandé.",
+                                "unconfirmed": "Installation réussie. Redémarrage envoyé, confirmation indisponible : vérifie la reconnexion.",
+                                "failed": "Installation réussie, mais redémarrage automatique impossible. Redémarre le lecteur manuellement.",
+                            }[reboot])
+                    else:
+                        outcome = dict(
+                            state="failed", code=code, reboot="skipped",
+                            message="L'installateur a signalé une erreur. Aucun redémarrage effectué. Consulte le journal.")
                     break
                 if time.monotonic() - started > INSTALL_TIMEOUT:
                     outcome = dict(state="failed", code=None, message="Déploiement trop long (35 minutes).")
