@@ -55,9 +55,15 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
       - name: Test PowerShell Windows sans Wi-Fi et analyse AST
         shell: powershell
         run: .\\tests\\test-network-no-wifi.ps1
       - name: Vérifier autologin et veille Windows (sans modification)
         shell: powershell
         run: .\\tests\\test-session-lecteur-windows.ps1
+      - name: Vérifier les commandes Windows de préparation et déploiement SSH
+        shell: powershell
+        run: .\\tests\\test-page-ssh-windows.ps1
