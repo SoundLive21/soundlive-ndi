@@ -49,6 +49,14 @@ for kind in ("windows", "invalid"):
         pass
     else:
         raise AssertionError("Plateforme Linux inattendue acceptée")
+linux_sudo = command_linux("ubuntu", "192.168.56.1", 8765, "CODE_1234", True)
+assert "__SOUNDLIVE_SUDO_READY__" in linux_sudo
+assert "stty -echo" in linux_sudo
+assert "sudo -S -p '' -v" in linux_sudo
+assert "SOUNDLIVE_SUDO_REFRESH" in linux_sudo
+assert "SOUNDLIVE_DEPLOY_REMOTE=1" in linux_sudo
+assert "secret-NEVER-IN-COMMAND" not in linux_sudo
+print("OK: sudo ponctuel par SSH, sans mot de passe dans la commande distante.")
 print("OK: commande de déploiement Linux avec clonage Git officiel.")
 
 encoded = command_windows("192.168.56.1", 8765, "CODE_1234").split()[-1]
