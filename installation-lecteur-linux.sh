@@ -61,7 +61,14 @@ install_os_maintenance() (
 prepare_remote_access() {
     local kit=$1 platform=$2
     bash "$kit/installer-ssh-linux.sh" configurer
-    bash "$kit/installer-bureau-distant-linux.sh" "$platform"
+    if [[ ${SOUNDLIVE_DEPLOY_REMOTE:-0} == 1 ]]; then
+        # L'installation VNC/RDP peut exiger une saisie interactive de mot de passe.
+        # Ne pas bloquer une session SSH non interactive ; le bureau distant
+        # sera configuré ensuite localement sur le lecteur si nécessaire.
+        echo "Déploiement SSH : configure ultérieurement VNC/RDP sur le bureau du lecteur."
+    else
+        bash "$kit/installer-bureau-distant-linux.sh" "$platform"
+    fi
 }
 
 clean_reader_profiles() {
