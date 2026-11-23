@@ -37,7 +37,7 @@ from commun import (APP_NAME, MEDIA_CHUNK, MEDIA_COUNT_LIMIT, MEDIA_DISK_PERCENT
                     options, release_number, ssh_fingerprints, ssh_pairing_proof)
 from diagnostic import Diagnostic, NetworkRates, OsUpdateCheck, desktop_protocol, desktop_services, network_info, os_update_report
 from certificats_acme import configure_certificate, disable_certificate
-from gestion_acme_powerdns import RenewalService, get_config
+from gestion_acme_powerdns import RenewalService, get_config, disable_automatic
 from deploiement_lecteur import Deployments, validate_ipv4
 from page_ssh import render as render_ssh_page
 from installation_lecteur import KEYS_PATH, installation_keys, prepare_installations, ssh_access_public
@@ -2115,6 +2115,7 @@ def main():
     if args.configurer_certificat_acme:
         try:
             identifier = configure_certificate(REMOTE_ACCESS, *args.configurer_certificat_acme)
+            disable_automatic(REMOTE_ACCESS)
         except (OSError, ValueError) as error:
             sys.exit(f"Certificat ACME non configuré : {error}")
         print(f"Certificat externe configuré pour {identifier}. Le port HTTPS reste {REMOTE_PORT}.")
@@ -2122,6 +2123,7 @@ def main():
         return
     if args.retirer_certificat_acme:
         disable_certificate(REMOTE_ACCESS)
+        disable_automatic(REMOTE_ACCESS)
         print("Retour au certificat local au prochain démarrage de la régie.")
         return
     if args.activer_acces_distant:
