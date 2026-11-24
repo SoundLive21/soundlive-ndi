@@ -259,6 +259,18 @@ def restore_backup(root, source, password, ip=None):
             else:
                 atomic(paths[name], originals[name])
         raise
+    # L'historique local ne contient ni mot de passe ni chemin personnel.
+    history = root / ".soundlive-backups"
+    try:
+        if history.is_symlink() or (hasattr(history, "is_junction") and history.is_junction()):
+            raise ValueError("Dossier historique non sûr.")
+        atomic(history / "derniere-restauration.json", encode_json({
+            "archive": Path(source).name,
+            "date": datetime.now().astimezone().strftime("%d/%m/%Y %H:%M"),
+        }))
+    except (OSError, ValueError):
+        # La restauration est déjà validée ; ne pas annoncer un échec des données.
+        pass
     return len(files), safety
 
 
