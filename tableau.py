@@ -1008,6 +1008,12 @@ class Request(BaseHTTPRequestHandler):
         remote = getattr(self.server, "remote_dashboard", False)
         if remote:
             hosts = {f"{self.server.server_address[0]}:{port}"}
+            # N'autoriser que le nom du certificat effectivement chargé.
+            certificates = getattr(self.server, "certificates", None)
+            identifier = getattr(certificates, "identifier", None)
+            if identifier:
+                authority = f"[{identifier}]" if ":" in identifier else identifier
+                hosts.add(f"{authority}:{port}")
             scheme = "https"
         else:
             hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
