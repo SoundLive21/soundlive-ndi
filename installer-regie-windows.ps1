@@ -174,12 +174,23 @@ try {
     $progress.Text = $title
     $progress.StartPosition = 'CenterScreen'
     $progress.ClientSize = New-Object Drawing.Size(460, 98)
+    $logoPath = Join-Path $payload 'logo-soundlive.txt'
+    if (Test-Path -LiteralPath $logoPath) {
+        $logoBytes = [Convert]::FromBase64String([IO.File]::ReadAllText($logoPath).Trim())
+        $logoStream = New-Object IO.MemoryStream(,$logoBytes)
+        $logoImage = [Drawing.Image]::FromStream($logoStream)
+        $picture = New-Object Windows.Forms.PictureBox
+        $picture.Image = $logoImage
+        $picture.SizeMode = 'Zoom'
+        $picture.SetBounds(12, 12, 48, 48)
+        $progress.Controls.Add($picture)
+    }
     $progress.FormBorderStyle = 'FixedDialog'
     $progress.ControlBox = $false
     $label = New-Object Windows.Forms.Label
-    $label.SetBounds(18, 17, 420, 26)
+    $label.SetBounds(70, 17, 370, 36)
     $bar = New-Object Windows.Forms.ProgressBar
-    $bar.SetBounds(18, 57, 422, 12)
+    $bar.SetBounds(70, 61, 370, 12)
     $bar.Style = 'Marquee'
     $progress.Controls.Add($label)
     $progress.Controls.Add($bar)
@@ -296,6 +307,10 @@ try {
         }
     }
 
+    $icons = Invoke-Hidden $python "-B `"$(Join-Path $installDir 'logo_soundlive.py')`""
+    if ($icons.ExitCode -ne 0) { throw 'Impossible de créer les icônes SoundLive.' }
+    $appIcon = Join-Path $installDir 'soundlive.ico'
+    $progress.Icon = New-Object Drawing.Icon($appIcon)
     Set-Status 'Création des raccourcis et de la désinstallation…'
     $Launcher = @'
 """Start the installed régie with the interpreter selected by Setup."""
@@ -380,7 +395,7 @@ try {
 }
 '@
     Set-Content -LiteralPath (Join-Path $maintenance 'desinstaller.ps1') -Value $Uninstaller -Encoding UTF8
-    Set-Content -LiteralPath (Join-Path $maintenance 'fichiers.txt') -Value $files.Name -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $maintenance 'fichiers.txt') -Value @($files.Name; 'soundlive.ico'; 'soundlive.png') -Encoding UTF8
     $launcher = Join-Path $maintenance 'lancer-regie.pyw'
     $shell = New-Object -ComObject WScript.Shell
     foreach ($target in @([Environment]::GetFolderPath('Programs'), [Environment]::GetFolderPath('DesktopDirectory'))) {
@@ -389,7 +404,7 @@ try {
         $shortcut.TargetPath = $pythonw
         $shortcut.Arguments = "-B `"$launcher`""
         $shortcut.WorkingDirectory = $installDir
-        $shortcut.IconLocation = "$appExe,0"
+        $shortcut.IconLocation = "$appIcon,0"
         $shortcut.Description = 'Ouvrir le lanceur de la régie SoundLive-NDI'
         $shortcut.Save()
     }
@@ -413,7 +428,7 @@ try {
     $metadata = @{
         DisplayName = 'SoundLive-NDI Régie'
         DisplayVersion = $version
-        DisplayIcon = "$appExe,0"
+        DisplayIcon = "$appIcon,0"
         Publisher = 'SoundLive'
         InstallLocation = $installDir
         UninstallString = $uninstallCommand
