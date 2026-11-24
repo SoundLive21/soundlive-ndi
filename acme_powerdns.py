@@ -101,11 +101,11 @@ class PowerDNS:
         self.endpoint = (self.api_url + "/api/v1/servers/" + quote(server_id, safe="")
                          + "/zones/" + quote(zone, safe="."))
 
-    def request(self, method, body=None):
-        operation = method if body is None else method + " " + ", ".join(
+    def request(self, method, body=None, suffix=""):
+        operation = method + suffix if body is None else method + " " + ", ".join(
             rr["changetype"] + " " + rr["type"] + " " + rr["name"] for rr in body["rrsets"])
         self.progress(f"PowerDNS : {operation} (zone {self.zone})")
-        request = Request(self.endpoint, data=encoded(body) if body is not None else None,
+        request = Request(self.endpoint + suffix, data=encoded(body) if body is not None else None,
                           headers={"X-API-Key": self.api_key, "Accept": "application/json",
                                    "Content-Type": "application/json"},
                           method=method)
@@ -134,6 +134,18 @@ class PowerDNS:
             raise AcmeFailure("La zone PowerDNS est secondaire : configure l'API du serveur primaire.")
         return payload
 
+    def notify(self):
+        # Native zones replicate through the backend, not DNS NOTIFY.
+        zone = self.verify()
+        kind = zone.get("kind", "").lower()
+        self.progress(f"PowerDNS : zone {kind}, SOA {zone.get('serial', 'inconnu')}, "
+                      f"SOA publié {zone.get('edited_serial', 'inconnu')}.")
+        if kind == "native":
+            self.progress("PowerDNS : zone Native, notification DNS non applicable.")
+            return
+        self.request("PUT", suffix="/notify")
+        self.progress("PowerDNS : notification des secondaires demandée.")
+
     def txt(self, fqdn, value, action):
         if action not in ("EXTEND", "PRUNE"):
             raise ValueError("Action PowerDNS non autorisée.")
@@ -150,14 +162,17 @@ class PowerDNS:
                         "name": fqdn, "type": "TXT", "changetype": action,
                         "ttl": 60, "records": [record],
                     }]})
-                    return
                 except PowerDNSRejected:
                     self.progress("PowerDNS : bascule vers le mode compatible GET/REPLACE/DELETE.")
                     # Les anciennes versions ne connaissent pas EXTEND/PRUNE.
                     # Ne pas basculer sur erreur réseau ou d'authentification.
                     pass
+                else:
+                    self.notify()
+                    return
             self._legacy_txt(fqdn, record, action)
             self._legacy = True
+            self.notify()
 
     def _legacy_txt(self, fqdn, record, action):
         # GET doit réussir et retourner une liste complète avant toute écriture.
@@ -325,8 +340,8 @@ class AcmeClient:
             txt = b64(sha256(key_authorization.encode("ascii")).digest())
             name = "_acme-challenge." + identifier
             progress(f"Création du TXT DNS-01 : {name}.")
-            publish_txt(name, txt)
             try:
+                publish_txt(name, txt)
                 progress("Vérification de la propagation du TXT DNS public…")
                 wait_dns(name, txt)
                 progress("Validation DNS-01 par Let's Encrypt…")
