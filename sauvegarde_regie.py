@@ -137,6 +137,9 @@ def collect(root):
 
 
 def create_backup(root, destination, password):
+    destination = Path(destination)
+    if destination.suffix.lower() != '.slbackup' or destination.is_symlink():
+        raise ValueError('Choisis un fichier .slbackup sans lien symbolique.')
     files = collect(root)
     if not files:
         raise ValueError("Aucune configuration à sauvegarder.")
@@ -223,7 +226,10 @@ def restore_backup(root, source, password, ip=None):
     previous = collect(root)
     safety = None
     if previous:
-        safety = root / ".soundlive-backups" / (
+        backup_dir = root / ".soundlive-backups"
+        if backup_dir.is_symlink() or (hasattr(backup_dir, "is_junction") and backup_dir.is_junction()):
+            raise ValueError("Dossier de sauvegarde de sécurité non sûr.")
+        safety = backup_dir / (
             "avant-restauration-" + datetime.now().strftime("%Y%m%d-%H%M%S")
             + "-" + secrets.token_hex(4) + ".slbackup")
         create_backup(root, safety, password)
@@ -232,6 +238,10 @@ def restore_backup(root, source, password, ip=None):
                                ".soundlive-acces/acme-powerdns.json")
               if name not in files}
     paths = {name: target(root, name) for name in set(files) | remove}
+    if Path(source).resolve() in paths.values():
+        raise ValueError("L'archive ne doit pas remplacer un fichier de configuration.")
+    if any(path.exists() and not path.is_file() for path in paths.values()):
+        raise ValueError("Un chemin de restauration n'est pas un fichier.")
     originals = {name: path.read_bytes() if path.is_file() else None
                  for name, path in paths.items()}
     changed = []
