@@ -93,6 +93,7 @@ class PowerDNS:
             raise ValueError("Clé API PowerDNS invalide.")
         if not isinstance(server_id, str) or not server_id or len(server_id) > 128:
             raise ValueError("Identifiant de serveur PowerDNS invalide.")
+        self.progress = lambda message: None
         self._legacy = False
         self._lock = RLock()
         self.api_key = api_key
@@ -101,15 +102,20 @@ class PowerDNS:
                          + "/zones/" + quote(zone, safe="."))
 
     def request(self, method, body=None):
+        operation = method if body is None else method + " " + ", ".join(
+            rr["changetype"] + " " + rr["type"] + " " + rr["name"] for rr in body["rrsets"])
+        self.progress(f"PowerDNS : {operation} (zone {self.zone})")
         request = Request(self.endpoint, data=encoded(body) if body is not None else None,
                           headers={"X-API-Key": self.api_key, "Accept": "application/json",
                                    "Content-Type": "application/json"},
                           method=method)
         try:
             with urlopen(request, timeout=TIMEOUT) as response:
+                self.progress(f"PowerDNS : HTTP {response.status} — {operation}")
                 raw = response.read(2_000_000)
                 return json.loads(raw) if raw else {}
         except HTTPError as error:
+            self.progress(f"PowerDNS : HTTP {error.code} — {operation}")
             if error.code in (401, 403):
                 raise AcmeFailure("API PowerDNS : accès refusé. Vérifie la clé API et les droits de la zone.") from None
             if error.code == 404:
@@ -146,6 +152,7 @@ class PowerDNS:
                     }]})
                     return
                 except PowerDNSRejected:
+                    self.progress("PowerDNS : bascule vers le mode compatible GET/REPLACE/DELETE.")
                     # Les anciennes versions ne connaissent pas EXTEND/PRUNE.
                     # Ne pas basculer sur erreur réseau ou d'authentification.
                     pass
@@ -172,6 +179,7 @@ class PowerDNS:
         ttl = existing.get("ttl") if existing else 60
         if not isinstance(ttl, int) or ttl < 0:
             raise AcmeFailure("API PowerDNS : TTL invalide, modification annulée.")
+        self.progress(f"PowerDNS : {len(records)} valeur(s) TXT existante(s), TTL {ttl} s.")
         if action == "EXTEND":
             if record in records:
                 return
@@ -316,7 +324,7 @@ class AcmeClient:
             key_authorization = challenge["token"] + "." + account_thumbprint
             txt = b64(sha256(key_authorization.encode("ascii")).digest())
             name = "_acme-challenge." + identifier
-            progress("Création du TXT DNS-01 dans PowerDNS…")
+            progress(f"Création du TXT DNS-01 : {name}.")
             publish_txt(name, txt)
             try:
                 progress("Vérification de la propagation du TXT DNS public…")
@@ -334,7 +342,9 @@ class AcmeClient:
                     raise AcmeFailure("Validation DNS-01 non achevée après 90 secondes.")
             finally:
                 try:
+                    progress(f"Nettoyage du TXT DNS-01 : {name}.")
                     cleanup_txt(name, txt)
+                    progress("Nettoyage du challenge terminé.")
                 except (OSError, ValueError, AcmeFailure):
                     progress("Attention : nettoyage du TXT DNS-01 à vérifier dans PowerDNS.")
         progress("Finalisation et signature du certificat…")
@@ -369,8 +379,11 @@ def public_txt_contains(name, value):
 def wait_public_txt(name, value, progress, timeout=300):
     until = time.monotonic() + timeout
     while time.monotonic() < until:
+        progress(f"DNS public (Google) : recherche TXT {name}.")
         if public_txt_contains(name, value):
+            progress("DNS public : valeur du challenge trouvée.")
             return
+        progress("DNS public : valeur non visible, nouvel essai dans 10 s.")
         time.sleep(10)
     raise AcmeFailure("Le TXT DNS-01 n'est pas visible depuis le DNS public après 5 minutes. Vérifie les NS, la zone et la propagation.")
 
