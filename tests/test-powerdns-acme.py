@@ -152,18 +152,53 @@ with patch.object(legacy, "verify", return_value={"kind": "Master"}), \
         raise AssertionError("Un refus NOTIFY Master a été ignoré")
 
 messages = []
-with patch("acme_powerdns.json_http", return_value=(
-        {"Status": 3, "Authority": [{"type": 6, "TTL": 300}]}, {}, 200)):
+with patch("acme_powerdns.dns_json_http", return_value=
+        {"Status": 3, "Authority": [{"type": 6, "TTL": 300}]}):
     assert not public_txt_contains(name, token, messages.append)
 assert any("NXDOMAIN" in message for message in messages)
 assert any("300" in message for message in messages)
 messages.clear()
-with patch("acme_powerdns.json_http", return_value=(
-        {"Status": 0, "Answer": [{"type": 16, "data": '"' + token + '"'}]}, {}, 200)) as query:
+with patch("acme_powerdns.dns_json_http", return_value=
+        {"Status": 0, "Answer": [{"type": 16, "data": '"' + token + '"'}]}) as query:
     assert public_txt_contains(name, token, messages.append, "Cloudflare")
-    assert "cloudflare-dns.com" in query.call_args.args[1]
+    assert "cloudflare-dns.com" in query.call_args.args[0]
 assert any("challenge trouvé" in message for message in messages)
-print("OK: notification Native et diagnostic DNS public.")
+from urllib.error import HTTPError
+from acme_powerdns import dns_tcp_txt, wait_public_txt
+import struct
+
+messages.clear()
+with patch("acme_powerdns.dns_json_http", side_effect=HTTPError(
+        "https://dns.google/resolve", 403, "Forbidden", {}, None)):
+    assert public_txt_contains(name, token, messages.append) is None
+assert any("HTTP 403" in message for message in messages)
+
+# Réponse DNS TCP synthétique, avec nom compressé et TXT exact.
+class FakeDNS:
+    def __enter__(self):
+        return self
+    def __exit__(self, *_):
+        pass
+    def sendall(self, wire):
+        query = wire[2:]
+        ident = struct.unpack_from("!H", query)[0]
+        txt = bytes([len(token)]) + token.encode("ascii")
+        response = (struct.pack("!HHHHHH", ident, 0x8180, 1, 1, 0, 0)
+                    + query[12:] + b"\xc0\x0c"
+                    + struct.pack("!HHIH", 16, 1, 60, len(txt)) + txt)
+        self.data = struct.pack("!H", len(response)) + response
+    def recv(self, count):
+        data, self.data = self.data[:count], self.data[count:]
+        return data
+
+with patch("acme_powerdns.socket.create_connection", return_value=FakeDNS()):
+    assert dns_tcp_txt(name, token, "8.8.8.8", messages.append)
+    assert not dns_tcp_txt(name, "x" * 43, "8.8.8.8", messages.append)
+with patch("acme_powerdns.public_txt_contains", return_value=None), \
+     patch("acme_powerdns.dns_tcp_txt", return_value=True) as fallback:
+    wait_public_txt(name, token, messages.append)
+    fallback.assert_called_once_with(name, token, "8.8.8.8", messages.append)
+print("OK: notification Native, diagnostic DNS public et secours TCP.")
 
 assert validate_zone("exemple.fr", "regie.exemple.fr") == "exemple.fr."
 try:
