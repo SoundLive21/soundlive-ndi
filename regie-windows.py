@@ -430,6 +430,12 @@ class Launcher:
         self.dhcp_shutdown = None
 
         window.title(f"{APP_NAME} · Régie {tableau.SOFTWARE_VERSION}")
+        try:
+            from logo_soundlive import png_bytes
+            self.logo_image = tk.PhotoImage(data=b64encode(png_bytes()).decode("ascii"))
+            window.iconphoto(True, self.logo_image)
+        except (OSError, ValueError, tk.TclError):
+            self.logo_image = None
         window.minsize(620, 510)
         window.columnconfigure(0, weight=1)
         window.rowconfigure(0, weight=1)
@@ -443,7 +449,11 @@ class Launcher:
         panel.bind("<Configure>", lambda _event: viewport.configure(scrollregion=viewport.bbox(panel_id)))
         viewport.bind("<Configure>", lambda event: viewport.itemconfigure(panel_id, width=event.width))
         panel.columnconfigure(0, weight=1)
-        ttk.Label(panel, text=f"{APP_NAME} · Régie", font=("Segoe UI", 19, "bold")).grid(row=0, sticky="w")
+        heading = ttk.Frame(panel)
+        heading.grid(row=0, sticky="w")
+        if self.logo_image:
+            ttk.Label(heading, image=self.logo_image).pack(side="left", padx=(0, 10))
+        ttk.Label(heading, text=f"{APP_NAME} · Régie", font=("Segoe UI", 19, "bold")).pack(side="left")
         states = ttk.LabelFrame(panel, text="États", padding=10)
         states.grid(row=1, sticky="ew", pady=(6, 10))
         ttk.Label(states, textvariable=self.status).pack(anchor="w", pady=(0, 8))
