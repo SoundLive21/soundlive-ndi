@@ -1405,3 +1405,8 @@ Get-Service WinNat -ErrorAction SilentlyContinue
 Si `Get-CimClass` échoue, réparer/activer les composants nécessaires sur Windows,
 redémarrer, puis relancer le diagnostic. Ne pas supprimer les règles NAT d'autres
 applications ni activer ICS sur le réseau écrans sans plan de reconfiguration.
+
+
+### Désinstallation locale (Windows, Ubuntu, Raspberry Pi)
+
+Depuis un kit décompressé distinct de l'installation, sous le compte utilisateur d'origine et après avoir arrêté la régie ou le lecteur, exécuter `python3 desinstaller_soundlive.py regie --simulation` (ou `lecteur`). Sous Windows utiliser `py -3` au lieu de `python3`. Retirer ensuite `--simulation` pour désinstaller en conservant les données, ou ajouter `--purger` après avoir vérifié une sauvegarde. La procédure cible les installations actuelles aux emplacements standards. Elle conserve Python, SSH, NDI, les réglages système et les autorisations réseau ; vérifier séparément les services réseau système, les anciennes installations et retirer l'association du lecteur dans la régie. Ne pas utiliser le mode purge sur une régie sans sauvegarde vérifiée.
