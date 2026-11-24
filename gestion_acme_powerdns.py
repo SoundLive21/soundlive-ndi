@@ -216,7 +216,8 @@ def renew_once(folder, progress=None, force=False):
         try:
             secret = _restore_secret(config["secret"])
             pdns = PowerDNS(config["api_url"], secret, config["zone"], config["server_id"])
-            notify("Vérification de l'accès API PowerDNS…")
+            pdns.progress = notify
+            notify(f"Vérification API PowerDNS : zone {config['zone']}, certificat {config['domain']}.")
             pdns.verify()
             account_path = folder / ACCOUNT
             if account_path.is_file():
@@ -224,9 +225,11 @@ def renew_once(folder, progress=None, force=False):
             else:
                 account = create_account_key()
                 _atomic(account_path, private_pem(account))
+            notify(f"Connexion à Let's Encrypt ({config['environment']})…")
             client = AcmeClient(config["environment"], account, config["email"])
             notify("Enregistrement du compte Let's Encrypt…")
             client.account()
+            notify("Compte ACME validé. Création de la clé du certificat…")
             key = create_certificate_key()
             chain = client.issue(
                 config["domain"], key,
@@ -234,6 +237,7 @@ def renew_once(folder, progress=None, force=False):
                 lambda name, token: pdns.txt(name, token, "PRUNE"),
                 lambda name, token: wait_public_txt(name, token, notify),
                 notify)
+            notify("Vérification et installation du certificat PEM…")
             temporary_chain = folder / "acme-chain.pending.pem"
             temporary_key = folder / "acme-key.pending.pem"
             _atomic(temporary_chain, chain)
