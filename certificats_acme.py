@@ -66,8 +66,13 @@ def check_certificate(identifier, fullchain, private_key):
         first_cert = paths[0].read_bytes().split(b"-----END CERTIFICATE-----", 1)[0] + b"-----END CERTIFICATE-----\n"
         cert = x509.load_pem_x509_certificate(first_cert)
         now = datetime.now(timezone.utc)
-        start = cert.not_valid_before_utc
-        end = cert.not_valid_after_utc
+        # cryptography < 42 exposes naive datetimes already expressed in UTC.
+        try:
+            start = cert.not_valid_before_utc
+            end = cert.not_valid_after_utc
+        except AttributeError:
+            start = cert.not_valid_before.replace(tzinfo=timezone.utc)
+            end = cert.not_valid_after.replace(tzinfo=timezone.utc)
         if not start <= now < end:
             raise ValueError("Le certificat est expiré ou n'est pas encore valable.")
         try:
