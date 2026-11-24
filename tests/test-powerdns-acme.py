@@ -29,13 +29,22 @@ from cryptography.x509.oid import NameOID
 
 class PDNSHandler(BaseHTTPRequestHandler):
     requests = []
+    notifications = []
+    kind = "Master"
     def log_message(self, *_):
         pass
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(b'{"name":"exemple.fr.","kind":"Native"}')
+        self.wfile.write(json.dumps({"name": "exemple.fr.", "kind": self.kind}).encode())
+    def do_PUT(self):
+        assert self.headers["X-API-Key"] == "test-api-key"
+        assert self.path == "/api/v1/servers/localhost/zones/exemple.fr./notify"
+        self.notifications.append(self.path)
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'{"result":"Notification queued"}')
     def do_PATCH(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         assert self.headers["X-API-Key"] == "test-api-key"
@@ -49,7 +58,7 @@ with HTTPServer(("127.0.0.1", 0), PDNSHandler) as server:
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     pdns = PowerDNS(api_url, "test-api-key", "exemple.fr.")
-    assert pdns.verify()["kind"] == "Native"
+    assert pdns.verify()["kind"] == "Master"
     token = b64(b"abcdefghijklmnopqrstuvwxy0123456")
     assert len(token) == 43
     pdns.txt("_acme-challenge.regie.exemple.fr", token, "EXTEND")
@@ -57,6 +66,10 @@ with HTTPServer(("127.0.0.1", 0), PDNSHandler) as server:
     assert [row["rrsets"][0]["changetype"] for row in PDNSHandler.requests] == ["EXTEND", "PRUNE"]
     assert all(row["rrsets"][0]["name"] == "_acme-challenge.regie.exemple.fr."
                for row in PDNSHandler.requests)
+    assert len(PDNSHandler.notifications) == 2
+    PDNSHandler.kind = "Native"
+    pdns.notify()
+    assert len(PDNSHandler.notifications) == 2
     server.shutdown()
     thread.join(timeout=5)
 print("OK: API PowerDNS GET et TXT EXTEND/PRUNE sans effacer le reste de la zone.")
@@ -75,9 +88,13 @@ zone = {"name": "exemple.fr.", "kind": "Native", "rrsets": [
 ]}
 actions = []
 
-def legacy_request(method, body=None):
+def legacy_request(method, body=None, suffix=""):
     if method == "GET":
         return deepcopy(zone)
+    if method == "PUT":
+        assert suffix == "/notify"
+        actions.append("NOTIFY")
+        return {}
     rr = deepcopy(body["rrsets"][0])
     actions.append(rr["changetype"])
     if rr["changetype"] in ("EXTEND", "PRUNE"):
@@ -104,6 +121,11 @@ with patch.object(legacy, "request", side_effect=legacy_request):
     assert zone["rrsets"][0]["ttl"] == 60
     legacy.txt(name, token, "PRUNE")
     assert not zone["rrsets"] and actions[-1] == "DELETE"
+    zone["kind"] = "Master"
+    legacy.txt(name, token, "EXTEND")
+    assert actions[-2:] == ["REPLACE", "NOTIFY"]
+    legacy.txt(name, token, "PRUNE")
+    assert actions[-2:] == ["DELETE", "NOTIFY"]
     del zone["rrsets"]
     before = list(actions)
     try:
