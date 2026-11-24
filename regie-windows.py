@@ -1199,13 +1199,49 @@ class Launcher:
             launch_button.configure(state="disabled")
             status.set("Vérification de l'API PowerDNS, puis demande de certificat…")
             output = Queue()
+            events = Queue()
+            log_window = tk.Toplevel(dialog)
+            log_window.title("SoundLive NDI — Journal DNS / ACME")
+            log_window.geometry("850x440")
+            log_window.transient(dialog)
+            log_frame = ttk.Frame(log_window, padding=12)
+            log_frame.pack(fill="both", expand=True)
+            log_text = tk.Text(log_frame, wrap="word", state="disabled")
+            scroll = ttk.Scrollbar(log_frame, command=log_text.yview)
+            log_text.configure(yscrollcommand=scroll.set)
+            scroll.pack(side="right", fill="y")
+            log_text.pack(side="left", fill="both", expand=True)
+            def append_log(message):
+                if not log_window.winfo_exists():
+                    return
+                from datetime import datetime
+                log_text.configure(state="normal")
+                log_text.insert("end", datetime.now().strftime("[%H:%M:%S] ") + message + "\n")
+                log_text.see("end")
+                log_text.configure(state="disabled")
+            def close_log():
+                if not running[0]:
+                    log_window.destroy()
+                    if dialog.winfo_exists():
+                        dialog.grab_set()
+            log_window.protocol("WM_DELETE_WINDOW", close_log)
+            log_actions = ttk.Frame(log_window, padding=(12, 0, 12, 12))
+            log_actions.pack(fill="x")
+            def copy_log():
+                log_window.clipboard_clear()
+                log_window.clipboard_append(log_text.get("1.0", "end-1c"))
+            ttk.Button(log_actions, text="Copier le journal", command=copy_log).pack(side="left")
+            ttk.Button(log_actions, text="Fermer", command=close_log).pack(side="right")
+            log_window.grab_set()
+            append_log("Début de la vérification PowerDNS et ACME.")
 
             def work():
                 try:
                     configure(folder, params["domain"], params["zone"], params["api_url"],
                               secret, params["email"], params["server_id"], environment,
                               accept_terms=True)
-                    renew_once(folder, force=True)
+                    events.put("Configuration PowerDNS validée.")
+                    renew_once(folder, progress=events.put, force=True)
                     output.put((True, "Certificat obtenu et installé. Le renouvellement automatique "
                                 "sera actif lorsque la régie fonctionne."))
                 except Exception as error:
@@ -1219,6 +1255,11 @@ class Launcher:
             threading.Thread(target=work, daemon=True, name="acme-powerdns-setup").start()
 
             def update():
+                while True:
+                    try:
+                        append_log(events.get_nowait())
+                    except Empty:
+                        break
                 state = read_status(folder)
                 if running[0] and state.get("state") in ("running", "failed"):
                     status.set(state.get("message", ""))
@@ -1229,6 +1270,12 @@ class Launcher:
                         dialog.after(500, update)
                     return
                 running[0] = False
+                while True:
+                    try:
+                        append_log(events.get_nowait())
+                    except Empty:
+                        break
+                append_log(("SUCCÈS : " if ok else "ERREUR : ") + message)
                 if dialog.winfo_exists():
                     launch_button.configure(state="normal")
                     status.set(message if ok else state.get("message") or message)
@@ -1236,7 +1283,7 @@ class Launcher:
                         messagebox.showinfo("Let's Encrypt",
                             "Certificat obtenu. Démarre ou redémarre la régie pour afficher "
                             "le nom DNS dans son QR code. Les renouvellements seront automatiques.",
-                            parent=dialog)
+                            parent=log_window)
             dialog.after(500, update)
 
         launch_button = ttk.Button(buttons, text="Vérifier PowerDNS et obtenir le certificat",
