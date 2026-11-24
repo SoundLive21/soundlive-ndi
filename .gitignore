@@ -21,3 +21,6 @@ __pycache__/
 *.so.*
 *.zip
 dist/
+
+*.slbackup
+disposition-ecrans.json
