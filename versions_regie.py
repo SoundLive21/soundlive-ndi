@@ -35,7 +35,7 @@ LEGACY_LAUNCHER_NAMES = {"SoundLive-NDI.c": "SoundLive-Regie.c",
                          "SoundLive-NDI.exe": "SoundLive-Regie.exe"}
 MAX_ARCHIVE = 64 * 1024 * 1024
 FILES = frozenset((
-    "sauvegarde_regie.py", "tableau.py", "tableau.html", "acces_regie.py", "certificats_acme.py", "acme_powerdns.py", "gestion_acme_powerdns.py", "acces-refuse.html", "commun.py", "qrencoder.py", "regie-windows.py",
+    "logo-soundlive.txt", "logo_soundlive.py", "sauvegarde_regie.py", "tableau.py", "tableau.html", "acces_regie.py", "certificats_acme.py", "acme_powerdns.py", "gestion_acme_powerdns.py", "acces-refuse.html", "commun.py", "qrencoder.py", "regie-windows.py",
     "demarrer-windows.bat", "demarrer-regie-ubuntu.sh", "SoundLive-NDI.c", "SoundLive-NDI.exe",
     "ecran.py", "diagnostic.py", "mise_a_jour.py", "lancer-client.py",
     "installer-client.sh", "installer-client.cmd", "installer-client-windows.py",
@@ -108,6 +108,8 @@ def required_files(version):
         files.update(("acme_powerdns.py", "gestion_acme_powerdns.py"))
     if version >= (1, 4, 106):
         files.add("sauvegarde_regie.py")
+    if version >= (1, 4, 107):
+        files.update(("logo-soundlive.txt", "logo_soundlive.py"))
     return files
 
 
