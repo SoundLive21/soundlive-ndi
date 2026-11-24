@@ -11,6 +11,7 @@ from pathlib import Path
 import secrets
 import socket
 import ssl
+import struct
 import time
 from threading import RLock
 from urllib.error import HTTPError, URLError
@@ -380,6 +381,93 @@ class AcmeClient:
         raise AcmeFailure("Let's Encrypt n'a pas finalisé la demande dans le délai prévu.")
 
 
+def dns_json_http(url):
+    """HTTP DNS indépendant d'ACME, avec erreurs de transport explicites."""
+    request = Request(url, headers={"Accept": "application/dns-json",
+                                    "User-Agent": "SoundLive-NDI DNS/1.0"})
+    with urlopen(request, timeout=8) as response:
+        return json.loads(response.read(65536))
+
+
+def dns_tcp_txt(name, value, server, progress):
+    """Interroge un résolveur public en DNS classique TCP, sans dépendance."""
+    ident = secrets.randbits(16)
+    labels = name.rstrip(".").lower().split(".")
+    qname = b"".join(bytes([len(label)]) + label.encode("ascii") for label in labels) + b"\x00"
+    question = qname + struct.pack("!HH", 16, 1)
+    query = struct.pack("!HHHHHH", ident, 0x0100, 1, 0, 0, 0) + question
+
+    def receive(stream, count):
+        data = bytearray()
+        while len(data) < count:
+            part = stream.recv(count - len(data))
+            if not part:
+                raise ValueError("réponse DNS TCP incomplète")
+            data.extend(part)
+        return bytes(data)
+
+    def read_name(packet, offset):
+        parts, seen, end = [], set(), None
+        while True:
+            if offset >= len(packet) or offset in seen:
+                raise ValueError("nom DNS invalide")
+            seen.add(offset)
+            length = packet[offset]
+            if length & 0xc0 == 0xc0:
+                if offset + 1 >= len(packet):
+                    raise ValueError("pointeur DNS incomplet")
+                if end is None:
+                    end = offset + 2
+                offset = ((length & 0x3f) << 8) | packet[offset + 1]
+                continue
+            offset += 1
+            if length == 0:
+                return ".".join(parts).lower(), end if end is not None else offset
+            if length > 63 or offset + length > len(packet):
+                raise ValueError("label DNS invalide")
+            parts.append(packet[offset:offset + length].decode("ascii"))
+            offset += length
+
+    try:
+        with socket.create_connection((server, 53), timeout=5) as stream:
+            stream.sendall(struct.pack("!H", len(query)) + query)
+            packet = receive(stream, struct.unpack("!H", receive(stream, 2))[0])
+        rid, flags, qd, an, _, _ = struct.unpack_from("!HHHHHH", packet)
+        if rid != ident or not flags & 0x8000 or flags & 0x0200 or qd != 1:
+            raise ValueError("en-tête DNS inattendu")
+        qowner, offset = read_name(packet, 12)
+        if qowner != ".".join(labels) or struct.unpack_from("!HH", packet, offset) != (16, 1):
+            raise ValueError("question DNS différente")
+        offset += 4
+        records = []
+        for _ in range(an):
+            owner, offset = read_name(packet, offset)
+            typ, cls, _, length = struct.unpack_from("!HHIH", packet, offset)
+            offset += 10
+            end = offset + length
+            if end > len(packet):
+                raise ValueError("enregistrement DNS tronqué")
+            if typ == 16 and cls == 1 and owner == ".".join(labels):
+                chunks = []
+                while offset < end:
+                    size = packet[offset]
+                    offset += 1
+                    if offset + size > end:
+                        raise ValueError("TXT DNS invalide")
+                    chunks.append(packet[offset:offset + size])
+                    offset += size
+                records.append(b"".join(chunks))
+            offset = end
+        status = flags & 15
+        found = status == 0 and value.encode("ascii") in records
+        progress(f"DNS TCP ({server}) : RCODE {status}, {len(records)} TXT, "
+                 + ("challenge trouvé." if found else "challenge absent."))
+        return found
+    except (OSError, ValueError, struct.error) as error:
+        progress(f"DNS TCP ({server}) : {type(error).__name__}, {error}.")
+        return False
+
+
 def public_txt_contains(name, value, progress=None, resolver="Google"):
     """Recherche DNS-over-HTTPS et diagnostic sans divulguer les valeurs TXT."""
     progress = progress or (lambda message: None)
@@ -387,14 +475,19 @@ def public_txt_contains(name, value, progress=None, resolver="Google"):
                  "Cloudflare": "https://cloudflare-dns.com/dns-query"}
     query = urlencode({"name": name, "type": "TXT"})
     try:
-        result, _, _ = json_http("GET", endpoints[resolver] + "?" + query,
-                                headers={"Accept": "application/dns-json"})
-    except (AcmeFailure, OSError, ValueError):
-        progress(f"DNS public ({resolver}) : requête HTTPS impossible ou réponse invalide.")
-        return False
+        result = dns_json_http(endpoints[resolver] + "?" + query)
+    except HTTPError as error:
+        progress(f"DNS public ({resolver}) : HTTPS HTTP {error.code}.")
+        return None
+    except URLError as error:
+        progress(f"DNS public ({resolver}) : HTTPS {type(error.reason).__name__}: {error.reason}.")
+        return None
+    except (OSError, ValueError) as error:
+        progress(f"DNS public ({resolver}) : HTTPS {type(error).__name__}: {error}.")
+        return None
     if not isinstance(result, dict):
         progress(f"DNS public ({resolver}) : réponse JSON invalide.")
-        return False
+        return None
     status = result.get("Status")
     label = {0: "NOERROR", 1: "FORMERR", 2: "SERVFAIL", 3: "NXDOMAIN",
              4: "NOTIMP", 5: "REFUSED"}.get(status, "inconnu")
@@ -414,9 +507,13 @@ def public_txt_contains(name, value, progress=None, resolver="Google"):
 def wait_public_txt(name, value, progress, timeout=300):
     until = time.monotonic() + timeout
     while time.monotonic() < until:
-        for resolver in ("Google", "Cloudflare"):
+        for resolver, server in (("Google", "8.8.8.8"), ("Cloudflare", "1.1.1.1")):
             progress(f"DNS public ({resolver}) : recherche TXT {name}.")
-            if public_txt_contains(name, value, progress, resolver):
+            found = public_txt_contains(name, value, progress, resolver)
+            if found is None:
+                progress(f"DNS public ({resolver}) : secours DNS TCP port 53.")
+                found = dns_tcp_txt(name, value, server, progress)
+            if found:
                 progress("DNS public : valeur du challenge trouvée.")
                 return
         progress("DNS public : valeur non visible, nouvel essai dans 10 s.")
