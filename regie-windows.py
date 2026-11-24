@@ -1141,8 +1141,20 @@ class Launcher:
         dialog = tk.Toplevel(self.window)
         dialog.title("Let's Encrypt · PowerDNS API · certificat automatique")
         dialog.transient(parent or self.window)
-        content = ttk.Frame(dialog, padding=18)
-        content.pack(fill="both", expand=True)
+        # Réserver le pied de fenêtre avant le contenu défilant.
+        buttons = ttk.Frame(dialog, padding=(18, 8, 18, 12))
+        buttons.pack(side="bottom", fill="x")
+        viewport = ttk.Frame(dialog)
+        viewport.pack(fill="both", expand=True)
+        canvas = tk.Canvas(viewport, highlightthickness=0, borderwidth=0)
+        scrollbar = ttk.Scrollbar(viewport, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        content = ttk.Frame(canvas, padding=18)
+        content_id = canvas.create_window((0, 0), window=content, anchor="nw")
+        content.bind("<Configure>", lambda event: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(content_id, width=event.width))
         content.columnconfigure(1, weight=1)
         info = ("SoundLive-NDI peut obtenir et renouveler un certificat Let's Encrypt "
                 "en créant un enregistrement TXT temporaire dans PowerDNS. "
@@ -1182,8 +1194,6 @@ class Launcher:
         status = tk.StringVar(value=(read_status(folder).get("message") or "Configuration non démarrée."))
         ttk.Label(content, textvariable=status, wraplength=605).grid(
             row=10, column=0, columnspan=2, sticky="w", pady=10)
-        buttons = ttk.Frame(content)
-        buttons.grid(row=11, column=0, columnspan=2, sticky="ew")
         running = [False]
 
         def begin():
@@ -1202,8 +1212,11 @@ class Launcher:
             events = Queue()
             log_window = tk.Toplevel(dialog)
             log_window.title("SoundLive NDI — Journal DNS / ACME")
-            log_window.geometry("850x440")
+            log_window.geometry(f"{min(850, log_window.winfo_screenwidth() - 80)}x"
+                                f"{min(440, log_window.winfo_screenheight() - 100)}")
             log_window.transient(dialog)
+            log_actions = ttk.Frame(log_window, padding=(12, 8, 12, 12))
+            log_actions.pack(side="bottom", fill="x")
             log_frame = ttk.Frame(log_window, padding=12)
             log_frame.pack(fill="both", expand=True)
             log_text = tk.Text(log_frame, wrap="word", state="disabled")
@@ -1225,13 +1238,14 @@ class Launcher:
                     if dialog.winfo_exists():
                         dialog.grab_set()
             log_window.protocol("WM_DELETE_WINDOW", close_log)
-            log_actions = ttk.Frame(log_window, padding=(12, 0, 12, 12))
-            log_actions.pack(fill="x")
             def copy_log():
                 log_window.clipboard_clear()
                 log_window.clipboard_append(log_text.get("1.0", "end-1c"))
             ttk.Button(log_actions, text="Copier le journal", command=copy_log).pack(side="left")
             ttk.Button(log_actions, text="Fermer", command=close_log).pack(side="right")
+            log_window.update_idletasks()
+            log_window.minsize(min(log_window.winfo_screenwidth() - 80,
+                                   log_actions.winfo_reqwidth() + 24), log_actions.winfo_reqheight() + 100)
             log_window.grab_set()
             append_log("Début de la vérification PowerDNS et ACME.")
 
@@ -1290,6 +1304,14 @@ class Launcher:
                                    command=begin)
         launch_button.pack(side="left", padx=(0, 8))
         ttk.Button(buttons, text="Fermer", command=dialog.destroy).pack(side="right")
+        dialog.update_idletasks()
+        width = min(dialog.winfo_screenwidth() - 80,
+                    max(720, content.winfo_reqwidth() + scrollbar.winfo_reqwidth()))
+        height = min(dialog.winfo_screenheight() - 120,
+                     content.winfo_reqheight() + buttons.winfo_reqheight() + 12)
+        dialog.geometry(f"{width}x{height}")
+        dialog.minsize(min(width, buttons.winfo_reqwidth() + 24),
+                       buttons.winfo_reqheight() + 100)
         dialog.grab_set()
 
     def open_certificate_folder(self):
