@@ -69,7 +69,7 @@ with HTTPServer(("127.0.0.1", 0), PDNSHandler) as server:
     assert len(PDNSHandler.notifications) == 2
     PDNSHandler.kind = "Native"
     pdns.notify()
-    assert len(PDNSHandler.notifications) == 2
+    assert len(PDNSHandler.notifications) == 3
     server.shutdown()
     thread.join(timeout=5)
 print("OK: API PowerDNS GET et TXT EXTEND/PRUNE sans effacer le reste de la zone.")
@@ -115,12 +115,12 @@ with patch.object(legacy, "request", side_effect=legacy_request):
     legacy.txt(name, token, "PRUNE")
     assert zone["rrsets"][0]["records"] == [other, disabled]
     legacy.txt(name, token, "PRUNE")
-    assert actions == ["EXTEND", "REPLACE", "REPLACE"]
+    assert actions == ["EXTEND", "REPLACE", "NOTIFY", "NOTIFY", "REPLACE", "NOTIFY", "NOTIFY"]
     zone["rrsets"] = []
     legacy.txt(name, token, "EXTEND")
     assert zone["rrsets"][0]["ttl"] == 60
     legacy.txt(name, token, "PRUNE")
-    assert not zone["rrsets"] and actions[-1] == "DELETE"
+    assert not zone["rrsets"] and actions[-2:] == ["DELETE", "NOTIFY"]
     zone["kind"] = "Master"
     legacy.txt(name, token, "EXTEND")
     assert actions[-2:] == ["REPLACE", "NOTIFY"]
@@ -136,6 +136,34 @@ with patch.object(legacy, "request", side_effect=legacy_request):
         raise AssertionError("Une réponse GET incomplète a été acceptée")
     assert actions == before
 print("OK: ancienne API PowerDNS, conservation des TXT et TTL, nettoyage ciblé.")
+
+# Une zone Native doit tenter NOTIFY ; un refus 422 ne bloque pas le DNS-01.
+with patch.object(legacy, "verify", return_value={"kind": "Native"}), \
+     patch.object(legacy, "request", side_effect=PowerDNSRejected("HTTP 422")) as request:
+    legacy.notify()
+    request.assert_called_once_with("PUT", suffix="/notify")
+with patch.object(legacy, "verify", return_value={"kind": "Master"}), \
+     patch.object(legacy, "request", side_effect=PowerDNSRejected("HTTP 422")):
+    try:
+        legacy.notify()
+    except PowerDNSRejected:
+        pass
+    else:
+        raise AssertionError("Un refus NOTIFY Master a été ignoré")
+
+messages = []
+with patch("acme_powerdns.json_http", return_value=(
+        {"Status": 3, "Authority": [{"type": 6, "TTL": 300}]}, {}, 200)):
+    assert not public_txt_contains(name, token, messages.append)
+assert any("NXDOMAIN" in message for message in messages)
+assert any("300" in message for message in messages)
+messages.clear()
+with patch("acme_powerdns.json_http", return_value=(
+        {"Status": 0, "Answer": [{"type": 16, "data": '"' + token + '"'}]}, {}, 200)) as query:
+    assert public_txt_contains(name, token, messages.append, "Cloudflare")
+    assert "cloudflare-dns.com" in query.call_args.args[1]
+assert any("challenge trouvé" in message for message in messages)
+print("OK: notification Native et diagnostic DNS public.")
 
 assert validate_zone("exemple.fr", "regie.exemple.fr") == "exemple.fr."
 try:
