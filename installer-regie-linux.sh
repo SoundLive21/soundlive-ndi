@@ -69,6 +69,7 @@ if [[ ! $previous -ef $target ]]; then
     done
 fi
 
+/usr/bin/python3 -B "$target/logo_soundlive.py"
 /usr/bin/python3 -B "$target/tableau.py" --preparer-installations
 
 applications="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
@@ -83,6 +84,7 @@ cat > "$applications/soundlive-ndi-regie.desktop" <<DESKTOP
 Type=Application
 Name=SoundLive-NDI Régie
 Exec=/bin/bash "$desktop_path/demarrer-regie-ubuntu.sh"
+Icon=$target/soundlive.png
 Terminal=false
 Categories=AudioVideo;
 DESKTOP
