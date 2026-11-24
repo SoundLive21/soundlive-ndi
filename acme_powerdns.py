@@ -135,16 +135,19 @@ class PowerDNS:
         return payload
 
     def notify(self):
-        # Native zones replicate through the backend, not DNS NOTIFY.
         zone = self.verify()
         kind = zone.get("kind", "").lower()
         self.progress(f"PowerDNS : zone {kind}, SOA {zone.get('serial', 'inconnu')}, "
                       f"SOA publié {zone.get('edited_serial', 'inconnu')}.")
-        if kind == "native":
-            self.progress("PowerDNS : zone Native, notification DNS non applicable.")
-            return
-        self.request("PUT", suffix="/notify")
-        self.progress("PowerDNS : notification des secondaires demandée.")
+        try:
+            self.request("PUT", suffix="/notify")
+        except PowerDNSRejected as error:
+            if kind != "native":
+                raise
+            self.progress(f"PowerDNS : NOTIFY refusé pour la zone Native ({error}). "
+                          "Poursuite de la vérification DNS.")
+        else:
+            self.progress("PowerDNS : notification des secondaires demandée.")
 
     def txt(self, fqdn, value, action):
         if action not in ("EXTEND", "PRUNE"):
@@ -377,29 +380,47 @@ class AcmeClient:
         raise AcmeFailure("Let's Encrypt n'a pas finalisé la demande dans le délai prévu.")
 
 
-def public_txt_contains(name, value):
-    """Recherche via DNS-over-HTTPS pour ne pas confondre split-DNS et DNS public."""
+def public_txt_contains(name, value, progress=None, resolver="Google"):
+    """Recherche DNS-over-HTTPS et diagnostic sans divulguer les valeurs TXT."""
+    progress = progress or (lambda message: None)
+    endpoints = {"Google": "https://dns.google/resolve",
+                 "Cloudflare": "https://cloudflare-dns.com/dns-query"}
     query = urlencode({"name": name, "type": "TXT"})
     try:
-        result, _, _ = json_http("GET", "https://dns.google/resolve?" + query,
+        result, _, _ = json_http("GET", endpoints[resolver] + "?" + query,
                                 headers={"Accept": "application/dns-json"})
-    except (AcmeFailure, OSError):
+    except (AcmeFailure, OSError, ValueError):
+        progress(f"DNS public ({resolver}) : requête HTTPS impossible ou réponse invalide.")
         return False
-    if not isinstance(result, dict) or result.get("Status") != 0:
+    if not isinstance(result, dict):
+        progress(f"DNS public ({resolver}) : réponse JSON invalide.")
         return False
-    return any(row.get("type") == 16 and row.get("data", "").strip('"') == value
-               for row in result.get("Answer", []))
+    status = result.get("Status")
+    label = {0: "NOERROR", 1: "FORMERR", 2: "SERVFAIL", 3: "NXDOMAIN",
+             4: "NOTIMP", 5: "REFUSED"}.get(status, "inconnu")
+    answers = result.get("Answer") or []
+    records = [row for row in answers if row.get("type") == 16]
+    found = status == 0 and any(row.get("data", "").strip('"') == value for row in records)
+    progress(f"DNS public ({resolver}) : {label}, {len(records)} TXT, "
+             + ("challenge trouvé." if found else "challenge absent."))
+    if not found:
+        for row in result.get("Authority") or []:
+            if row.get("type") == 6:
+                progress(f"DNS public ({resolver}) : SOA en réponse négative, TTL {row.get('TTL', '?')} s.")
+                break
+    return found
 
 
 def wait_public_txt(name, value, progress, timeout=300):
     until = time.monotonic() + timeout
     while time.monotonic() < until:
-        progress(f"DNS public (Google) : recherche TXT {name}.")
-        if public_txt_contains(name, value):
-            progress("DNS public : valeur du challenge trouvée.")
-            return
+        for resolver in ("Google", "Cloudflare"):
+            progress(f"DNS public ({resolver}) : recherche TXT {name}.")
+            if public_txt_contains(name, value, progress, resolver):
+                progress("DNS public : valeur du challenge trouvée.")
+                return
         progress("DNS public : valeur non visible, nouvel essai dans 10 s.")
-        time.sleep(10)
+        time.sleep(min(10, max(0, until - time.monotonic())))
     raise AcmeFailure("Le TXT DNS-01 n'est pas visible depuis le DNS public après 5 minutes. Vérifie les NS, la zone et la propagation.")
 
 
