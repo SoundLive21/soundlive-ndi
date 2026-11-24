@@ -18,7 +18,7 @@ import sys
 import threading
 from time import monotonic
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 import traceback
 import webbrowser
 
@@ -532,7 +532,13 @@ class Launcher:
         ttk.Button(share, text="Serveur DHCP", command=self.open_dhcp).pack(side="left", padx=(8, 0))
         self.network_button = ttk.Button(share, text="Autoriser la gestion réseau web", command=self.authorize_network)
         self.network_button.pack(side="left", padx=(8, 0))
-        ttk.Label(panel, text=COPYRIGHT).grid(row=8, sticky="w", pady=(8, 0))
+        backups = ttk.Frame(panel)
+        backups.grid(row=8, sticky="ew", pady=(10, 0))
+        self.backup_button = ttk.Button(backups, text="Sauvegarder la régie", command=self.backup_dialog)
+        self.restore_button = ttk.Button(backups, text="Restaurer la régie", command=self.restore_dialog)
+        self.backup_button.pack(side="left", padx=(0, 8))
+        self.restore_button.pack(side="left")
+        ttk.Label(panel, text=COPYRIGHT).grid(row=9, sticky="w", pady=(8, 0))
         window.update_idletasks()
         viewport.configure(width=min(panel.winfo_reqwidth(), window.winfo_screenwidth() * 9 // 10),
                            height=min(panel.winfo_reqheight(), window.winfo_screenheight() * 4 // 5))
@@ -678,6 +684,68 @@ class Launcher:
         self.visible.set(True)
         self.reveal_password()
 
+    def backup_dialog(self):
+        if self.regie is not None or self.busy:
+            return
+        from sauvegarde_regie import create_backup
+        destination = filedialog.asksaveasfilename(parent=self.window,
+            title="Sauvegarder la régie", defaultextension=".slbackup",
+            initialfile="SoundLive-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".slbackup",
+            filetypes=[("Sauvegarde SoundLive chiffrée", "*.slbackup")])
+        if not destination:
+            return
+        password = simpledialog.askstring("Sauvegarde chiffrée", "Mot de passe (12 caractères minimum) :",
+                                          show="•", parent=self.window)
+        if not password:
+            return
+        confirm = simpledialog.askstring("Sauvegarde chiffrée", "Confirmer le mot de passe :",
+                                         show="•", parent=self.window)
+        if password != confirm:
+            messagebox.showerror("Sauvegarde", "Les mots de passe diffèrent.", parent=self.window)
+            return
+        try:
+            count = create_backup(self.tableau.ROOT, destination, password)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            messagebox.showerror("Sauvegarde", str(error), parent=self.window)
+            return
+        messagebox.showinfo("Sauvegarde", f"{count} fichiers sauvegardés dans une archive chiffrée.\n"
+                            "Conserve son mot de passe séparément.", parent=self.window)
+
+    def restore_dialog(self):
+        if self.regie is not None or self.busy:
+            return
+        if self.network.dhcp.status().get("running"):
+            messagebox.showwarning("Restauration", "Arrête d'abord le serveur DHCP.", parent=self.window)
+            return
+        from sauvegarde_regie import restore_backup
+        source = filedialog.askopenfilename(parent=self.window, title="Restaurer la régie",
+            filetypes=[("Sauvegarde SoundLive chiffrée", "*.slbackup")])
+        if not source:
+            return
+        password = simpledialog.askstring("Restauration", "Mot de passe de l'archive :",
+                                          show="•", parent=self.window)
+        if not password:
+            return
+        if not messagebox.askyesno("Restaurer la régie",
+            "Remplacer les configurations présentes dans la sauvegarde ?\n"
+            "Une sauvegarde de sécurité sera créée avant les modifications.\n"
+            "Le DHCP restauré restera désactivé. Le lanceur redémarrera.",
+            default=messagebox.NO, parent=self.window):
+            return
+        ip = simpledialog.askstring("Adresse HTTPS",
+            "Nouvelle IPv4 locale de la régie (laisser vide pour conserver celle de la sauvegarde) :",
+            initialvalue=dict(self.interfaces).get(self.interface.get(), ""), parent=self.window)
+        if ip is None:
+            return
+        try:
+            count, safety = restore_backup(self.tableau.ROOT, source, password, ip.strip() or None)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            messagebox.showerror("Restauration", str(error), parent=self.window)
+            return
+        messagebox.showinfo("Restauration", f"{count} fichiers restaurés.\n"
+                            f"Sauvegarde de sécurité : {safety or 'aucune'}", parent=self.window)
+        self.finish_close(restart=True)
+
     def refresh_acme_summary(self, force=False):
         if not force and monotonic() < self.acme_next_refresh:
             return
@@ -723,6 +791,8 @@ class Launcher:
         self.selector.configure(state="readonly" if editable else "disabled")
         for widget in (self.reload, self.entry, self.reveal, self.generate, self.acme_button):
             widget.configure(state="normal" if editable else "disabled")
+        self.backup_button.configure(state="normal" if stopped else "disabled")
+        self.restore_button.configure(state="normal" if stopped else "disabled")
         self.start_button.configure(state="normal" if stopped else "disabled")
         self.stop_button.configure(state="normal" if self.regie and not self.busy else "disabled")
         self.open_button.configure(state="normal" if self.regie and not self.busy else "disabled")
