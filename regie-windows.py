@@ -5,7 +5,7 @@
 """Lanceur graphique de la régie SoundLive-NDI."""
 from base64 import b64encode
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timezone
 from ipaddress import IPv4Address
 import json
 import os
@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from time import monotonic
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import traceback
@@ -463,11 +464,21 @@ class Launcher:
         ttk.Label(setup, text="Compte regie. À IP identique, laisse le champ vide pour conserver le mot de passe.",
                   wraplength=550).grid(
             row=3, column=0, columnspan=3, sticky="w", pady=(2, 0))
-        self.generate = ttk.Button(setup, text="Générer un nouveau mot de passe", command=self.generate_password)
-        self.generate.grid(row=4, column=1, sticky="w", pady=(8, 0))
-        self.acme_button = ttk.Button(setup, text="Certificat ACME / DNS / IP publique…",
+        setup_actions = ttk.Frame(setup)
+        setup_actions.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        self.generate = ttk.Button(setup_actions, text="Générer un nouveau mot de passe", command=self.generate_password)
+        self.generate.pack(side="left", padx=(0, 8))
+        self.acme_button = ttk.Button(setup_actions, text="Certificat ACME",
                                       command=self.configure_acme_dialog)
-        self.acme_button.grid(row=5, column=1, sticky="w", pady=(8, 0))
+        self.acme_button.pack(side="left", padx=(0, 10))
+        self.acme_summary = tk.StringVar(value="Aucun certificat ACME")
+        self.acme_summary_label = ttk.Label(setup_actions, textvariable=self.acme_summary,
+                                            justify="left", wraplength=300)
+        self.acme_summary_label.pack(side="left", fill="x", expand=True)
+        setup_actions.bind("<Configure>", lambda event: self.acme_summary_label.configure(
+            wraplength=max(100, event.width - self.generate.winfo_reqwidth()
+                           - self.acme_button.winfo_reqwidth() - 30)))
+        self.acme_next_refresh = 0.0
 
         actions = ttk.Frame(panel)
         actions.grid(row=3, sticky="ew", pady=12)
@@ -667,6 +678,44 @@ class Launcher:
         self.visible.set(True)
         self.reveal_password()
 
+    def refresh_acme_summary(self, force=False):
+        if not force and monotonic() < self.acme_next_refresh:
+            return
+        self.acme_next_refresh = monotonic() + 10
+        from certificats_acme import certificate_configuration, check_certificate
+        from gestion_acme_powerdns import get_config, RENEW_BEFORE, CERT, KEY
+        folder = self.tableau.REMOTE_ACCESS
+        try:
+            config = certificate_configuration(folder)
+            if not config:
+                self.acme_summary.set("Aucun certificat ACME")
+                return
+            name = config["identifier"]
+            host = f"[{name}]" if ":" in name else name
+            url = f"https://{host}:{self.access.PORT}"
+            try:
+                _, expiry = check_certificate(name, config["fullchain"], config["private_key"])
+            except (OSError, ValueError):
+                self.acme_summary.set(url + "\nCertificat invalide ou expiré")
+                return
+            automatic = get_config(folder)
+            managed = (automatic and automatic["domain"] == name
+                       and Path(config["fullchain"]).resolve() == (folder / CERT).resolve()
+                       and Path(config["private_key"]).resolve() == (folder / KEY).resolve())
+            expiry_text = expiry.astimezone().strftime("%d/%m/%Y")
+            if managed:
+                renewal = expiry - RENEW_BEFORE
+                date = renewal.astimezone().strftime("%d/%m/%Y")
+                detail = ("Renouvellement dès le " + date if renewal > datetime.now(timezone.utc)
+                          else "Renouvellement à effectuer")
+                if automatic["environment"] == "staging":
+                    detail += " · TEST"
+            else:
+                detail = "Renouvellement externe"
+            self.acme_summary.set(f"{url}\n{detail} · Expire le {expiry_text}")
+        except (OSError, ValueError, KeyError, TypeError):
+            self.acme_summary.set("Configuration ACME illisible")
+
     def controls(self):
         stopped = self.regie is None and not self.busy
         editable = stopped and self.remote.get()
@@ -844,6 +893,7 @@ class Launcher:
             self.finish_close()
             return
         self.refresh_remote_list()
+        self.refresh_acme_summary()
         self.show_publication(self.publication_status.read())
         self.window.after(1500, self.tick)
 
@@ -1107,6 +1157,7 @@ class Launcher:
             except (OSError, ValueError) as error:
                 messagebox.showerror("Certificat ACME", str(error), parent=dialog)
                 return
+            self.refresh_acme_summary(force=True)
             dialog.destroy()
             messagebox.showinfo("Certificat ACME",
                 f"Certificat configuré pour {name}. Démarre la régie pour l'activer. "
@@ -1124,6 +1175,7 @@ class Launcher:
             except OSError as error:
                 messagebox.showerror("Certificat ACME", str(error), parent=dialog)
                 return
+            self.refresh_acme_summary(force=True)
             dialog.destroy()
         ttk.Button(actions, text="Appliquer", command=enable).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="Automatiser via PowerDNS…",
@@ -1289,6 +1341,7 @@ class Launcher:
                         append_log(events.get_nowait())
                     except Empty:
                         break
+                self.refresh_acme_summary(force=True)
                 append_log(("SUCCÈS : " if ok else "ERREUR : ") + message)
                 if dialog.winfo_exists():
                     launch_button.configure(state="normal")
