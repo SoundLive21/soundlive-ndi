@@ -444,7 +444,9 @@ class Launcher:
         viewport.bind("<Configure>", lambda event: viewport.itemconfigure(panel_id, width=event.width))
         panel.columnconfigure(0, weight=1)
         ttk.Label(panel, text=f"{APP_NAME} · Régie", font=("Segoe UI", 19, "bold")).grid(row=0, sticky="w")
-        ttk.Label(panel, textvariable=self.status).grid(row=1, sticky="w", pady=(2, 14))
+        states = ttk.LabelFrame(panel, text="États", padding=10)
+        states.grid(row=1, sticky="ew", pady=(6, 10))
+        ttk.Label(states, textvariable=self.status).pack(anchor="w", pady=(0, 8))
 
         setup = ttk.LabelFrame(panel, text="Accès distant HTTPS", padding=10)
         setup.grid(row=2, sticky="ew")
@@ -480,24 +482,24 @@ class Launcher:
                            - self.acme_button.winfo_reqwidth() - 30)))
         self.acme_next_refresh = 0.0
 
-        actions = ttk.Frame(panel)
-        actions.grid(row=3, sticky="ew", pady=12)
+        actions = ttk.Frame(states)
+        actions.pack(fill="x")
         self.start_button = ttk.Button(actions, text="Démarrer la régie", command=self.start)
         self.stop_button = ttk.Button(actions, text="Arrêter la régie", command=self.stop)
         self.open_button = ttk.Button(actions, text="Ouvrir la console", command=self.open_dashboard)
-        self.release_button = ttk.Button(actions, text="Versions publiées", command=self.publications)
+        self.release_button = ttk.Button(actions, text="Versions", command=self.publications)
         for button in (self.start_button, self.stop_button, self.open_button):
             button.pack(side="left", padx=(0, 8))
         self.release_button.pack(side="left")
-        address = ttk.Frame(panel)
-        address.grid(row=4, sticky="ew", pady=(0, 10))
+        address = ttk.Frame(setup)
+        address.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(10, 0))
         ttk.Label(address, textvariable=self.remote_address).pack(side="left")
         self.copy_button = ttk.Button(address, text="Copier l’adresse", command=self.copy_address)
         self.copy_button.pack(side="right")
         self.certificate_button = ttk.Button(address, text="Dossier du certificat", command=self.open_certificate_folder)
         self.certificate_button.pack(side="right", padx=(0, 8))
         connections = ttk.LabelFrame(panel, text="Connexions à distance", padding=10)
-        connections.grid(row=5, sticky="ew")
+        connections.grid(row=5, sticky="ew", pady=(10, 0))
         connections.columnconfigure(0, weight=1)
         connections.rowconfigure(1, weight=1)
         ttk.Label(connections, textvariable=self.connection_status).grid(sticky="w", pady=(0, 6))
@@ -526,19 +528,32 @@ class Launcher:
         ttk.Label(self.qr_panel, text="Scanne ce code depuis un appareil connecté au réseau de la régie.",
                   wraplength=290).pack(side="left", fill="x", expand=True)
 
-        share = ttk.Frame(panel)
+        share = ttk.LabelFrame(panel, text="Services", padding=10)
         share.grid(row=7, sticky="ew", pady=(10, 0))
-        ttk.Button(share, text="Partage Internet", command=self.internet_dialog).pack(side="left")
-        ttk.Button(share, text="Serveur DHCP", command=self.open_dhcp).pack(side="left", padx=(8, 0))
+        self.internet_status = tk.StringVar(value="Vérification…")
+        self.dhcp_status = tk.StringVar(value="Vérification…")
+        ttk.Button(share, text="Partage Internet", command=self.internet_dialog).grid(row=0, column=0, sticky="ew", pady=3)
+        ttk.Label(share, textvariable=self.internet_status).grid(row=0, column=1, sticky="w", padx=10)
+        ttk.Button(share, text="Serveur DHCP", command=self.open_dhcp).grid(row=1, column=0, sticky="ew", pady=3)
+        ttk.Label(share, textvariable=self.dhcp_status).grid(row=1, column=1, sticky="w", padx=10)
         self.network_button = ttk.Button(share, text="Autoriser la gestion réseau web", command=self.authorize_network)
-        self.network_button.pack(side="left", padx=(8, 0))
-        backups = ttk.Frame(panel)
+        self.network_button.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        backups = ttk.LabelFrame(panel, text="Sauvegarde et restauration", padding=10)
         backups.grid(row=8, sticky="ew", pady=(10, 0))
-        self.backup_button = ttk.Button(backups, text="Sauvegarder la régie", command=self.backup_dialog)
-        self.restore_button = ttk.Button(backups, text="Restaurer la régie", command=self.restore_dialog)
+        backup_actions = ttk.Frame(backups)
+        backup_actions.pack(fill="x")
+        self.backup_button = ttk.Button(backup_actions, text="Sauvegarder la régie", command=self.backup_dialog)
+        self.restore_button = ttk.Button(backup_actions, text="Restaurer la régie", command=self.restore_dialog)
         self.backup_button.pack(side="left", padx=(0, 8))
-        self.restore_button.pack(side="left")
-        ttk.Label(panel, text=COPYRIGHT).grid(row=9, sticky="w", pady=(8, 0))
+        self.restore_button.pack(side="left", padx=(0, 8))
+        ttk.Button(backup_actions, text="Dossier de configuration", command=self.open_configuration_folder).pack(side="left")
+        self.restore_summary = tk.StringVar(value="Aucune restauration enregistrée")
+        # Le message est sur une ligne distincte des boutons.
+        backup_status = ttk.Frame(backups)
+        backup_status.pack(fill="x")
+        ttk.Label(backup_status, textvariable=self.restore_summary, wraplength=620).pack(anchor="w", padx=10, pady=(3, 0))
+        self.refresh_restore_summary()
+        ttk.Label(panel, text=COPYRIGHT).grid(row=10, sticky="w", pady=(8, 0))
         window.update_idletasks()
         viewport.configure(width=min(panel.winfo_reqwidth(), window.winfo_screenwidth() * 9 // 10),
                            height=min(panel.winfo_reqheight(), window.winfo_screenheight() * 4 // 5))
@@ -684,6 +699,30 @@ class Launcher:
         self.visible.set(True)
         self.reveal_password()
 
+    def open_configuration_folder(self):
+        folder = self.tableau.ROOT
+        try:
+            if sys.platform == "win32":
+                os.startfile(folder)
+            else:
+                subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(folder)])
+        except OSError as error:
+            messagebox.showerror("Dossier de configuration", str(error), parent=self.window)
+
+    def refresh_restore_summary(self):
+        try:
+            info = json.loads((self.tableau.ROOT / ".soundlive-backups" / "derniere-restauration.json").read_text(encoding="utf-8"))
+            self.restore_summary.set("Dernière restauration réussie : " + info["archive"] + " · " + info["date"])
+        except (OSError, ValueError, KeyError, TypeError):
+            self.restore_summary.set("Aucune restauration enregistrée")
+
+    def refresh_services(self):
+        gateway = internet_state().get("gateway")
+        self.internet_status.set(f"Configuré · {gateway}" if gateway else "Désactivé")
+        dhcp = self.network.dhcp.status()
+        self.dhcp_status.set("En service" if dhcp.get("running") else
+                             "Erreur · " + str(dhcp["error"]) if dhcp.get("error") else "Arrêté")
+
     def backup_dialog(self):
         if self.regie is not None or self.busy:
             return
@@ -742,6 +781,7 @@ class Launcher:
         except (OSError, ValueError, KeyError, TypeError) as error:
             messagebox.showerror("Restauration", str(error), parent=self.window)
             return
+        self.refresh_restore_summary()
         messagebox.showinfo("Restauration", f"{count} fichiers restaurés.\n"
                             f"Sauvegarde de sécurité : {safety or 'aucune'}", parent=self.window)
         self.finish_close(restart=True)
@@ -964,6 +1004,7 @@ class Launcher:
             return
         self.refresh_remote_list()
         self.refresh_acme_summary()
+        self.refresh_services()
         self.show_publication(self.publication_status.read())
         self.window.after(1500, self.tick)
 
