@@ -542,12 +542,21 @@ class Launcher:
         share.grid(row=7, sticky="ew", pady=(10, 0))
         self.internet_status = tk.StringVar(value="Vérification…")
         self.dhcp_status = tk.StringVar(value="Vérification…")
-        ttk.Button(share, text="Partage Internet", command=self.internet_dialog).grid(row=0, column=0, sticky="ew", pady=3)
-        ttk.Label(share, textvariable=self.internet_status).grid(row=0, column=1, sticky="w", padx=10)
-        ttk.Button(share, text="Serveur DHCP", command=self.open_dhcp).grid(row=1, column=0, sticky="ew", pady=3)
-        ttk.Label(share, textvariable=self.dhcp_status).grid(row=1, column=1, sticky="w", padx=10)
+        for column in range(3):
+            share.columnconfigure(column, weight=1, uniform="service")
+        ttk.Button(share, text="Partage Internet", command=self.internet_dialog).grid(
+            row=0, column=0, sticky="ew", padx=(0, 8))
+        ttk.Button(share, text="Serveur DHCP", command=self.open_dhcp).grid(
+            row=0, column=1, sticky="ew", padx=(0, 8))
         self.network_button = ttk.Button(share, text="Autoriser la gestion réseau web", command=self.authorize_network)
-        self.network_button.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.network_button.grid(row=0, column=2, sticky="ew")
+        internet_label = ttk.Label(share, textvariable=self.internet_status, justify="left")
+        internet_label.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        dhcp_label = ttk.Label(share, textvariable=self.dhcp_status, justify="left")
+        dhcp_label.grid(row=1, column=1, sticky="w", pady=(4, 0))
+        share.bind("<Configure>", lambda event: (
+            internet_label.configure(wraplength=max(100, event.width // 3 - 18)),
+            dhcp_label.configure(wraplength=max(100, event.width // 3 - 18))))
         backups = ttk.LabelFrame(panel, text="Sauvegarde et restauration", padding=10)
         backups.grid(row=8, sticky="ew", pady=(10, 0))
         backup_actions = ttk.Frame(backups)
@@ -809,12 +818,10 @@ class Launcher:
                 self.acme_summary.set("Aucun certificat ACME")
                 return
             name = config["identifier"]
-            host = f"[{name}]" if ":" in name else name
-            url = f"https://{host}:{self.access.PORT}"
             try:
                 _, expiry = check_certificate(name, config["fullchain"], config["private_key"])
             except (OSError, ValueError):
-                self.acme_summary.set(url + "\nCertificat invalide ou expiré")
+                self.acme_summary.set("Certificat invalide ou expiré")
                 return
             automatic = get_config(folder)
             managed = (automatic and automatic["domain"] == name
@@ -830,7 +837,7 @@ class Launcher:
                     detail += " · TEST"
             else:
                 detail = "Renouvellement externe"
-            self.acme_summary.set(f"{url}\n{detail} · Expire le {expiry_text}")
+            self.acme_summary.set(f"{detail}\nExpire le {expiry_text}")
         except (OSError, ValueError, KeyError, TypeError):
             self.acme_summary.set("Configuration ACME illisible")
 
