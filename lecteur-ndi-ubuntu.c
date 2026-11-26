@@ -430,6 +430,10 @@ cleanup:
 
 static int run(int argc, char **argv)
 {
+    if (argc == 2 && strcmp(argv[1], "--multi-ecrans") == 0) {
+        puts("multi-ecrans-1");
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "--displays") == 0) {
         SDL_SetMainReady();
         if (SDL_Init(SDL_INIT_VIDEO) < 0) return 1;
