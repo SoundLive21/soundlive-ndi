@@ -47,6 +47,15 @@ h2{margin:0;font-size:1.24rem;overflow-wrap:anywhere}.badge{flex:none;border-rad
 input,select,button{font:inherit;border-radius:8px;border:1px solid var(--edge);color:inherit}input:not([type=checkbox]):not([type=range]),select{padding:10px;background:#100d12;width:100%}input[type=range]{accent-color:var(--red);width:100%}input[type=checkbox]{accent-color:var(--red)}
 button{padding:9px 13px;cursor:pointer;background:#2b222f;font-weight:600;white-space:nowrap}button.primary{background:#df3453;color:#fff;border-color:#df3453}button:disabled{opacity:.44;cursor:default}button:hover:not(:disabled){filter:brightness(1.18)}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}button.remove{color:#efacb7}.check{display:flex;align-items:center;gap:6px}
+.video-output{min-width:0;margin:12px 0;padding:12px 14px 16px;border:1px solid #59404e;border-radius:12px;background:#17121b}
+.video-output legend{padding:0 8px;color:#f5d1df;font-size:1rem;font-weight:700}
+.video-output legend .output-title{display:inline-flex;align-items:center;gap:8px}
+.video-output legend svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.video-output legend small{font-size:.78rem;font-weight:400;color:var(--sub)}
+.video-output .check{display:flex;align-items:center;justify-content:flex-start;gap:6px}
+.video-output .check input{margin:0 4px 0 0;width:auto}
+.video-output .primary{width:100%}
+.video-output .action-row .primary{width:auto}
 .action-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
 .action-row button,.full-action{white-space:normal}
 .full-action{width:100%;margin-top:12px}
@@ -776,7 +785,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
       <summary>Commandes et réglages</summary>
       <section class="pending"></section>
       <form class="config">
-      <fieldset class="primary-output"><legend>Écran 1</legend>
+      <fieldset class="primary-output video-output"><legend>Écran 1</legend>
       <div class="resolution-controls" hidden>
         <label>Résolution maximale validée<select class="resolution-limit"></select></label>
         <p class="small resolution-help">Choisis la résolution la plus élevée testée sur ce lecteur.</p>
@@ -2706,8 +2715,10 @@ function cardFor(id) {
   });
   list.addEventListener("change", () => {
     if (!list.value) return;
-    ui.source.value = list.value;
     card.dirty = true;
+    card.outputOff = list.value === "\u0000off";
+    if (!card.outputOff) ui.source.value = list.value;
+    syncSourceChoice(card);
   });
   resolution.addEventListener("change", () => {
     card.resolutionChoice = resolution.value;
@@ -2751,13 +2762,13 @@ function cardFor(id) {
     const local = card.data.media?.enabled === true;
     const settings = {source:local ? current.source : ui.source.value, bandwidth:ui.bandwidth.value, volume:Number(ui.volume.value),
                       orientation:ui.orientation.value,
-                      muted:ui.muted.checked, enabled:current.enabled};
+                      muted:ui.muted.checked, enabled:local ? current.enabled : !card.outputOff};
     const version = card.editVersion;
     const quality = ui.bandwidth.selectedOptions[0].textContent;
-    const requested = local ? undefined : card.resolutionChoice || undefined;
+    const requested = local || card.outputOff ? undefined : card.resolutionChoice || undefined;
     const volume = settings.muted ? "Son coupé" : "Volume " + settings.volume + " %";
     const mode = local ? ["Média local", settings.bandwidth !== current.bandwidth ? "Qualité NDI · " + quality : ""] :
-      [settings.source, quality];
+      [settings.enabled ? settings.source : "Ne pas diffuser de flux", quality];
     showAction({
       title:"Appliquer les réglages à " + card.data.name,
       detail:[...mode, volume, ui.orientation.selectedOptions[0].textContent].filter(Boolean).join(" · "),
@@ -2865,20 +2876,38 @@ function syncSourceChoice(card) {
     const hint = new Option(items.length ? "Choisir une source" :
       row.online ? "Aucune source détectée" : "Récepteur hors ligne", "");
     hint.disabled = true;
-    list.replaceChildren(hint, ...items.map(([source, disabled]) => {
+    list.replaceChildren(hint, new Option("Ne pas diffuser de flux", "\u0000off"), ...items.map(([source, disabled]) => {
       const option = new Option(source + (disabled ? " · Non validée pour cet écran" : ""), source);
       option.disabled = disabled;
       return option;
     }));
-    list.disabled = !items.length;
+    list.disabled = false;
     card.sources = signature;
   }
-  list.value = Array.from(list.options).some(option => option.value === ui.source.value) ?
+  list.value = card.outputOff ? "\u0000off" : Array.from(list.options).some(option => option.value === ui.source.value) ?
     ui.source.value : "";
+  ui.source.disabled = !!card.outputOff;
   const changed = ui.source.value !== row.options.source || ui.bandwidth.value !== row.options.bandwidth;
-  ui.source.setCustomValidity(activeResolution && (changed || filter)
+  ui.source.setCustomValidity(!card.outputOff && activeResolution && (changed || filter)
     && !available[activeResolution]?.includes(ui.source.value)
     ? "Cette source n’est pas détectée ou sa résolution n’est pas validée sur cet écran." : "");
+}
+function outputLegend(legend, number, output) {
+  const title = document.createElement("span");
+  title.className = "output-title";
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("viewBox", "0 0 24 24");
+  icon.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(icon.namespaceURI, "path");
+  path.setAttribute("d", "M3 4h18v13H3z M12 17v4 M8 21h8");
+  icon.append(path);
+  title.append(icon, document.createTextNode("Écran " + number));
+  if (output) {
+    const size = document.createElement("small");
+    size.textContent = output.width + " × " + output.height;
+    title.append(size);
+  }
+  legend.replaceChildren(title);
 }
 function renderExtraOutputs(card, row) {
   const box = card.outputs;
@@ -2894,7 +2923,8 @@ function renderExtraOutputs(card, row) {
     const current = row.extra_outputs?.[output.id] || {};
     const line = document.createElement("fieldset");
     const heading = document.createElement("legend");
-    heading.textContent = "Écran " + (Number(output.id) + 1) + " · " + output.width + " × " + output.height + (output.playing ? " · Lecture" : "");
+    line.className = "video-output";
+    outputLegend(heading, Number(output.id) + 1, output);
     const source = document.createElement("select");
     const sources = [...new Set([current.source, ...(row.report.sources || [])].filter(Boolean))];
     source.append(new Option("Ne pas diffuser de flux", "off"),
@@ -2921,7 +2951,9 @@ function renderExtraOutputs(card, row) {
       const node = document.createElement("label");
       node.append(title, control); return node;
     };
-    const audio = label("Couper le son ", muted);
+    const audio = document.createElement("label");
+    audio.className = "check";
+    audio.append(muted, " Couper le son");
     const sync = () => {
       bandwidth.disabled = volume.disabled = muted.disabled = source.value === "off";
     };
@@ -2950,7 +2982,7 @@ function render(row) {
   card.data = row;
   renderExtraOutputs(card, row);
   const primary = (row.report.outputs || []).find(o => o.id === "0");
-  select(form, ".primary-output legend").textContent = "Écran 1" + (primary ? " · " + primary.width + " × " + primary.height : "");
+  outputLegend(select(form, ".primary-output legend"), 1, primary);
   const handle = select(el, ".card-heading .drag-handle");
   handle.title = "Déplacer " + row.name + " · Glisser ou utiliser les flèches";
   handle.setAttribute("aria-label",handle.title);
@@ -3060,6 +3092,7 @@ function render(row) {
     ui.muted.checked = row.options.muted;
     select(el,"output").value = row.options.volume + " %";
     card.editVersion = row.version;
+    card.outputOff = !row.options.enabled;
   }
   syncSourceChoice(card);
   ui.toggle.textContent = row.options.enabled ? "Stop" : "Reprendre";
