@@ -19,6 +19,7 @@ jobs:
       - name: Construire et signer
         env:
           PUBLICATION_KEY: ${{ secrets.SOUNDLIVE_PUBLICATION_KEY }}
+          PUBLICATION_PASSPHRASE: ${{ secrets.SOUNDLIVE_PUBLICATION_PASSPHRASE }}
         shell: bash
         run: |
           set -euo pipefail
@@ -30,7 +31,15 @@ jobs:
             exit 1
           fi
           printf '%s\n' "$PUBLICATION_KEY" > "$key"
-          actual=$(ssh-keygen -y -P '' -f "$key" | awk '{print $1, $2}')
+          askpass=$(mktemp "$RUNNER_TEMP/soundlive-askpass.XXXXXX")
+          trap 'rm -f "$key" "$askpass"' EXIT
+          printf '%s\n' '#!/bin/sh' 'printf "%s\\n" "$PUBLICATION_PASSPHRASE"' > "$askpass"
+          chmod 700 "$askpass"
+          export SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0
+          if ! actual=$(ssh-keygen -y -f "$key" </dev/null | awk '{print $1, $2}'); then
+            echo "::error::Impossible de déverrouiller la clé. Vérifie SOUNDLIVE_PUBLICATION_PASSPHRASE."
+            exit 1
+          fi
           expected=$(awk '{print $1, $2}' publication.pub)
           if [[ "$actual" != "$expected" ]]; then
             echo "::error::La clé privée ne correspond pas à publication.pub."
