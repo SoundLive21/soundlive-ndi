@@ -395,6 +395,10 @@ static int play(const char *source, bool low, float volume, const char *ready_fi
                         perror("Impossible de signaler la lecture");
                         goto cleanup;
                     }
+                    SDL_Rect bounds;
+                    int actual = SDL_GetWindowDisplayIndex(window);
+                    if (actual >= 0 && SDL_GetDisplayBounds(actual, &bounds) == 0)
+                        fprintf(file, "%d %d %d %d %d\n", actual, bounds.x, bounds.y, bounds.w, bounds.h);
                     fclose(file);
                     visible = true;
                 }
