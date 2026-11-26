@@ -2492,6 +2492,10 @@ def run_windows_screen(tk, log):
     work = ThreadPoolExecutor(max_workers=2)
     flags = subprocess.CREATE_NO_WINDOW
     retry_at = 0
+    displays = []
+    extra_settings = {}
+    extra_players = {}
+    next_displays = 0
 
     badge = tk.Toplevel(root, background="#17141a")
     badge.withdraw()
@@ -2603,12 +2607,68 @@ def run_windows_screen(tk, log):
             raise RuntimeError(result.stderr.strip() or "Découverte NDI indisponible.")
         return [line for line in result.stdout.splitlines() if line]
 
+    def stop_extra(index):
+        entry = extra_players.pop(index, None)
+        if entry:
+            process = entry[0]
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=3)
+
+    def detect_displays():
+        result = subprocess.run([PLAYER, "--displays"], capture_output=True, text=True,
+                                timeout=4, creationflags=flags)
+        if result.returncode:
+            return []
+        found = []
+        for line in result.stdout.splitlines():
+            index, x, y, width, height = map(int, line.split())
+            if 0 <= index < 8 and width > 0 and height > 0:
+                found.append(dict(id=str(index), width=width, height=height, x=x, y=y))
+        return found
+
+    def sync_extra():
+        wanted = {}
+        if not media.enabled and settings["enabled"] and len(displays) > 1:
+            for output in displays:
+                index = output["id"]
+                if index == "0":
+                    continue
+                selected = extra_settings.get(index, {})
+                if selected.get("enabled") is not True:
+                    continue
+                source = settings["source"] if selected.get("mode") == "same" else selected.get("source")
+                if source and source in sources:
+                    wanted[index] = (source, settings["bandwidth"], 0)
+        for index, (process, config, path) in list(extra_players.items()):
+            if wanted.get(index) != config or process.poll() is not None:
+                stop_extra(index)
+        for index, config in wanted.items():
+            if index in extra_players:
+                continue
+            path = STATE / ("video-sortie-" + index + ".prete")
+            path.unlink(missing_ok=True)
+            process = subprocess.Popen([PLAYER, config[0], config[1], str(config[2]), str(path)],
+                stdout=log, stderr=subprocess.STDOUT, creationflags=flags,
+                env={**os.environ, "SOUNDLIVE_DISPLAY_INDEX": index})
+            extra_players[index] = (process, config, path)
+
     def update():
         nonlocal request, discovery, next_poll, next_probe, player, settings, sources
         nonlocal failure, restart, ready, power_id, retry_at
-        nonlocal playing_local, local_name, identification
+        nonlocal playing_local, local_name, identification, displays, extra_settings, next_displays
         now = time.monotonic()
         try:
+            if now >= next_displays:
+                next_displays = now + 10
+                try:
+                    displays = detect_displays()
+                except (OSError, ValueError, subprocess.SubprocessError):
+                    displays = []
             if media.tick():
                 stop_player()
                 media.prune()
@@ -2617,6 +2677,7 @@ def run_windows_screen(tk, log):
                 try:
                     answer = finished.result()
                     new = options(answer["options"])
+                    extra_settings = answer.get("extra_outputs") or {}
                     media.receive(answer.get("media"), answer.get("media_catalog"))
                     if new != settings:
                         write_json(LAST_SETTINGS, new)
@@ -2688,7 +2749,9 @@ def run_windows_screen(tk, log):
                     READY.unlink(missing_ok=True)
                     volume = 0 if settings["muted"] else settings["volume"]
                     player = subprocess.Popen([PLAYER, settings["source"], settings["bandwidth"], str(volume), str(READY)],
-                                              stdout=log, stderr=subprocess.STDOUT, creationflags=flags)
+                                              stdout=log, stderr=subprocess.STDOUT, creationflags=flags,
+                                              env={**os.environ, "SOUNDLIVE_DISPLAY_INDEX": "0"} if displays else None)
+            sync_extra()
             if not ready:
                 show_waiting()
             refresh_identification(now)
@@ -2701,7 +2764,9 @@ def run_windows_screen(tk, log):
                 request = work.submit(client.poll, dict(id=identity["id"], boot=BOOT, state=state,
                     sources=sources, active_source=source if ready else None,
                     error=failure, can_poweroff=True, can_reboot=True,
-                    local_video=playing_local, media_status=media.report(), identification=identification_state),
+                    local_video=playing_local, media_status=media.report(), identification=identification_state,
+                    outputs=[{**output, "playing": output["id"] in extra_players and extra_players[output["id"]][2].exists()}
+                             for output in displays]),
                     player.pid if state == "Lecture" and player else os.getpid())
                 next_poll = now + 2
         except (OSError, ValueError, subprocess.SubprocessError) as error:
@@ -2721,6 +2786,8 @@ def run_windows_screen(tk, log):
     finally:
         try:
             stop_player()
+            for index in list(extra_players):
+                stop_extra(index)
         finally:
             work.shutdown(wait=True, cancel_futures=True)
             if client:
