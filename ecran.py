@@ -934,8 +934,16 @@ def supports_identification(program):
         return False
 
 
+def supports_multi_outputs(program):
+    try:
+        result = subprocess.run([str(program), "--multi-ecrans"], capture_output=True, timeout=2)
+        return result.returncode == 0 and result.stdout.strip() == b"multi-ecrans-1"
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def updated_identification_player(program, log):
-    if not IDENTIFICATION_RENDER_SOURCE or supports_identification(program):
+    if not IDENTIFICATION_RENDER_SOURCE or supports_multi_outputs(program):
         return program
     compiler = shutil.which("gcc")
     pkg_config = shutil.which("pkg-config")
@@ -948,7 +956,7 @@ def updated_identification_player(program, log):
     revision = sha256(IDENTIFICATION_RENDER_SOURCE).hexdigest()[:24]
     folder = STATE / "identification-rendu" / revision
     engine = folder / "lecteur-ndi-ubuntu"
-    if engine.is_file() and supports_identification(engine):
+    if engine.is_file() and supports_multi_outputs(engine):
         return str(engine)
     try:
         folder.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -960,7 +968,7 @@ def updated_identification_player(program, log):
             source.write_bytes(IDENTIFICATION_RENDER_SOURCE)
             subprocess.run([compiler, "-O2", "-std=c11", "-I", str(include), str(source), *flags,
                             str(library), "-o", str(pending)], check=True, capture_output=True, timeout=14)
-            if not supports_identification(pending):
+            if not supports_multi_outputs(pending):
                 raise RuntimeError("Le nouveau moteur ne répond pas au test d’identification.")
             pending.replace(engine)
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
@@ -1682,6 +1690,7 @@ def desktop():
             self.extra_settings = {}
             self.extra_players = {}
             self.extra_retry = {}
+            self.extra_waiting = {}
             self.output_request = None
             self.next_outputs = 0
             self.active_source = None
@@ -1754,7 +1763,7 @@ def desktop():
             layer.add_overlay(badge)
             layer.set_overlay_pass_through(badge, True)
             self.identification_popup = self.make_identification_popup(wayland)
-            if UBUNTU and wayland and not self.identification_popup:
+            if UBUNTU:
                 self.video_engine = updated_identification_player(PLAYER, self.log)
             if self.dashboard and UBUNTU and wayland:
                 self.dashboard.internal_preview_required = True
@@ -1784,6 +1793,9 @@ def desktop():
             attrs.insert(Pango.attr_weight_new(Pango.Weight.BOLD))
             self.screen_name.set_attributes(attrs)
             box.pack_start(self.screen_name, False, False, 0)
+            self.output_label = Gtk.Label(label="Écran 1", no_show_all=True)
+            self.output_label.get_style_context().add_class("reader-group")
+            box.pack_start(self.output_label, False, False, 0)
             self.group_label = Gtk.Label(no_show_all=True)
             self.group_label.set_line_wrap(True)
             self.group_label.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
@@ -2010,7 +2022,12 @@ def desktop():
             elif not self.settings["enabled"]:
                 text = "Diffusion arrêtée"
             self.title.set_text(text)
-            self.window.fullscreen()
+            primary = next((o for o in self.outputs if o["id"] == "0"), None)
+            monitor = self.output_monitor(primary) if primary else None
+            if monitor is not None:
+                self.window.fullscreen_on_monitor(self.window.get_screen(), monitor)
+            else:
+                self.window.fullscreen()
             self.window.show_all()
             self.pages.set_visible_child(self.waiting_box)
 
@@ -2223,6 +2240,61 @@ def desktop():
                         process.kill()
                         process.wait(timeout=2)
 
+        def output_monitor(self, output):
+            display = self.window.get_display()
+            for index in range(display.get_n_monitors()):
+                rect = display.get_monitor(index).get_geometry()
+                if (rect.x, rect.y, rect.width, rect.height) == tuple(output[k] for k in ("x", "y", "width", "height")):
+                    return index
+            return None
+
+        def sync_waiting_outputs(self):
+            multiple = len(self.outputs) > 1
+            self.output_label.set_visible(multiple)
+            active = {o["id"]: o for o in self.outputs if o["id"] != "0"} if multiple else {}
+            for index in list(self.extra_waiting):
+                if index not in active:
+                    self.extra_waiting.pop(index)[0].destroy()
+            for index, output in active.items():
+                monitor = self.output_monitor(output)
+                if monitor is None:
+                    if index in self.extra_waiting:
+                        self.extra_waiting.pop(index)[0].destroy()
+                    continue
+                if index not in self.extra_waiting:
+                    window = Gtk.Window(decorated=False, accept_focus=False, focus_on_map=False)
+                    window.connect("key-press-event", self.key_press)
+                    panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+                    panel.set_halign(Gtk.Align.CENTER)
+                    panel.set_valign(Gtk.Align.CENTER)
+                    window.add(panel)
+                    brand = Gtk.Label()
+                    brand.set_markup(f'<span size="46000" weight="bold">{APP_NAME}</span>')
+                    panel.pack_start(brand, False, False, 0)
+                    labels = [Gtk.Label() for _ in range(6)]
+                    for widget, style in zip(labels, ("reader-group", "reader-group", "waiting-status", "reader-regie", "reader-version", "reader-version")):
+                        widget.get_style_context().add_class(style)
+                        widget.set_line_wrap(True)
+                        panel.pack_start(widget, False, False, 0)
+                    qr = Gtk.Image()
+                    panel.pack_start(qr, False, False, 0)
+                    self.extra_waiting[index] = (window, labels, qr)
+                window, labels, qr = self.extra_waiting[index]
+                selected = self.extra_settings.get(index, {})
+                entry = self.extra_players.get(index)
+                if entry and entry[0].poll() is None and entry[2].exists():
+                    window.hide()
+                    continue
+                texts = (self.screen_name.get_text(), "Écran " + str(int(index) + 1),
+                         "En attente du flux vidéo" if selected.get("enabled") else "Diffusion arrêtée",
+                         self.regie_label.get_text(), f"Version du lecteur {SOFTWARE_VERSION}", COPYRIGHT)
+                for widget, value in zip(labels, texts):
+                    widget.set_text(value)
+                qr.set_from_pixbuf(self.qr_image.get_pixbuf())
+                if not window.get_visible():
+                    window.fullscreen_on_monitor(window.get_screen(), monitor)
+                    window.show_all()
+
         def sync_outputs(self):
             if not UBUNTU:
                 return
@@ -2246,8 +2318,8 @@ def desktop():
                         continue
                     source = self.settings["source"] if selected.get("mode") == "same" else selected.get("source")
                     if source in self.sources:
-                        wanted[index] = (source, self.settings["bandwidth"], output["x"], output["y"],
-                                         output["width"], output["height"])
+                        wanted[index] = (source, selected.get("bandwidth", self.settings["bandwidth"]), output["x"], output["y"],
+                                         output["width"], output["height"], 0 if selected.get("muted", True) else selected.get("volume", 0))
             for index, (process, config, path) in list(self.extra_players.items()):
                 if wanted.get(index) != config or process.poll() is not None:
                     self.stop_extra(index)
@@ -2255,7 +2327,7 @@ def desktop():
                 elif path.exists():
                     try:
                         actual = tuple(map(int, path.read_text().split()))
-                        if len(actual) == 5 and actual != (int(index), *config[2:]):
+                        if len(actual) == 5 and actual != (int(index), *config[2:6]):
                             self.stop_extra(index)
                             self.extra_retry[index] = now + 15
                             self.error = "Le compositeur Wayland n’a pas placé la sortie secondaire demandée."
@@ -2268,7 +2340,7 @@ def desktop():
                 try:
                     path.unlink(missing_ok=True)
                     process = subprocess.Popen(
-                        [self.video_engine, config[0], config[1], "0", str(path)],
+                        [self.video_engine, config[0], config[1], str(config[6]), str(path)],
                         stdout=self.log, stderr=subprocess.STDOUT,
                         env={**os.environ, "SOUNDLIVE_DISPLAY_INDEX": index})
                     self.extra_players[index] = (process, config, path)
@@ -2393,6 +2465,7 @@ def desktop():
                     and GLib.get_monotonic_time() >= self.retry_at):
                 self.start()
             self.sync_outputs()
+            self.sync_waiting_outputs()
             self.refresh_identification()
             return GLib.SOURCE_CONTINUE
 
@@ -2521,6 +2594,8 @@ def desktop():
                 Gtk.main()
             finally:
                 screen.terminate()
+                for window, _, _ in screen.extra_waiting.values():
+                    window.destroy()
                 for index in list(screen.extra_players):
                     screen.stop_extra(index)
                 if screen.player:
@@ -2753,7 +2828,8 @@ def run_windows_screen(tk, log):
                     continue
                 source = settings["source"] if selected.get("mode") == "same" else selected.get("source")
                 if source and source in sources:
-                    wanted[index] = (source, settings["bandwidth"], 0)
+                    wanted[index] = (source, selected.get("bandwidth", settings["bandwidth"]),
+                                     0 if selected.get("muted", True) else selected.get("volume", 0))
         for index, (process, config, path) in list(extra_players.items()):
             if wanted.get(index) != config or process.poll() is not None:
                 stop_extra(index)
