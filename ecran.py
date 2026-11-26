@@ -2369,8 +2369,7 @@ def desktop():
                 self.output_request = self.work.submit(self.discover_outputs)
                 self.next_outputs = now + 10
             wanted = {}
-            if (not self.maintenance.active and not self.media.enabled and
-                    self.settings["enabled"] and len(self.outputs) > 1):
+            if (not self.maintenance.active and not self.media.enabled and len(self.outputs) > 1):
                 for output in self.outputs:
                     index = output["id"]
                     selected = self.extra_settings.get(index, {})
@@ -2936,7 +2935,7 @@ def run_windows_screen(tk, log):
 
     def sync_extra():
         wanted = {}
-        if not media.enabled and settings["enabled"] and len(displays) > 1:
+        if not media.enabled and len(displays) > 1:
             for output in displays:
                 index = output["id"]
                 if index == "0":
