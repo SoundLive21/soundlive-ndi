@@ -2653,6 +2653,8 @@ def run_windows_screen(tk, log):
 
     label(APP_NAME, 36)
     name = label((identity or {}).get("name") or socket.gethostname(), 24)
+    output_label = label("Écran 1", 18, "#ffc0cd")
+    output_label.pack_forget()
     status = label("", 18)
     group_label = label("", 18, "#ffc0cd")
     group_label.pack_forget()
@@ -2680,6 +2682,7 @@ def run_windows_screen(tk, log):
     displays = []
     extra_settings = {}
     extra_players = {}
+    extra_waiting = {}
     next_displays = 0
 
     badge = tk.Toplevel(root, background="#17141a")
@@ -2816,6 +2819,48 @@ def run_windows_screen(tk, log):
                 found.append(dict(id=str(index), width=width, height=height, x=x, y=y))
         return found
 
+    def sync_waiting_outputs():
+        if len(displays) > 1:
+            output_label.pack(before=status, pady=7)
+        else:
+            output_label.pack_forget()
+        active = {o["id"]: o for o in displays if o["id"] != "0"} if len(displays) > 1 else {}
+        for index in list(extra_waiting):
+            if index not in active:
+                extra_waiting.pop(index)[0].destroy()
+        for index, output in active.items():
+            if index not in extra_waiting:
+                window = tk.Toplevel(root, background="#100e11")
+                window.withdraw()
+                window.overrideredirect(True)
+                panel = tk.Frame(window, background="#100e11")
+                panel.place(relx=.5, rely=.5, anchor="center")
+                labels = []
+                for size in (36, 24, 18, 18, 13, 13, 12):
+                    widget = tk.Label(panel, bg="#100e11", fg="white", font=("Segoe UI", size))
+                    widget.pack(pady=7)
+                    labels.append(widget)
+                image = tk.Label(panel, bg="#100e11")
+                image.pack()
+                extra_waiting[index] = (window, labels, image)
+            window, labels, image = extra_waiting[index]
+            entry = extra_players.get(index)
+            if entry and entry[0].poll() is None and entry[2].exists():
+                window.withdraw()
+                continue
+            selected = extra_settings.get(index, {})
+            values = (APP_NAME, name.cget("text"), "Écran " + str(int(index) + 1),
+                      "En attente du flux vidéo" if selected.get("enabled") else "Diffusion arrêtée",
+                      regie_label.cget("text"), f"Version du lecteur {SOFTWARE_VERSION}", COPYRIGHT)
+            for widget, value in zip(labels, values):
+                widget.configure(text=value)
+            image.configure(image=picture if picture else "")
+            if window.state() == "withdrawn":
+                window.deiconify()
+                window.update_idletasks()
+                hwnd = user.GetAncestor(window.winfo_id(), 2) or window.winfo_id()
+                user.SetWindowPos(hwnd, None, output["x"], output["y"], output["width"], output["height"], 0x0014)
+
     def sync_extra():
         wanted = {}
         if not media.enabled and settings["enabled"] and len(displays) > 1:
@@ -2938,6 +2983,7 @@ def run_windows_screen(tk, log):
                                               stdout=log, stderr=subprocess.STDOUT, creationflags=flags,
                                               env={**os.environ, "SOUNDLIVE_DISPLAY_INDEX": "0"} if displays else None)
             sync_extra()
+            sync_waiting_outputs()
             if not ready:
                 show_waiting()
             refresh_identification(now)
@@ -2974,6 +3020,8 @@ def run_windows_screen(tk, log):
             stop_player()
             for index in list(extra_players):
                 stop_extra(index)
+            for window, _, _ in extra_waiting.values():
+                window.destroy()
         finally:
             work.shutdown(wait=True, cancel_futures=True)
             if client:
