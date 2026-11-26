@@ -1678,6 +1678,12 @@ def desktop():
             self.regie_state = None
             self.sources = []
             self.player = None
+            self.outputs = []
+            self.extra_settings = {}
+            self.extra_players = {}
+            self.extra_retry = {}
+            self.output_request = None
+            self.next_outputs = 0
             self.active_source = None
             self.playing_local = False
             self.local_pixbuf = None
@@ -2178,6 +2184,98 @@ def desktop():
                     self.terminate()
             GLib.timeout_add_seconds(5, self.probe)
 
+        def discover_outputs(self):
+            result = subprocess.run([self.video_engine, "--displays"], capture_output=True,
+                                    text=True, timeout=4)
+            if result.returncode:
+                return []
+            outputs = []
+            for line in result.stdout.splitlines():
+                index, x, y, width, height = map(int, line.split())
+                if 0 <= index < 8 and 0 < width <= 16384 and 0 < height <= 16384:
+                    outputs.append(dict(id=str(index), x=x, y=y, width=width, height=height))
+            return outputs
+
+        def actual_monitor(self):
+            # SDL reports the actual display rectangle; match it to GTK, not
+            # the numeric index, which can differ across display backends.
+            try:
+                _, x, y, width, height = map(int, READY.read_text().split())
+            except (OSError, ValueError):
+                return None
+            display = self.window.get_display()
+            for index in range(display.get_n_monitors()):
+                monitor = display.get_monitor(index)
+                rect = monitor.get_geometry()
+                if (rect.x, rect.y, rect.width, rect.height) == (x, y, width, height):
+                    return -index - 1
+            return None
+
+        def stop_extra(self, index):
+            entry = self.extra_players.pop(index, None)
+            if entry:
+                process = entry[0]
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=2)
+
+        def sync_outputs(self):
+            if not UBUNTU:
+                return
+            now = time.monotonic()
+            if self.output_request and self.output_request.done():
+                try:
+                    self.outputs = self.output_request.result()
+                except (OSError, ValueError, subprocess.SubprocessError):
+                    self.outputs = []
+                self.output_request = None
+            if not self.output_request and now >= self.next_outputs:
+                self.output_request = self.work.submit(self.discover_outputs)
+                self.next_outputs = now + 10
+            wanted = {}
+            if (not self.maintenance.active and not self.media.enabled and
+                    self.settings["enabled"] and len(self.outputs) > 1):
+                for output in self.outputs:
+                    index = output["id"]
+                    selected = self.extra_settings.get(index, {})
+                    if index == "0" or selected.get("enabled") is not True:
+                        continue
+                    source = self.settings["source"] if selected.get("mode") == "same" else selected.get("source")
+                    if source in self.sources:
+                        wanted[index] = (source, self.settings["bandwidth"], output["x"], output["y"],
+                                         output["width"], output["height"])
+            for index, (process, config, path) in list(self.extra_players.items()):
+                if wanted.get(index) != config or process.poll() is not None:
+                    self.stop_extra(index)
+                    self.extra_retry[index] = now + 3
+                elif path.exists():
+                    try:
+                        actual = tuple(map(int, path.read_text().split()))
+                        if len(actual) == 5 and actual != (int(index), *config[2:]):
+                            self.stop_extra(index)
+                            self.extra_retry[index] = now + 15
+                            self.error = "Le compositeur Wayland n’a pas placé la sortie secondaire demandée."
+                    except (OSError, ValueError):
+                        pass
+            for index, config in wanted.items():
+                if index in self.extra_players or now < self.extra_retry.get(index, 0):
+                    continue
+                path = STATE / ("video-sortie-" + index + ".prete")
+                try:
+                    path.unlink(missing_ok=True)
+                    process = subprocess.Popen(
+                        [self.video_engine, config[0], config[1], "0", str(path)],
+                        stdout=self.log, stderr=subprocess.STDOUT,
+                        env={**os.environ, "SOUNDLIVE_DISPLAY_INDEX": index})
+                    self.extra_players[index] = (process, config, path)
+                except OSError as error:
+                    self.error = str(error)[:240]
+                    self.extra_retry[index] = now + 5
+
         def start(self):
             if self.maintenance.active:
                 return
@@ -2206,6 +2304,8 @@ def desktop():
                     env = {**os.environ, "SOUNDLIVE_IDENTIFICATION_TEXTURE": str(IDENTIFICATION_TEXTURE)}
                 if not local and self.dashboard and self.dashboard.internal_preview is not None:
                     env = {**(env or os.environ), "SOUNDLIVE_RENDER_PREVIEW": str(RENDER_PREVIEW)}
+                if UBUNTU and not local and self.outputs:
+                    env = {**(env or os.environ), "SOUNDLIVE_DISPLAY_INDEX": "0"}
                 self.player = subprocess.Popen(command, stdout=self.log, stderr=subprocess.STDOUT, env=env,
                                                cwd=STATE if self.identification_output == "text" else None)
                 self.active_source = source
@@ -2292,6 +2392,7 @@ def desktop():
                     and self.player is None and self.local_pixbuf is None
                     and GLib.get_monotonic_time() >= self.retry_at):
                 self.start()
+            self.sync_outputs()
             self.refresh_identification()
             return GLib.SOURCE_CONTINUE
 
@@ -2325,9 +2426,15 @@ def desktop():
                         os_capability=capability, os_result=self.maintenance.report(),
                         active_source=self.active_source if state == "Lecture" else None,
                         error=self.error, can_poweroff=True, media_status=self.media.report(),
-                        local_video=self.playing_local, identification=self.identification_state)
+                        local_video=self.playing_local, identification=self.identification_state,
+                        outputs=[{**output, "playing": output["id"] in self.extra_players and
+                                  self.extra_players[output["id"]][2].exists()} for output in self.outputs])
             display_pid = self.player.pid if state == "Lecture" and self.player else 0
             display = self.window.get_display()
+            if UBUNTU and display_pid > 0 and not self.playing_local and display.__gtype__.name != "GdkX11Display":
+                actual = self.actual_monitor()
+                if actual is not None:
+                    display_pid = actual
             if DEVICE_KIND == "pi" and not self.dashboard.internal_preview_required:
                 if display.__gtype__.name == "GdkX11Display":
                     self.dashboard.local_screen_capture = (True, "")
@@ -2356,6 +2463,7 @@ def desktop():
                 self.terminate()
                 self.waiting()
             new = options(result["options"])
+            self.extra_settings = result.get("extra_outputs") or {}
             self.media.receive(result.get("media"), result.get("media_catalog"))
             message = waiting_update_message(result.get("reader_update"))
             self.update_label.set_text(message)
@@ -2413,6 +2521,8 @@ def desktop():
                 Gtk.main()
             finally:
                 screen.terminate()
+                for index in list(screen.extra_players):
+                    screen.stop_extra(index)
                 if screen.player:
                     try:
                         screen.player.wait(timeout=3)
