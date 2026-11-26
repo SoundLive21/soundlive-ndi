@@ -2964,14 +2964,34 @@ function renderExtraOutputs(card, row) {
     save.textContent = "Appliquer";
     save.onclick = action(async () => {
       await call("/api/extra-output", {id:row.id, output:output.id,
-        enabled:source.value !== "off", mode:source.value === "same" ? "same" : "independent",
-        source:source.value.startsWith("ndi:") ? source.value.slice(4) : "",
+        enabled:source.value !== "off", mode:source.value === "off" ? (current.mode || "independent") : source.value === "same" ? "same" : "independent",
+        source:source.value === "off" ? (current.source || "") : source.value.startsWith("ndi:") ? source.value.slice(4) : "",
         bandwidth:bandwidth.value, volume:Number(volume.value), muted:muted.checked, orientation:orientation.value});
       box.dataset.signature = "";
+      if (box.contains(document.activeElement)) document.activeElement.blur();
       await refresh(true);
     });
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.textContent = current.enabled === true ? "Stop" : "Reprendre";
+    toggle.disabled = current.enabled !== true && current.mode !== "same" && !current.source;
+    toggle.title = toggle.disabled ? "Sélectionne d’abord une source et applique les réglages." : "";
+    toggle.onclick = action(async () => {
+      const latest = card.data.extra_outputs?.[output.id] || {};
+      await call("/api/extra-output", {id:row.id, output:output.id,
+        enabled:latest.enabled !== true, mode:latest.mode || "independent",
+        source:latest.source || "", bandwidth:latest.bandwidth || row.options.bandwidth,
+        volume:latest.volume ?? 0, muted:latest.muted ?? true,
+        orientation:latest.orientation || "landscape"});
+      box.dataset.signature = "";
+      if (box.contains(document.activeElement)) document.activeElement.blur();
+      await refresh(true);
+    });
+    const actions = document.createElement("div");
+    actions.className = "action-row";
+    actions.append(save, toggle);
     line.append(heading, label("Sources NDI détectées", source),
-      label("Qualité", bandwidth), label("Orientation de l’écran", orientation), label("Volume ", level), volume, audio, save);
+      label("Qualité", bandwidth), label("Orientation de l’écran", orientation), label("Volume ", level), volume, audio, actions);
     box.append(line);
   }
 }
