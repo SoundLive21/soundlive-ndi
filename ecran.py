@@ -1691,6 +1691,8 @@ def desktop():
             self.extra_players = {}
             self.extra_retry = {}
             self.extra_waiting = {}
+            self.extra_orientation = {}
+            self.extra_orientation_jobs = {}
             self.output_request = None
             self.next_outputs = 0
             self.active_source = None
@@ -1793,8 +1795,14 @@ def desktop():
             attrs.insert(Pango.attr_weight_new(Pango.Weight.BOLD))
             self.screen_name.set_attributes(attrs)
             box.pack_start(self.screen_name, False, False, 0)
-            self.output_label = Gtk.Label(label="▣  Écran 1", no_show_all=True)
-            self.output_label.get_style_context().add_class("reader-group")
+            self.output_label = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, no_show_all=True)
+            self.output_label.set_halign(Gtk.Align.CENTER)
+            icon = Gtk.Image.new_from_icon_name("video-display", Gtk.IconSize.DIALOG)
+            number = Gtk.Label(label="Écran 1")
+            number.get_style_context().add_class("reader-group")
+            for widget in (icon, number):
+                self.output_label.pack_start(widget, False, False, 0)
+                widget.show()
             box.pack_start(self.output_label, False, False, 0)
             self.group_label = Gtk.Label(no_show_all=True)
             self.group_label.set_line_wrap(True)
@@ -2281,7 +2289,14 @@ def desktop():
                     for widget, style in zip(labels, ("", "reader-group", "reader-group", "waiting-status", "reader-regie", "reader-version", "reader-version", "reader-update")):
                         widget.get_style_context().add_class(style)
                         widget.set_line_wrap(True)
-                        panel.pack_start(widget, False, False, 0)
+                        if widget is labels[1]:
+                            badge = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+                            badge.set_halign(Gtk.Align.CENTER)
+                            badge.pack_start(Gtk.Image.new_from_icon_name("video-display", Gtk.IconSize.DIALOG), False, False, 0)
+                            badge.pack_start(widget, False, False, 0)
+                            panel.pack_start(badge, False, False, 0)
+                        else:
+                            panel.pack_start(widget, False, False, 0)
                     labels[0].set_attributes(self.screen_name.get_attributes())
                     qr = Gtk.Image()
                     panel.pack_start(qr, False, False, 0)
@@ -2295,7 +2310,7 @@ def desktop():
                 if entry and entry[0].poll() is None and entry[2].exists():
                     window.hide()
                     continue
-                texts = (self.screen_name.get_text(), "▣  Écran " + str(int(index) + 1), self.group_label.get_text() if self.group_label.get_visible() else "",
+                texts = (self.screen_name.get_text(), "Écran " + str(int(index) + 1), self.group_label.get_text() if self.group_label.get_visible() else "",
                          "En attente du flux vidéo" if selected.get("enabled") else "Diffusion arrêtée",
                          self.regie_label.get_text(), f"Version du lecteur {SOFTWARE_VERSION}", COPYRIGHT, self.update_label.get_text())
                 for widget, value in zip(labels, texts):
@@ -2309,6 +2324,36 @@ def desktop():
                 labels[7].set_visible(self.update_label.get_visible())
                 qr.set_visible(self.qr_panel.get_visible())
                 qr.get_parent().get_children()[-1].set_visible(self.qr_panel.get_visible())
+
+        def sync_extra_orientation(self):
+            now = time.monotonic()
+            for index, (job, desired) in list(self.extra_orientation_jobs.items()):
+                if not job.done():
+                    continue
+                self.extra_orientation_jobs.pop(index)
+                try:
+                    job.result()
+                except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+                    self.error = f"Écran {int(index)+1} : {error}"[:240]
+                    self.extra_orientation[index] = (desired, now + 30)
+                else:
+                    self.extra_orientation[index] = (desired, now + 60)
+                    self.next_outputs = 0
+            for output in self.outputs:
+                index = output["id"]
+                selected = self.extra_settings.get(index, {})
+                desired = selected.get("orientation")
+                if index == "0" or desired not in ORIENTATIONS or index in self.extra_orientation_jobs:
+                    continue
+                previous, retry = self.extra_orientation.get(index, (None, 0))
+                if previous == desired and now < retry:
+                    continue
+                monitor = self.output_monitor(output)
+                if monitor is None:
+                    continue
+                self.extra_orientation_jobs[index] = (
+                    self.work.submit(self.dashboard.client_command, "--orienter-ecran", f"{-monitor-1} {desired}", 6),
+                    desired)
 
         def sync_outputs(self):
             if not UBUNTU:
@@ -2480,6 +2525,8 @@ def desktop():
                     and GLib.get_monotonic_time() >= self.retry_at):
                 self.start()
             self.sync_outputs()
+            if self.dashboard and not self.maintenance.active:
+                self.sync_extra_orientation()
             self.sync_waiting_outputs()
             self.refresh_identification()
             return GLib.SOURCE_CONTINUE
