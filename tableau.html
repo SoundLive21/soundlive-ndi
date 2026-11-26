@@ -2681,6 +2681,9 @@ function cardFor(id) {
   select(el, ".resolution-controls").hidden = !resolutionControlsEnabled;
   limit.replaceChildren(new Option("À valider après essai", ""), ...resolutions.map(value => new Option(value, value)));
   const card = {el, ui, form, list, resolution, limit, dirty:false};
+  card.outputs = document.createElement("fieldset");
+  card.outputs.hidden = true;
+  form.after(card.outputs);
   el.dataset.screen = id;
   const heading = select(el, ".card-heading");
   const handle = sortHandle(el, () => el.parentElement, id, () => screenKeys(el.parentElement),
@@ -2875,10 +2878,56 @@ function syncSourceChoice(card) {
     && !available[activeResolution]?.includes(ui.source.value)
     ? "Cette source n’est pas détectée ou sa résolution n’est pas validée sur cet écran." : "");
 }
+function renderExtraOutputs(card, row) {
+  const box = card.outputs;
+  const outputs = row.report.outputs || [];
+  box.hidden = !row.online || outputs.length < 2;
+  if (box.hidden) return;
+  if (box.contains(document.activeElement)) return;
+  const signature = JSON.stringify([outputs, row.extra_outputs, row.report.sources, row.media?.enabled]);
+  if (box.dataset.signature === signature) return;
+  box.dataset.signature = signature;
+  const legend = document.createElement("legend");
+  legend.textContent = "Sorties vidéo supplémentaires";
+  box.replaceChildren(legend);
+  for (const output of outputs.filter(o => o.id !== "0")) {
+    const current = row.extra_outputs?.[output.id] || {};
+    const line = document.createElement("div");
+    const heading = document.createElement("strong");
+    heading.textContent = "Écran " + (Number(output.id) + 1) + " · " + output.width + " × " + output.height + (output.playing ? " · Lecture" : "");
+    const enabled = document.createElement("input");
+    enabled.type = "checkbox";
+    enabled.checked = current.enabled === true;
+    const label = document.createElement("label");
+    label.append(enabled, " Activer cet écran");
+    const mode = document.createElement("select");
+    mode.append(new Option("Même flux que le principal", "same"), new Option("Flux indépendant", "independent"));
+    mode.value = current.mode || "same";
+    const source = document.createElement("select");
+    const sources = [...new Set([current.source, ...(row.report.sources || [])].filter(Boolean))];
+    source.append(new Option("Choisir une source NDI", ""), ...sources.map(s => new Option(s, s)));
+    source.value = current.source || "";
+    const sync = () => { mode.disabled = !enabled.checked; source.disabled = !enabled.checked || mode.value === "same"; };
+    enabled.onchange = mode.onchange = sync;
+    sync();
+    const save = document.createElement("button");
+    save.type = "button";
+    save.textContent = "Appliquer";
+    save.onclick = action(async () => {
+      await call("/api/extra-output", {id:row.id, output:output.id, enabled:enabled.checked, mode:mode.value, source:source.value});
+      box.dataset.signature = "";
+      await refresh(true);
+    });
+    line.append(heading, document.createElement("br"), label, mode, source, save);
+    box.append(line);
+  }
+}
+
 function render(row) {
   const card = cardFor(row.id);
   const {el, ui, form} = card;
   card.data = row;
+  renderExtraOutputs(card, row);
   const handle = select(el, ".card-heading .drag-handle");
   handle.title = "Déplacer " + row.name + " · Glisser ou utiliser les flèches";
   handle.setAttribute("aria-label",handle.title);
