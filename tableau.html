@@ -2895,30 +2895,48 @@ function renderExtraOutputs(card, row) {
     const line = document.createElement("div");
     const heading = document.createElement("strong");
     heading.textContent = "Écran " + (Number(output.id) + 1) + " · " + output.width + " × " + output.height + (output.playing ? " · Lecture" : "");
-    const enabled = document.createElement("input");
-    enabled.type = "checkbox";
-    enabled.checked = current.enabled === true;
-    const label = document.createElement("label");
-    label.append(enabled, " Activer cet écran");
-    const mode = document.createElement("select");
-    mode.append(new Option("Même flux que le principal", "same"), new Option("Flux indépendant", "independent"));
-    mode.value = current.mode || "same";
     const source = document.createElement("select");
     const sources = [...new Set([current.source, ...(row.report.sources || [])].filter(Boolean))];
-    source.append(new Option("Choisir une source NDI", ""), ...sources.map(s => new Option(s, s)));
-    source.value = current.source || "";
-    const sync = () => { mode.disabled = !enabled.checked; source.disabled = !enabled.checked || mode.value === "same"; };
-    enabled.onchange = mode.onchange = sync;
+    source.append(new Option("Ne pas diffuser de flux", "off"),
+      new Option("Même flux que l’écran 1", "same"),
+      ...sources.map(s => new Option(s, "ndi:" + s)));
+    source.value = current.enabled !== true ? "off" :
+      current.mode === "same" ? "same" : "ndi:" + current.source;
+    const bandwidth = document.createElement("select");
+    bandwidth.append(new Option("High - 720p/1080p/4K (flux prod)", "0"),
+      new Option("Low 360p (flux preview)", "1"));
+    bandwidth.value = current.bandwidth || row.options?.bandwidth || "0";
+    const volume = document.createElement("input");
+    volume.type = "range"; volume.min = "0"; volume.max = "100";
+    volume.value = current.volume ?? 0;
+    const level = document.createElement("output");
+    level.value = volume.value + " %";
+    volume.oninput = () => { level.value = volume.value + " %"; };
+    const muted = document.createElement("input");
+    muted.type = "checkbox"; muted.checked = current.muted ?? true;
+    const label = (title, control) => {
+      const node = document.createElement("label");
+      node.append(title, control); return node;
+    };
+    const audio = label("Couper le son ", muted);
+    const sync = () => {
+      bandwidth.disabled = volume.disabled = muted.disabled = source.value === "off";
+    };
+    source.onchange = sync;
     sync();
     const save = document.createElement("button");
-    save.type = "button";
+    save.type = "button"; save.className = "primary";
     save.textContent = "Appliquer";
     save.onclick = action(async () => {
-      await call("/api/extra-output", {id:row.id, output:output.id, enabled:enabled.checked, mode:mode.value, source:source.value});
+      await call("/api/extra-output", {id:row.id, output:output.id,
+        enabled:source.value !== "off", mode:source.value === "same" ? "same" : "independent",
+        source:source.value.startsWith("ndi:") ? source.value.slice(4) : "",
+        bandwidth:bandwidth.value, volume:Number(volume.value), muted:muted.checked});
       box.dataset.signature = "";
       await refresh(true);
     });
-    line.append(heading, document.createElement("br"), label, mode, source, save);
+    line.append(heading, label("Sources NDI détectées", source),
+      label("Qualité", bandwidth), label("Volume ", level), volume, audio, save);
     box.append(line);
   }
 }
