@@ -25,11 +25,17 @@ jobs:
           umask 077
           key=$(mktemp "$RUNNER_TEMP/soundlive-key.XXXXXX")
           trap 'rm -f "$key"' EXIT
-          test -n "$PUBLICATION_KEY"
+          if [[ -z "$PUBLICATION_KEY" ]]; then
+            echo "::error::Secret Actions SOUNDLIVE_PUBLICATION_KEY absent ou inaccessible."
+            exit 1
+          fi
           printf '%s\n' "$PUBLICATION_KEY" > "$key"
           actual=$(ssh-keygen -y -P '' -f "$key" | awk '{print $1, $2}')
           expected=$(awk '{print $1, $2}' publication.pub)
-          test "$actual" = "$expected"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "::error::La clé privée ne correspond pas à publication.pub."
+            exit 1
+          fi
           python3 publier-version.py --cle "$key" --sortie "$RUNNER_TEMP/dist" --compatibilite
       - name: Publier les archives signées
         env:
