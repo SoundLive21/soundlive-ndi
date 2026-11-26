@@ -1793,7 +1793,7 @@ def desktop():
             attrs.insert(Pango.attr_weight_new(Pango.Weight.BOLD))
             self.screen_name.set_attributes(attrs)
             box.pack_start(self.screen_name, False, False, 0)
-            self.output_label = Gtk.Label(label="Écran 1", no_show_all=True)
+            self.output_label = Gtk.Label(label="▣  Écran 1", no_show_all=True)
             self.output_label.get_style_context().add_class("reader-group")
             box.pack_start(self.output_label, False, False, 0)
             self.group_label = Gtk.Label(no_show_all=True)
@@ -2267,17 +2267,27 @@ def desktop():
                     panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
                     panel.set_halign(Gtk.Align.CENTER)
                     panel.set_valign(Gtk.Align.CENTER)
+                    panel.set_border_width(16)
                     window.add(panel)
                     brand = Gtk.Label()
                     brand.set_markup(f'<span size="46000" weight="bold">{APP_NAME}</span>')
                     panel.pack_start(brand, False, False, 0)
-                    labels = [Gtk.Label() for _ in range(6)]
-                    for widget, style in zip(labels, ("reader-group", "reader-group", "waiting-status", "reader-regie", "reader-version", "reader-version")):
+                    line = Gtk.Box()
+                    line.set_size_request(64, 5)
+                    line.set_halign(Gtk.Align.CENTER)
+                    line.get_style_context().add_class("line")
+                    panel.pack_start(line, False, False, 0)
+                    labels = [Gtk.Label() for _ in range(8)]
+                    for widget, style in zip(labels, ("", "reader-group", "reader-group", "waiting-status", "reader-regie", "reader-version", "reader-version", "reader-update")):
                         widget.get_style_context().add_class(style)
                         widget.set_line_wrap(True)
                         panel.pack_start(widget, False, False, 0)
+                    labels[0].set_attributes(self.screen_name.get_attributes())
                     qr = Gtk.Image()
                     panel.pack_start(qr, False, False, 0)
+                    caption = Gtk.Label(label="Scanner pour ouvrir le tableau de régie")
+                    caption.get_style_context().add_class("qr-caption")
+                    panel.pack_start(caption, False, False, 0)
                     self.extra_waiting[index] = (window, labels, qr)
                 window, labels, qr = self.extra_waiting[index]
                 selected = self.extra_settings.get(index, {})
@@ -2285,15 +2295,20 @@ def desktop():
                 if entry and entry[0].poll() is None and entry[2].exists():
                     window.hide()
                     continue
-                texts = (self.screen_name.get_text(), "Écran " + str(int(index) + 1),
+                texts = (self.screen_name.get_text(), "▣  Écran " + str(int(index) + 1), self.group_label.get_text() if self.group_label.get_visible() else "",
                          "En attente du flux vidéo" if selected.get("enabled") else "Diffusion arrêtée",
-                         self.regie_label.get_text(), f"Version du lecteur {SOFTWARE_VERSION}", COPYRIGHT)
+                         self.regie_label.get_text(), f"Version du lecteur {SOFTWARE_VERSION}", COPYRIGHT, self.update_label.get_text())
                 for widget, value in zip(labels, texts):
                     widget.set_text(value)
+                labels[4].set_markup(self.regie_label.get_label())
                 qr.set_from_pixbuf(self.qr_image.get_pixbuf())
                 if not window.get_visible():
                     window.fullscreen_on_monitor(window.get_screen(), monitor)
                     window.show_all()
+                labels[2].set_visible(self.group_label.get_visible())
+                labels[7].set_visible(self.update_label.get_visible())
+                qr.set_visible(self.qr_panel.get_visible())
+                qr.get_parent().get_children()[-1].set_visible(self.qr_panel.get_visible())
 
         def sync_outputs(self):
             if not UBUNTU:
@@ -2653,7 +2668,7 @@ def run_windows_screen(tk, log):
 
     label(APP_NAME, 36)
     name = label((identity or {}).get("name") or socket.gethostname(), 24)
-    output_label = label("Écran 1", 18, "#ffc0cd")
+    output_label = label("▣  Écran 1", 18, "#ffc0cd")
     output_label.pack_forget()
     status = label("", 18)
     group_label = label("", 18, "#ffc0cd")
@@ -2836,7 +2851,7 @@ def run_windows_screen(tk, log):
                 panel = tk.Frame(window, background="#100e11")
                 panel.place(relx=.5, rely=.5, anchor="center")
                 labels = []
-                for size in (36, 24, 18, 18, 13, 13, 12):
+                for size in (36, 24, 18, 18, 18, 13, 13, 12, 14):
                     widget = tk.Label(panel, bg="#100e11", fg="white", font=("Segoe UI", size))
                     widget.pack(pady=7)
                     labels.append(widget)
@@ -2849,11 +2864,22 @@ def run_windows_screen(tk, log):
                 window.withdraw()
                 continue
             selected = extra_settings.get(index, {})
-            values = (APP_NAME, name.cget("text"), "Écran " + str(int(index) + 1),
+            values = (APP_NAME, name.cget("text"), "▣  Écran " + str(int(index) + 1),
                       "En attente du flux vidéo" if selected.get("enabled") else "Diffusion arrêtée",
-                      regie_label.cget("text"), f"Version du lecteur {SOFTWARE_VERSION}", COPYRIGHT)
+                      group_label.cget("text") if group_label.winfo_manager() else "",
+                      regie_label.cget("text"), f"Version du lecteur {SOFTWARE_VERSION}", COPYRIGHT, notice.cget("text"))
             for widget, value in zip(labels, values):
                 widget.configure(text=value)
+            labels[2].configure(fg="#ffc0cd")
+            labels[4].configure(fg="#ffc0cd")
+            labels[5].configure(fg=regie_label.cget("fg"))
+            labels[6].configure(fg="#dfcbd1")
+            labels[7].configure(fg="#dfcbd1")
+            labels[8].configure(fg="#ffc78a")
+            for widget in (labels[4], labels[8]):
+                if widget.cget("text"):
+                    if not widget.winfo_manager(): widget.pack(before=labels[5] if widget is labels[4] else image, pady=7)
+                else: widget.pack_forget()
             image.configure(image=picture if picture else "")
             if window.state() == "withdrawn":
                 window.deiconify()
