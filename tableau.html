@@ -2962,30 +2962,50 @@ function renderExtraOutputs(card, row) {
     const save = document.createElement("button");
     save.type = "button"; save.className = "primary";
     save.textContent = "Appliquer";
-    save.onclick = action(async () => {
-      await call("/api/extra-output", {id:row.id, output:output.id,
-        enabled:source.value !== "off", mode:source.value === "off" ? (current.mode || "independent") : source.value === "same" ? "same" : "independent",
-        source:source.value === "off" ? (current.source || "") : source.value.startsWith("ndi:") ? source.value.slice(4) : "",
-        bandwidth:bandwidth.value, volume:Number(volume.value), muted:muted.checked, orientation:orientation.value});
+    const screenTitle = row.name + " · Écran " + (Number(output.id) + 1);
+    const applyOutput = async settings => {
+      await call("/api/extra-output", {id:row.id, output:output.id, ...settings});
       box.dataset.signature = "";
       if (box.contains(document.activeElement)) document.activeElement.blur();
       await refresh(true);
+      return "La demande pour « " + screenTitle + " » est enregistrée.";
+    };
+    save.onclick = action(() => {
+      const settings = {
+        enabled:source.value !== "off", mode:source.value === "off" ? (current.mode || "independent") : source.value === "same" ? "same" : "independent",
+        source:source.value === "off" ? (current.source || "") : source.value.startsWith("ndi:") ? source.value.slice(4) : "",
+        bandwidth:bandwidth.value, volume:Number(volume.value), muted:muted.checked, orientation:orientation.value
+      };
+      showAction({
+        title:"Appliquer les réglages à " + screenTitle,
+        detail:[source.selectedOptions[0].textContent, bandwidth.selectedOptions[0].textContent,
+          settings.muted ? "Son coupé" : "Volume " + settings.volume + " %",
+          orientation.selectedOptions[0].textContent].join(" · "),
+        label:"Appliquer", successTitle:"Réglages enregistrés",
+        perform:() => applyOutput(settings)
+      });
     });
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.textContent = current.enabled === true ? "Stop" : "Reprendre";
     toggle.disabled = current.enabled !== true && current.mode !== "same" && !current.source;
     toggle.title = toggle.disabled ? "Sélectionne d’abord une source et applique les réglages." : "";
-    toggle.onclick = action(async () => {
+    toggle.onclick = action(() => {
       const latest = card.data.extra_outputs?.[output.id] || {};
-      await call("/api/extra-output", {id:row.id, output:output.id,
-        enabled:latest.enabled !== true, mode:latest.mode || "independent",
-        source:latest.source || "", bandwidth:latest.bandwidth || row.options.bandwidth,
-        volume:latest.volume ?? 0, muted:latest.muted ?? true,
-        orientation:latest.orientation || "landscape"});
-      box.dataset.signature = "";
-      if (box.contains(document.activeElement)) document.activeElement.blur();
-      await refresh(true);
+      const stopping = latest.enabled === true;
+      const settings = {
+        enabled:!stopping, mode:latest.mode || "independent", source:latest.source || "",
+        bandwidth:latest.bandwidth || row.options.bandwidth, volume:latest.volume ?? 0,
+        muted:latest.muted ?? true, orientation:latest.orientation || "landscape"
+      };
+      showAction({
+        title:(stopping ? "Arrêter la diffusion sur " : "Reprendre la diffusion sur ") + screenTitle,
+        detail:stopping ? "Cet écran affichera sa page d’attente. Les autres écrans ne seront pas modifiés." :
+          "Cet écran reprendra la source NDI enregistrée, sans modifier les autres écrans.",
+        label:stopping ? "Arrêter" : "Reprendre",
+        successTitle:stopping ? "Arrêt demandé" : "Reprise demandée",
+        perform:() => applyOutput(settings)
+      });
     });
     const actions = document.createElement("div");
     actions.className = "action-row";
