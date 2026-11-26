@@ -1,0 +1,46 @@
+name: Publication signée SoundLive NDI
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: soundlive-publication
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Vérifier les sources
+        run: |
+          python3 -m py_compile ecran.py tableau.py commun.py publier-version.py
+          bash -n installer-ubuntu.sh
+      - name: Construire et signer
+        env:
+          PUBLICATION_KEY: ${{ secrets.SOUNDLIVE_PUBLICATION_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          key=$(mktemp "$RUNNER_TEMP/soundlive-key.XXXXXX")
+          trap 'rm -f "$key"' EXIT
+          test -n "$PUBLICATION_KEY"
+          printf '%s\n' "$PUBLICATION_KEY" > "$key"
+          actual=$(ssh-keygen -y -P '' -f "$key" | awk '{print $1, $2}')
+          expected=$(awk '{print $1, $2}' publication.pub)
+          test "$actual" = "$expected"
+          python3 publier-version.py --cle "$key" --sortie "$RUNNER_TEMP/dist" --compatibilite
+      - name: Publier les archives signées
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python3 -c 'from pathlib import Path; from versions_regie import software_version; print(software_version(Path("tableau.py").read_bytes(), "tableau.py"))')
+          tag="v$version"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Une release existe déjà pour $tag."
+            exit 1
+          fi
+          gh release create "$tag" "$RUNNER_TEMP/dist/"*.zip "$RUNNER_TEMP/dist/"*.sig --target "$GITHUB_SHA" --title "SoundLive-NDI $version" --generate-notes
