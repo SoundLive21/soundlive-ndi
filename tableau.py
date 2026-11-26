@@ -48,7 +48,7 @@ from terminal_ssh import GROUP_LIMIT, USER as SSH_USER, HostKeyCheck, Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.111"
+SOFTWARE_VERSION = "1.4.112"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -1999,9 +1999,12 @@ class Request(BaseHTTPRequestHandler):
             volume, muted = data.get("volume", 0), data.get("muted", True)
             if bandwidth not in ("0", "1") or type(volume) is not int or not 0 <= volume <= 100 or type(muted) is not bool:
                 raise ValueError("Réglages de qualité ou de son invalides.")
+            orientation = data.get("orientation", "landscape")
+            if orientation not in ORIENTATIONS:
+                raise ValueError("Orientation invalide.")
             previous = row.get("extra_outputs", {})
             row["extra_outputs"] = {**previous, index: dict(enabled=enabled, mode=mode, source=source.strip(),
-                                                            bandwidth=bandwidth, volume=volume, muted=muted)}
+                                                            bandwidth=bandwidth, volume=volume, muted=muted, orientation=orientation)}
             try:
                 save()
             except OSError:
