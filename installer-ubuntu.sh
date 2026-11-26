@@ -111,6 +111,11 @@ Terminal=false
 DESKTOP
 }
 
+if $client_only && [[ -x "$app/lecteur-ndi-ubuntu" ]] && [[ $("$app/lecteur-ndi-ubuntu" --multi-ecrans 2>/dev/null || true) != multi-ecrans-1 ]]; then
+    echo "Mise à niveau du moteur SDL multi-écrans nécessaire."
+    bash "$here/installer-ubuntu.sh" --mettre-a-jour-rendu
+fi
+
 if $client_only; then
     if [[ ! -x "$app/lecteur-ndi-ubuntu" || ! -r "$app/lib/libndi.so.6" ]]; then
         echo "Installation Ubuntu incomplète. Lance la mise à jour complète avec --mettre-a-jour."
@@ -218,6 +223,10 @@ read -r -a sdl_flags <<< "$(pkg-config --cflags --libs sdl2)"
 gcc -O2 -std=c11 -Wall -Wextra -I"$sdk/include" "$here/lecteur-ndi-ubuntu.c" \
     "${sdl_flags[@]}" -Wl,-rpath,'$ORIGIN/lib' \
     -L"$temp/lib" -l:libndi.so.6 -o "$temp/lecteur-ndi-ubuntu"
+if [[ $("$temp/lecteur-ndi-ubuntu" --multi-ecrans) != multi-ecrans-1 ]]; then
+    echo "Le moteur compilé ne prend pas en charge le multi-écrans." >&2
+    exit 1
+fi
 if $render_only; then
     if ! /usr/bin/python3 -c 'import cairo, gi; gi.require_foreign("cairo")' >/dev/null 2>&1; then
         sudo apt install -y python3-gi-cairo
