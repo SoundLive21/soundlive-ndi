@@ -296,7 +296,18 @@ static int play(const char *source, bool low, float volume, const char *ready_fi
     if (SDL_InitSubSystem(SDL_INIT_VIDEO) < 0)
         goto sdl_error;
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
-    window = SDL_CreateWindow("SoundLive-NDI", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+    int position = SDL_WINDOWPOS_CENTERED;
+    const char *requested_display = getenv("SOUNDLIVE_DISPLAY_INDEX");
+    if (requested_display) {
+        char *end = NULL;
+        long index = strtol(requested_display, &end, 10);
+        if (end == requested_display || *end || index < 0 || index >= SDL_GetNumVideoDisplays()) {
+            fprintf(stderr, "Sortie vidéo indisponible.\n");
+            goto cleanup;
+        }
+        position = SDL_WINDOWPOS_CENTERED_DISPLAY((int)index);
+    }
+    window = SDL_CreateWindow("SoundLive-NDI", position, position,
                               1280, 720, SDL_WINDOW_HIDDEN | SDL_WINDOW_ALLOW_HIGHDPI);
     if (!window)
         goto sdl_error;
@@ -415,6 +426,18 @@ cleanup:
 
 static int run(int argc, char **argv)
 {
+    if (argc == 2 && strcmp(argv[1], "--displays") == 0) {
+        SDL_SetMainReady();
+        if (SDL_Init(SDL_INIT_VIDEO) < 0) return 1;
+        int count = SDL_GetNumVideoDisplays();
+        for (int i = 0; i < count; ++i) {
+            SDL_Rect rect;
+            if (SDL_GetDisplayBounds(i, &rect) == 0)
+                printf("%d %d %d %d %d\n", i, rect.x, rect.y, rect.w, rect.h);
+        }
+        SDL_Quit();
+        return count < 0 ? 1 : 0;
+    }
     if (argc == 2 && strcmp(argv[1], "--identification") == 0) {
         puts("identification");
         return 0;
