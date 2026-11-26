@@ -48,7 +48,7 @@ from terminal_ssh import GROUP_LIMIT, USER as SSH_USER, HostKeyCheck, Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.108"
+SOFTWARE_VERSION = "1.4.109"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -1183,7 +1183,7 @@ class Request(BaseHTTPRequestHandler):
                     group = row.get("group") or ""
                     rows.append(dict(
                         id=key, name=row["name"], options=row.get("options"),
-                        report=report, online=now - report.get("seen", 0) < ONLINE_AGE,
+                        report=report, extra_outputs=row.get("extra_outputs", {}), online=now - report.get("seen", 0) < ONLINE_AGE,
                         pairing=row.get("pairing") if now < row.get("pairing_until", 0) else None,
                         installation_fingerprint=row.get("installation_fingerprint"),
                         paired="token" in row, version=row.get("version", 0), kind=row.get("kind"),
@@ -1923,7 +1923,15 @@ class Request(BaseHTTPRequestHandler):
             os_capability = data.get("os_capability")
             if os_capability not in ("ready", "setup_required", "key_required") or row["kind"] == "windows":
                 os_capability = "unsupported"
-            row["report"] = dict(seen=now, ip=self.client_address[0], state=state, boot=boot,
+            outputs = []
+            if row.get("kind") == "windows" and isinstance(data.get("outputs"), list):
+                for output in data["outputs"][:8]:
+                    if (isinstance(output, dict) and output.get("id") in tuple(map(str, range(8)))
+                            and all(type(output.get(k)) is int and 0 < output[k] <= 16384 for k in ("width", "height"))
+                            and not any(o["id"] == output["id"] for o in outputs)):
+                        outputs.append(dict(id=output["id"], width=output["width"], height=output["height"],
+                                            playing=output.get("playing") is True))
+            row["report"] = dict(outputs=outputs, seen=now, ip=self.client_address[0], state=state, boot=boot,
                                  os_capability=os_capability,
                                  os_health=os_update_report(data.get("os_health")),
                                  identification=identification,
@@ -1958,7 +1966,7 @@ class Request(BaseHTTPRequestHandler):
             preview = next((dict(id=item["id"], source=item["source"], screen=item["screen"],
                                  automatic=item["automatic"]) for item in PREVIEWS.values()
                             if item["reader"] == key and item["state"] == "pending"), None)
-            return 200, dict(options=row["options"], identify=row.get("identify") is True,
+            return 200, dict(options=row["options"], extra_outputs=row.get("extra_outputs", {}), identify=row.get("identify") is True,
                              media=screen_media(row),
                              media_catalog=catalog_items(row),
                              preview_request=preview,
@@ -1972,6 +1980,28 @@ class Request(BaseHTTPRequestHandler):
                              and now < job["until"] else None)
         if path == "/api/remove":
             remove_screens({key: row})
+            return 200, {"ok": True}
+        elif path == "/api/extra-output" and row.get("token"):
+            report = row.get("report", {})
+            outputs = report.get("outputs", [])
+            index = data.get("output")
+            if (now - report.get("seen", 0) >= ONLINE_AGE or len(outputs) < 2
+                    or index == "0" or not any(o["id"] == index for o in outputs)):
+                return 409, {"error": "Sortie secondaire indisponible."}
+            enabled, mode, source = data.get("enabled"), data.get("mode"), data.get("source", "")
+            if type(enabled) is not bool or mode not in ("same", "independent"):
+                raise ValueError("Mode de sortie invalide.")
+            if not isinstance(source, str) or len(source) > 256 or any(ord(c) < 32 for c in source):
+                raise ValueError("Source NDI invalide.")
+            if enabled and mode == "independent" and not source.strip():
+                raise ValueError("Sélectionne une source NDI.")
+            previous = row.get("extra_outputs", {})
+            row["extra_outputs"] = {**previous, index: dict(enabled=enabled, mode=mode, source=source.strip())}
+            try:
+                save()
+            except OSError:
+                row["extra_outputs"] = previous
+                raise
             return 200, {"ok": True}
         elif path == "/api/media-settings" and row.get("token"):
             return self.change_media(key, row, data)
