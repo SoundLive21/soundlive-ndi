@@ -48,7 +48,7 @@ from terminal_ssh import GROUP_LIMIT, USER as SSH_USER, HostKeyCheck, Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.109"
+SOFTWARE_VERSION = "1.4.110"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
@@ -1924,7 +1924,7 @@ class Request(BaseHTTPRequestHandler):
             if os_capability not in ("ready", "setup_required", "key_required") or row["kind"] == "windows":
                 os_capability = "unsupported"
             outputs = []
-            if row.get("kind") == "windows" and isinstance(data.get("outputs"), list):
+            if row.get("kind") in ("windows", "ubuntu", "pi") and isinstance(data.get("outputs"), list):
                 for output in data["outputs"][:8]:
                     if (isinstance(output, dict) and output.get("id") in tuple(map(str, range(8)))
                             and all(type(output.get(k)) is int and 0 < output[k] <= 16384 for k in ("width", "height"))
