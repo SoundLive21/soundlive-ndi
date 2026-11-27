@@ -1458,6 +1458,20 @@ class OsMaintenance:
             self.change("failed", "Mise à jour système interrompue ou APT en échec. Consulte le journal du lecteur.")
 
 
+def report_outputs(outputs, primary_ready, primary_local, players, local_players):
+    result = []
+    for output in outputs:
+        index = output["id"]
+        entry = players.get(index)
+        local = local_players.get(index)
+        playing = (primary_ready if index == "0" else bool(
+            (local and local.ready) or (entry and entry[0].poll() is None and entry[2].exists())))
+        result.append({**output, "playing": playing,
+                       "local": bool(primary_local if index == "0" else local and local.ready),
+                       "media_error": local.error if local else ""})
+    return result
+
+
 class SecondaryMedia:
     """Playlist indépendante ; les fichiers proviennent du cache LocalMedia commun."""
     def __init__(self, cache, log, gtk=None):
@@ -1600,9 +1614,13 @@ class SecondaryMedia:
         if monitor is None or self.gtk is None:
             raise RuntimeError("Sortie graphique secondaire introuvable.")
         Gtk, GdkPixbuf = self.gtk
+        from gi.repository import GLib
         self.window = Gtk.Window(decorated=False, accept_focus=False, focus_on_map=False)
         if image:
-            picture = GdkPixbuf.Pixbuf.new_from_file(str(path))
+            try:
+                picture = GdkPixbuf.Pixbuf.new_from_file(str(path))
+            except GLib.Error as error:
+                raise RuntimeError(error.message) from error
             self.window.add(Gtk.Image.new_from_pixbuf(fit_local_image(picture, width, height)))
         else:
             try:
@@ -1762,8 +1780,9 @@ class DashboardClient:
                     target = next((o for o in report.get("outputs", []) if o["id"] == output), None)
                     if target is None:
                         mode, argument = "missing-output", None
-                    elif target.get("playing") and not WINDOWS:
-                        mode, argument = "secondary-player", STATE / ("rendu-sortie-" + output)
+                    elif target.get("playing") and not target.get("local") and not WINDOWS:
+                        mode, argument = "secondary-player", (STATE / ("rendu-sortie-" + output),
+                            " ".join(str(target[k]) for k in ("x", "y", "width", "height")))
                     else:
                         mode, argument = "--capture-sortie", " ".join(str(target[k]) for k in ("x", "y", "width", "height"))
                 elif screen and image_preview:
@@ -1812,7 +1831,10 @@ class DashboardClient:
             if mode == "player":
                 png = player_render_preview()
             elif mode == "secondary-player":
-                png = player_render_preview(argument)
+                try:
+                    png = player_render_preview(argument[0])
+                except (OSError, RuntimeError, ValueError):
+                    png = self.client_command("--capture-sortie", argument[1], 7)
             elif mode == "missing-output":
                 raise RuntimeError("Écran déconnecté.")
             elif mode == "local-image":
@@ -2780,8 +2802,8 @@ def desktop():
                         active_source=self.active_source if state == "Lecture" else None,
                         error=self.error, can_poweroff=True, media_status=self.media.report(),
                         local_video=self.playing_local, identification=self.identification_state,
-                        outputs=[{**output, "playing": output["id"] in self.extra_players and
-                                  self.extra_players[output["id"]][2].exists()} for output in self.outputs])
+                        outputs=report_outputs(self.outputs, self.video_ready, self.playing_local,
+                                               self.extra_players, self.extra_media_players))
             display_pid = self.player.pid if state == "Lecture" and self.player else 0
             display = self.window.get_display()
             if UBUNTU and display_pid > 0 and not self.playing_local and display.__gtype__.name != "GdkX11Display":
@@ -3326,8 +3348,7 @@ def run_windows_screen(tk, log):
                     sources=sources, active_source=source if ready else None,
                     error=failure, can_poweroff=True, can_reboot=True,
                     local_video=playing_local, media_status=media.report(), identification=identification_state,
-                    outputs=[{**output, "playing": output["id"] in extra_players and extra_players[output["id"]][2].exists()}
-                             for output in displays]),
+                    outputs=report_outputs(displays, ready, playing_local, extra_players, extra_media_players)),
                     player.pid if state == "Lecture" and player else os.getpid())
                 next_poll = now + 2
         except (OSError, ValueError, subprocess.SubprocessError) as error:
