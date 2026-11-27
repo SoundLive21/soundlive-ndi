@@ -133,20 +133,20 @@ SHARED_ACTION_DIALOG = """<style>#sl-action[data-state="success"] .dialog-headin
  function show(t,message,mode,value){const task=()=>new Promise(resolve=>{d.dataset.state=mode;title.textContent=t;detail.textContent=message||"";field.hidden=value===undefined;input.required=value!==undefined;input.value=value??"";accept.textContent=mode==="confirm"?(value===undefined?"Confirmer":"Enregistrer"):"Fermer";cancel.hidden=mode!=="confirm";d.returnValue="cancel";d.addEventListener("close",()=>resolve(d.returnValue==="accept"?(value===undefined?true:input.value.trim()):null),{once:true});d.showModal();if(value!==undefined){input.focus();input.select()}else if(mode!=="confirm")accept.focus();else cancel.focus()});const next=queue.then(task);queue=next.catch(()=>{});return next}
  window.slConfirm=(message,title="Confirmation")=>show(title,message,"confirm");
  window.slPrompt=(message,value="")=>show(message,"Renseigne le nom souhaité.","confirm",value);
- window.slResult=(message,error=false)=>show(error?"Action impossible":"Action effectuée",message,error?"error":"success");
+ window.slResult=(message,error=false)=>{const notify=typeof showToast==="function"?showToast:window.showToast;notify(error?"Action impossible":"Action effectuée",error?"error":"success",message)};
 }</script>"""
 PERSONAL_MEDIA_DIALOG = """<dialog id="personal-media-dialog" aria-labelledby="pm-title" style="width:min(900px,94vw)"><div class="dialog-body"><div class="row"><h2 id="pm-title">Médias personnels</h2><button type="button" id="pm-close">Fermer</button></div><label>Utilisateur<select id="pm-owner"></select></label><label>Dossier<select id="pm-folder"></select></label><div class="actions"><button id="pm-create">Créer un dossier</button><button id="pm-rename">Renommer le dossier</button><button id="pm-remove">Supprimer le dossier</button></div><label>Images et vidéos<input type="file" id="pm-files" multiple accept=".jpg,.jpeg,.png,.mp4,.m4v,.mov,.webm,.mkv"></label><button class="primary" id="pm-upload">Déposer les fichiers</button><p id="pm-message" role="status"></p><div id="pm-items"></div><label>Écran de destination<select id="pm-screen"></select></label><button class="primary" id="pm-play">Diffuser ce dossier</button><p class="small">La diffusion transfère une copie du dossier vers le lecteur.</p></div></dialog><script>{const dialog=document.getElementById("personal-media-dialog");
 const q=id=>document.getElementById("pm-"+id);let state,busy=false;
 async function api(path,data,raw=false){const r=await fetch(path,data===undefined?{}:{method:"POST",headers:{"Content-Type":raw?"application/octet-stream":"application/json"},body:raw?data:JSON.stringify(data)});if(r.status===401){location.href="/connexion";throw Error("Session expirée")}const v=await r.json();if(!r.ok)throw Error(v.error||r.status);return v}
 const query=(extra={})=>new URLSearchParams({owner:q("owner").value,folder:q("folder").value,...extra});
-const act=(action,extra={})=>api("/api/personal-media",{owner:q("owner").value,folder:q("folder").value,action,...extra});
-const run=f=>async()=>{if(busy)return;busy=true;const controls=[...dialog.querySelectorAll("button,select,input")];controls.forEach(x=>x.disabled=true);try{q("message").textContent="Traitement en cours…";await f();await load();q("message").textContent="Terminé."}catch(e){q("message").textContent=e.message;await slResult(e.message,true)}finally{busy=false;controls.forEach(x=>x.disabled=false)}};
+const act=async(action,extra={})=>{const result=await api("/api/personal-media",{owner:q("owner").value,folder:q("folder").value,action,...extra});slResult(({create:"Dossier créé.",rename:"Dossier renommé.","remove-folder":"Dossier supprimé.","rename-file":"Fichier renommé.","remove-file":"Fichier supprimé.",play:"Diffusion demandée."})[action]||"Modifications enregistrées.");return result};
+const run=f=>async()=>{if(busy)return;busy=true;const controls=[...dialog.querySelectorAll("button,select,input")];controls.forEach(x=>x.disabled=true);try{q("message").textContent="Traitement en cours…";await f();await load();q("message").textContent=""}catch(e){q("message").textContent=e.message;slResult(e.message,true)}finally{busy=false;controls.forEach(x=>x.disabled=false)}};
 function options(node,items,previous){node.replaceChildren(...items.map(([v,n])=>new Option(n,v)));if(items.some(x=>x[0]===previous))node.value=previous}
 async function load(){const owner=q("owner").value,folder=q("folder").value,screen=q("screen").value;state=await api("/api/personal-media?"+new URLSearchParams({owner}));options(q("owner"),state.owners.map(x=>[x,x]),state.owner);options(q("folder"),Object.entries(state.folders).map(([id,f])=>[id,f.name]),folder);options(q("screen"),Object.entries(state.screens),screen);draw()}
 function draw(){const box=q("items");box.replaceChildren();for(const item of state.folders[q("folder").value]?.items||[]){const row=document.createElement("div");row.className="row";const name=document.createElement("a");name.textContent=item.name;name.href="/api/personal-media/file?"+query({file:item.id});name.target="_blank";name.rel="noopener";const rename=document.createElement("button"),remove=document.createElement("button");rename.textContent="Renommer";remove.textContent="Supprimer";rename.onclick=run(async()=>{const n=await slPrompt("Nouveau nom",item.name);if(n)await act("rename-file",{file:item.id,name:n})});remove.onclick=run(async()=>{if(await slConfirm("Supprimer "+item.name+" ?"))await act("remove-file",{file:item.id})});row.append(name,rename,remove);box.append(row)}}
 q("owner").onchange=()=>load().catch(e=>q("message").textContent=e.message);q("folder").onchange=draw;
 q("create").onclick=run(async()=>{const name=await slPrompt("Nom du dossier");if(name)await act("create",{name})});q("rename").onclick=run(async()=>{const name=await slPrompt("Nouveau nom",state.folders[q("folder").value]?.name);if(name)await act("rename",{name})});q("remove").onclick=run(async()=>{if(await slConfirm("Supprimer le dossier et ses fichiers ?"))await act("remove-folder")});
-q("upload").onclick=run(async()=>{for(const file of q("files").files){q("message").textContent="Envoi : "+file.name;await api("/api/personal-media/upload?"+query({name:file.name}),file,true)}q("files").value=""});
+q("upload").onclick=run(async()=>{for(const file of q("files").files){q("message").textContent="Envoi : "+file.name;await api("/api/personal-media/upload?"+query({name:file.name}),file,true)}q("files").value="";slResult("Fichiers importés.")});
 q("play").onclick=run(async()=>{if(!q("screen").value)throw Error("Aucun écran autorisé.");if(await slConfirm("Diffuser ce dossier sur l’écran sélectionné ?"))await act("play",{screen:q("screen").value})});
 const open=()=>{if(dialog.open)return;dialog.showModal();load().catch(e=>q("message").textContent=e.message)};
 document.querySelectorAll("[data-personal-media]").forEach(b=>b.addEventListener("click",open));q("close").onclick=()=>{if(!busy)dialog.close()};dialog.addEventListener("cancel",e=>{if(busy)e.preventDefault()});
@@ -227,7 +227,7 @@ q("organize").onclick=()=>{drawOrganizer();q("organizer").showModal()};q("close-
 const groupRights={start:"play",stop:"play",mute:"audio",unmute:"audio",volume:"audio",source:"source",quality:"source",orientation:"configuration"};
 function groupChoices(){const op=q("group-operation").value,eligible=latestRows.filter(s=>s.rights.includes(groupRights[op]));q("group-choices").replaceChildren();for(const s of eligible){const l=document.createElement("label"),i=document.createElement("input");l.className="check";i.type="checkbox";i.value=s.id+":"+s.output;l.append(i,s.name);q("group-choices").append(l)}q("group-volume-label").hidden=op!=="volume";q("group-value-label").hidden=!["source","quality","orientation"].includes(op);const choices=op==="source"?[...new Set(eligible.flatMap(s=>s.sources))].map(x=>[x,x]):op==="quality"?[["0","High"],["1","Low"]]:[["landscape","Paysage"],["portrait-left","Portrait gauche"],["portrait-right","Portrait droite"]];q("group-value").replaceChildren(...choices.map(x=>new Option(x[1],x[0])));q("group-error").textContent=""}
 q("group-action").onclick=()=>{const opts=[...q("group-operation").options];for(const o of opts)o.disabled=!latestRows.some(s=>s.rights.includes(groupRights[o.value]));if(q("group-operation").selectedOptions[0]?.disabled)q("group-operation").value=opts.find(o=>!o.disabled)?.value||"";groupChoices();q("group-dialog").showModal()};q("group-operation").onchange=groupChoices;q("close-group").onclick=()=>q("group-dialog").close();q("group-all").onclick=()=>q("group-choices").querySelectorAll("input").forEach(i=>i.checked=true);q("group-none").onclick=()=>q("group-choices").querySelectorAll("input").forEach(i=>i.checked=false);
-q("apply-group").onclick=async()=>{const op=q("group-operation").value,ids=[...q("group-choices").querySelectorAll("input:checked")].map(i=>i.value),v=q("group-value").value;const changes=op==="start"?{enabled:true}:op==="stop"?{enabled:false}:op==="mute"?{muted:true}:op==="unmute"?{muted:false}:op==="volume"?{volume:Number(q("group-volume").value)}:op==="source"?{source:v}:op==="quality"?{bandwidth:v}:{orientation:v};if(!ids.length){q("group-error").textContent="Sélectionne au moins un écran.";return}if(!await slConfirm("Appliquer à "+ids.length+" écran(s) ?","Actions de groupe"))return;try{await api("/api/operator/group",{ids,changes});q("group-dialog").close();await refresh();await slResult("Les réglages de groupe ont été transmis.")}catch(e){q("group-error").textContent=e.message;await slResult(e.message,true)}};
+q("apply-group").onclick=async()=>{const op=q("group-operation").value,ids=[...q("group-choices").querySelectorAll("input:checked")].map(i=>i.value),v=q("group-value").value;const changes=op==="start"?{enabled:true}:op==="stop"?{enabled:false}:op==="mute"?{muted:true}:op==="unmute"?{muted:false}:op==="volume"?{volume:Number(q("group-volume").value)}:op==="source"?{source:v}:op==="quality"?{bandwidth:v}:{orientation:v};if(!ids.length){q("group-error").textContent="Sélectionne au moins un écran.";slResult("Sélectionne au moins un écran.",true);return}if(!await slConfirm("Appliquer à "+ids.length+" écran(s) ?","Actions de groupe"))return;try{await api("/api/operator/group",{ids,changes});q("group-dialog").close();await refresh();await slResult("Les réglages de groupe ont été transmis.")}catch(e){q("group-error").textContent=e.message;await slResult(e.message,true)}};
 
 function getGroup(name){let g=groups.get(name);if(!g){const section=document.createElement("section"),title=document.createElement("h2"),grid=document.createElement("div");section.className="screen-group";title.className="screen-group-title";title.textContent=name||"Sans groupe";grid.className="grid";section.append(title,grid);q("screens").append(section);g={section,grid};groups.set(name,g);title.append(dragHandle(section,name,"groups"))}return g}
 function renderReaderHealth(r,s){
@@ -273,7 +273,51 @@ def shared_dashboard_template(name):
     start = _dashboard_markup.index('<template id="' + name + '">')
     end = _dashboard_markup.index("</template>", start) + len("</template>")
     return _dashboard_markup[start:end]
-OPERATOR_PAGE = OPERATOR_PAGE.replace("</html>", SHARED_ACTION_DIALOG + PERSONAL_MEDIA_DIALOG + "</html>").replace("__SHARED_STYLE__", _dashboard_markup.split("<style>", 1)[1].split("</style>", 1)[0]).replace("__OP_VERSION__", SOFTWARE_VERSION).replace("__SHARED_TEMPLATES__", shared_dashboard_template("card") + shared_dashboard_template("preview-template"))
+OPERATOR_TOASTS = """<div id="toasts" popover="manual" hidden></div>
+<template id="toast-template">
+  <div class="toast">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path class="toast-warning" d="M12 3 2.8 20h18.4L12 3Zm0 6v4m0 3h.01"/>
+      <path class="toast-check" d="m5 12 4 4L19 6"/>
+    </svg>
+    <div><strong class="toast-title"></strong><p class="toast-detail"></p></div>
+  </div>
+</template><script>{const select=(node,selector)=>node.querySelector(selector);const toastStack = document.querySelector("#toasts");
+const toastTemplate = document.querySelector("#toast-template");
+const visibleToasts = new Map();
+function dismissToast(key) {
+  const toast = visibleToasts.get(key);
+  if (!toast) return;
+  clearTimeout(toast.timer);
+  toast.element.remove();
+  visibleToasts.delete(key);
+  if (!visibleToasts.size) {
+    if (toastStack.hidePopover && toastStack.matches(":popover-open")) toastStack.hidePopover();
+    toastStack.hidden = true;
+  }
+}
+function showToast(title, tone, detail = "") {
+  const key = JSON.stringify([title, tone, detail]);
+  let toast = visibleToasts.get(key);
+  if (!toast) {
+    if (visibleToasts.size >= 4) dismissToast(visibleToasts.keys().next().value);
+    const element = toastTemplate.content.firstElementChild.cloneNode(true);
+    element.dataset.tone = tone;
+    element.setAttribute("role", tone === "success" ? "status" : "alert");
+    select(element,".toast-title").textContent = title;
+    select(element,".toast-detail").textContent = detail;
+    toast = {element};
+    visibleToasts.set(key, toast);
+    toastStack.append(element);
+    toastStack.hidden = false;
+    if (toastStack.showPopover && toastStack.matches(":popover-open")) toastStack.hidePopover();
+    toastStack.showPopover?.();
+  }
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => dismissToast(key), 7000);
+}
+window.showToast=showToast;}</script>"""
+OPERATOR_PAGE = OPERATOR_PAGE.replace("</html>", OPERATOR_TOASTS + SHARED_ACTION_DIALOG + PERSONAL_MEDIA_DIALOG + "</html>").replace("__SHARED_STYLE__", _dashboard_markup.split("<style>", 1)[1].split("</style>", 1)[0]).replace("__OP_VERSION__", SOFTWARE_VERSION).replace("__SHARED_TEMPLATES__", shared_dashboard_template("card") + shared_dashboard_template("preview-template"))
 TERMINAL_PAGE = (ROOT / "terminal.html").read_bytes()
 BLOCKED_MESSAGE = "Cette adresse IP est bloquée sur la régie. Contacte la régie pour demander le déblocage."
 LOGIN_NOTICES = {
