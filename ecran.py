@@ -1972,6 +1972,7 @@ def desktop():
             layer.add(self.pages)
             self.window.add(layer)
             self.identification = None
+            self.output_groups = {}
             self.identification_state = {"visible": False, "error": ""}
             self.identification_output = None
             self.identification_files = (None, None)
@@ -2248,7 +2249,9 @@ def desktop():
             errors = []
             for index, output in outputs.items():
                 path = STATE / ("identification-sortie-" + index + ".rgba")
-                numbered = (labels[0], "Écran " + str(int(index) + 1) + " · " + labels[1]) if labels else None
+                group = self.output_groups.get(index, None)
+                group_text = (waiting_group({"group": group}) or "Sans groupe") if index in self.output_groups else (labels[1] if labels else "")
+                numbered = (labels[0], "Écran " + str(int(index) + 1) + " · " + group_text) if labels else None
                 popup = self.extra_identification_popups.get(index)
                 if not labels:
                     if popup:
@@ -2611,7 +2614,7 @@ def desktop():
                 if (local and local.ready) or (entry and entry[0].poll() is None and entry[2].exists()):
                     window.hide()
                     continue
-                texts = (self.screen_name.get_text(), "Écran " + str(int(index) + 1), self.group_label.get_text() if self.group_label.get_visible() else "",
+                texts = (self.screen_name.get_text(), "Écran " + str(int(index) + 1), (waiting_group({"group": self.output_groups[index]}) if index in self.output_groups else self.group_label.get_text() if self.group_label.get_visible() else ""),
                          ("En attente d’un média local" if index in self.extra_media_settings else "En attente du flux vidéo") if selected.get("enabled") else "Diffusion arrêtée",
                          self.regie_label.get_text(), f"Version du lecteur {SOFTWARE_VERSION}", COPYRIGHT, self.update_label.get_text())
                 for widget, value in zip(labels, texts):
@@ -2621,7 +2624,7 @@ def desktop():
                 if not window.get_visible():
                     window.fullscreen_on_monitor(window.get_screen(), monitor)
                     window.show_all()
-                labels[2].set_visible(self.group_label.get_visible())
+                labels[2].set_visible(bool(texts[2]))
                 labels[7].set_visible(self.update_label.get_visible())
                 qr.set_visible(self.qr_panel.get_visible())
                 qr.get_parent().get_children()[-1].set_visible(self.qr_panel.get_visible())
@@ -2954,6 +2957,7 @@ def desktop():
             self.update_label.set_visible(bool(message))
             if self.show_waiting_details(result.get("waiting")):
                 save_waiting_details(self.identity, self.waiting_data, self.log)
+            self.output_groups = result.get("output_groups") or {}
             self.identification = identification_labels(result)
             self.refresh_identification()
             if new != self.settings:
@@ -3123,6 +3127,7 @@ def run_windows_screen(tk, log):
     ):
         getattr(user, function).restype, getattr(user, function).argtypes = result, args
     identification = None
+    output_groups = {}
     identification_state = {"visible": False, "error": ""}
     extra_badges = {}
     badge_target = None
@@ -3138,7 +3143,7 @@ def run_windows_screen(tk, log):
             identification_state = {"visible": False, "error": ""}
             return
         pid = player.pid if player and ready else 0
-        target = identification, pid, tuple((o["id"], o["x"], o["y"], o["width"], o["height"]) for o in displays)
+        target = identification, tuple(sorted(output_groups.items())), pid, tuple((o["id"], o["x"], o["y"], o["width"], o["height"]) for o in displays)
         if badge_target == target and now < next_badge_check:
             return
         badge_target, next_badge_check = target, now + 1
@@ -3171,7 +3176,8 @@ def run_windows_screen(tk, log):
                         label.pack(anchor="w", padx=13, pady=padding)
                     extra_badges[index] = window, labels
                 window, labels = extra_badges[index]
-            numbered = (identification[0], "Écran " + str(int(index)+1) + " · " + identification[1]) if identification else None
+            group_text = (waiting_group({"group": output_groups[index]}) or "Sans groupe") if index in output_groups else identification[1]
+            numbered = (identification[0], "Écran " + str(int(index)+1) + " · " + group_text)
             try:
                 for label, text in zip(labels, numbered):
                     label.configure(text=text)
@@ -3312,7 +3318,7 @@ def run_windows_screen(tk, log):
             selected = extra_settings.get(index, {})
             values = (APP_NAME, name.cget("text"), "▣  Écran " + str(int(index) + 1),
                       ("En attente d’un média local" if index in extra_media_settings else "En attente du flux vidéo") if selected.get("enabled") else "Diffusion arrêtée",
-                      group_label.cget("text") if group_label.winfo_manager() else "",
+                      (waiting_group({"group": output_groups[index]}) if index in output_groups else group_label.cget("text") if group_label.winfo_manager() else ""),
                       regie_label.cget("text"), f"Version du lecteur {SOFTWARE_VERSION}", COPYRIGHT, notice.cget("text"))
             for widget, value in zip(labels, values):
                 widget.configure(text=value)
@@ -3395,7 +3401,7 @@ def run_windows_screen(tk, log):
     def update():
         nonlocal request, discovery, next_poll, next_probe, player, settings, sources
         nonlocal failure, restart, ready, power_id, retry_at
-        nonlocal playing_local, local_name, identification, displays, extra_settings, next_displays, extra_media_settings
+        nonlocal playing_local, local_name, identification, displays, extra_settings, next_displays, extra_media_settings, output_groups
         now = time.monotonic()
         try:
             if now >= next_displays:
@@ -3423,6 +3429,7 @@ def run_windows_screen(tk, log):
                             stop_player()
                     if show_waiting_details(answer.get("waiting")):
                         save_waiting_details(identity, waiting_data, log)
+                    output_groups = answer.get("output_groups") or {}
                     identification = identification_labels(answer)
                     show_regie_state(REGIE_CONNECTED)
                     notice.configure(text=waiting_update_message(answer.get("reader_update")))
