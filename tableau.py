@@ -80,8 +80,8 @@ q("remove").onclick=async()=>{if(!confirm("Supprimer cet élément ?"))return;tr
 </script></html>"""
 OPERATOR_PAGE = """<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>SoundLive NDI · Opérateur</title><style>__SHARED_STYLE__
 .operator-controls{display:grid;gap:8px}.operator-controls label{margin:8px 0}.operator-preview img{display:block;width:100%;max-height:280px;object-fit:contain;border-radius:8px;background:#100d12}.operator-preview img[hidden]{display:none}.operator-output{margin-top:16px}.operator-output legend{font-weight:600}.operator-output .actions{margin-top:8px}.operator-header-statuses{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}.operator-preview{margin:8px 0}.operator-preview button{width:100%}.operator-card h2{min-width:0}.operator-card .badge{white-space:nowrap}.operator-controls button{white-space:normal}
-</style><header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release">v__OP_VERSION__</span><span id="count"></span><button id="logout">Me déconnecter</button></header><main><div class="heading"><h1>Gestion des écrans</h1></div><p id="message" role="status"></p><div id="screens"></div></main><script>
-const q=id=>document.getElementById(id);let cards=new Map();
+</style><header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release">v__OP_VERSION__</span><span id="count"></span><button id="logout">Me déconnecter</button></header><main><div class="heading"><h1>Gestion des écrans NDI</h1><div class="heading-actions"><button id="organize">Organiser les écrans</button><button id="group-action">Actions de groupe</button></div></div><details class="preview-section" id="source-previews" hidden><summary>Aperçu des sources NDI disponibles</summary><label class="check"><input type="checkbox" id="auto-previews" checked> Actualiser automatiquement les aperçus visibles</label><div class="preview-grid" id="source-grid"></div></details><p id="message" role="status"></p><div id="screens"></div></main><footer class="project-credits">© 2026 Société SoundLive · Auteur : DUVERNOY Matthieu &amp; ChatGPT · <a href="mailto:contact@soundlive.fr">contact@soundlive.fr</a></footer><dialog id="organizer" style="width:min(640px,92vw)"><div class="dialog-body"><h2>Organiser les écrans</h2><p>Personnalise l’ordre des groupes et des encarts dans ton navigateur.</p><div id="organizer-list"></div><div class="actions"><button id="reset-layout">Réinitialiser</button><button id="close-organizer" class="primary">Fermer</button></div></div></dialog><dialog id="group-dialog" style="width:min(650px,92vw)"><div class="dialog-body"><h2>Actions de groupe</h2><label>Action<select id="group-operation"><option value="start">Lecture</option><option value="stop">Arrêter</option><option value="mute">Couper le son</option><option value="unmute">Activer le son</option><option value="volume">Volume</option><option value="source">Source NDI</option><option value="quality">Qualité</option><option value="orientation">Orientation</option></select></label><label id="group-value-label" hidden>Valeur<select id="group-value"></select></label><label id="group-volume-label" hidden>Volume en %<input id="group-volume" type="number" min="0" max="100" value="50"></label><div class="actions"><button id="group-all">Tout sélectionner</button><button id="group-none">Tout désélectionner</button></div><div id="group-choices"></div><p id="group-error" role="status"></p><div class="actions"><button id="close-group">Fermer</button><button id="apply-group" class="primary">Appliquer</button></div></div></dialog><script>
+const q=id=>document.getElementById(id);let cards=new Map(),latestRows=[];
 async function api(path,data){const r=await fetch(path,data===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});if(r.status===401){location.href="/connexion";throw Error("Session expirée")}const v=await r.json();if(!r.ok)throw Error(v.error||r.status);return v}
 const run=f=>async()=>{try{await f();q("message").textContent=""}catch(e){q("message").textContent=e.message}};
 function build(s){const a=document.createElement("fieldset"),title=document.createElement("legend"),status=document.createElement("span"),controls=document.createElement("div");a.className="video-output operator-output";controls.className="operator-controls";status.className="badge";title.append(status);a.append(title,controls);const caption=document.createElement("span");title.prepend(caption);const has=p=>s.rights.includes(p),act=(action,data={})=>api("/api/operator/action",{id:s.id,output:s.output,action,...data}),patch=changes=>act("settings",{changes}),button=(name,fn)=>{const b=document.createElement("button");b.textContent=name;b.onclick=run(fn);controls.append(b);return b},select=(label,values,current,fn)=>{const l=document.createElement("label"),i=document.createElement("select");l.textContent=label;i.append(...values.map(v=>new Option(v[1],v[0])));i.value=current??"";i.onchange=run(()=>fn(i.value));l.append(i);controls.append(l);return i};
@@ -92,14 +92,48 @@ if(has("audio")){select("Sortie audio",[["","Automatique"],...s.audio_devices.ma
 if(has("configuration"))select("Orientation",[["landscape","Paysage"],["portrait-left","Portrait gauche"],["portrait-right","Portrait droite"]],s.settings.orientation,x=>patch({orientation:x}));
 if(has("media")){const folder=select("Dossier média",Object.entries(s.folders),Object.keys(s.folders)[0],()=>{});button("Diffuser le dossier",()=>act("media",{folder:folder.value,enabled:true}));button("Revenir au NDI",()=>act("media",{folder:folder.value,enabled:false}))}
 if(s.identify){button("Identifier",()=>act("identify",{enabled:true}));button("Masquer identification",()=>act("identify",{enabled:false}))}if(s.maintenance){button("Redémarrer",()=>confirm("Redémarrer le lecteur ?")&&act("reboot"));button("Éteindre",()=>confirm("Éteindre le lecteur ?")&&act("poweroff"))}return {a,title:caption,status}}
+const previewViews=new Map();
+function sourceGallery(rows){
+ const names=new Set(rows.flatMap(s=>s.preview_sources||[]));q("source-previews").hidden=!names.size;
+ for(const [name,v] of previewViews)if(!names.has(name)){v.el.remove();previewViews.delete(name)}
+ for(const name of [...names].sort())if(!previewViews.has(name)){
+  const el=document.createElement("div"),title=document.createElement("strong"),img=document.createElement("img"),button=document.createElement("button"),status=document.createElement("p");
+  el.className="preview-card operator-preview";title.textContent=name;img.hidden=true;button.textContent="Capturer un aperçu";status.className="small";el.append(title,img,status,button);q("source-grid").append(el);
+  const v={el,img,button,status,name,next:0,pending:false};previewViews.set(name,v);button.onclick=()=>captureSource(v);
+ }
+}
+async function captureSource(v,automatic=false){if(v.pending)return;v.pending=true;v.button.disabled=true;v.status.textContent="Capture en cours…";try{let p=await api("/api/preview",{source:v.name,previous:v.previous,automatic});const end=Date.now()+18000;while(p.state==="pending"&&Date.now()<end){await new Promise(r=>setTimeout(r,950));p=await api("/api/preview?"+new URLSearchParams({source:v.name}))}if(p.state!=="ready"||!p.image)throw Error(p.error||"Capture indisponible");v.previous=p.id;v.img.src="data:image/png;base64,"+p.image;v.img.hidden=false;v.status.textContent="Image capturée à "+new Date(p.captured*1000).toLocaleTimeString("fr-FR");v.button.textContent="Actualiser l’aperçu";v.next=Date.now()+10000}catch(e){v.status.textContent=e.message;v.next=Date.now()+30000}finally{v.pending=false;v.button.disabled=false}}
+setInterval(()=>{if(!q("source-previews").open||!q("auto-previews").checked||[...previewViews.values()].some(v=>v.pending))return;const v=[...previewViews.values()].find(v=>v.next<=Date.now()&&v.el.getBoundingClientRect().bottom>0&&v.el.getBoundingClientRect().top<innerHeight);if(v)captureSource(v,true)},3000);
 function badge(node,state,label=""){node.className="badge"+(state==="Lecture"?" online":state==="Arrêté"?" stopped":state==="En attente"?" waiting":"");node.textContent=label+state}
 const groups=new Map(), readerCards=new Map();
-function getGroup(name){let g=groups.get(name);if(!g){const section=document.createElement("section"),title=document.createElement("h2"),grid=document.createElement("div");section.className="screen-group";title.className="screen-group-title";title.textContent=name||"Sans groupe";grid.className="grid";section.append(title,grid);q("screens").append(section);g={section,grid};groups.set(name,g)}return g}
-function getReader(s){const key=JSON.stringify([s.group||"",s.id]);let r=readerCards.get(key);if(!r){const el=document.createElement("article"),head=document.createElement("div"),title=document.createElement("h2"),statuses=document.createElement("div"),body=document.createElement("div");el.className="operator-card";head.className="card-heading";statuses.className="operator-header-statuses";head.append(title);el.append(head,statuses,body);getGroup(s.group||"").grid.append(el);r={el,title,statuses,body,key};readerCards.set(key,r)}return r}
-async function refresh(){const rows=await api("/api/operator/screens"),keys=new Set(),activeReaders=new Map();q("count").textContent=rows.filter(s=>s.status!=="Hors ligne").length+" / "+rows.length+" écrans connectés";for(const s of rows){const k=s.id+":"+s.output;keys.add(k);const r=getReader(s);if(!activeReaders.has(r.key))activeReaders.set(r.key,[]);activeReaders.get(r.key).push(s);const signature=JSON.stringify([s.rights,s.sources,s.audio_devices,s.folders,s.identify,s.maintenance,s.settings,s.audio_route]);let c=cards.get(k);if(!c||c.signature!==signature&&!c.a.contains(document.activeElement)){const n=build(s);n.signature=signature;if(c)c.a.replaceWith(n.a);cards.set(k,n);c=n}if(c.a.parentElement!==r.body)r.body.append(c.a);c.title.textContent="Écran "+(Number(s.output)+1)+(s.output_name?" · "+s.output_name:"")+" ";badge(c.status,s.status)}
+let layout={groups:[],screens:{}};try{layout=JSON.parse(localStorage.getItem("soundlive-operator-layout")||"null")||layout}catch{}
+const saveLayout=()=>{try{localStorage.setItem("soundlive-operator-layout",JSON.stringify(layout))}catch{}};
+function rank(order,key){const i=order.indexOf(key);return i<0?1e9:i}
+function reorder(){for(const [name,g] of [...groups].sort((a,b)=>rank(layout.groups,a[0])-rank(layout.groups,b[0])))q("screens").append(g.section);for(const [name,g] of groups){const order=layout.screens[name]||[];for(const r of [...readerCards.values()].filter(r=>r.group===name).sort((a,b)=>rank(order,a.key)-rank(order,b.key)))g.grid.append(r.el)}}
+function move(order,source,dest){const a=order.indexOf(source),b=order.indexOf(dest);if(a<0||b<0)return order;const copy=[...order];copy.splice(a,1);copy.splice(b,0,source);return copy}
+let dragging=null;
+function dragHandle(target,key,scope,group=""){
+ const b=document.createElement("button");b.type="button";b.className="drag-handle";b.textContent="⠿";b.title="Déplacer · glisser-déposer ou flèches";b.draggable=true;
+ const keys=()=>scope==="groups"?[...q("screens").children].map(e=>e.dataset.orderKey):[...groups.get(group).grid.children].map(e=>e.dataset.orderKey);
+ const apply=(from,to)=>{const list=move(keys(),from,to);if(scope==="groups")layout.groups=list;else layout.screens[group]=list;saveLayout();reorder();if(q("organizer").open)drawOrganizer()};
+ b.ondragstart=e=>{dragging={key,scope,group};e.dataTransfer.setData("text/plain",key);e.dataTransfer.effectAllowed="move"};b.ondragend=()=>{dragging=null;target.classList.remove("drop-target")};
+ target.dataset.orderKey=key;target.ondragover=e=>{if(dragging&&dragging.scope===scope&&dragging.group===group){e.preventDefault();target.classList.add("drop-target")}};target.ondragleave=()=>target.classList.remove("drop-target");target.ondrop=e=>{if(dragging&&dragging.scope===scope&&dragging.group===group){e.preventDefault();e.stopPropagation();apply(dragging.key,key);dragging=null}target.classList.remove("drop-target")};
+ b.onkeydown=e=>{if(!["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key))return;e.preventDefault();const k=keys(),i=k.indexOf(key)+(e.key==="ArrowUp"||e.key==="ArrowLeft"?-1:1);if(k[i]!==undefined)apply(key,k[i])};return b;
+}
+function drawOrganizer(){const box=q("organizer-list");box.replaceChildren();for(const section of q("screens").children){const name=section.dataset.orderKey,g=groups.get(name),p=document.createElement("p");p.textContent=name||"Sans groupe";box.append(p);for(const el of g.grid.children){const r=readerCards.get(el.dataset.orderKey),line=document.createElement("div");line.className="row";line.textContent=r.title.textContent;for(const [symbol,delta] of [["↑",-1],["↓",1]]){const b=document.createElement("button");b.textContent=symbol;b.onclick=()=>{const k=[...g.grid.children].map(x=>x.dataset.orderKey),i=k.indexOf(r.key)+delta;if(k[i]!==undefined){layout.screens[name]=move(k,r.key,k[i]);saveLayout();reorder();drawOrganizer()}};line.append(b)}box.append(line)}}}
+q("organize").onclick=()=>{drawOrganizer();q("organizer").showModal()};q("close-organizer").onclick=()=>q("organizer").close();q("reset-layout").onclick=()=>{layout={groups:[],screens:{}};saveLayout();for(const [name,g] of [...groups].sort((a,b)=>a[0].localeCompare(b[0])))q("screens").append(g.section);for(const g of groups.values())for(const el of [...g.grid.children].sort((a,b)=>readerCards.get(a.dataset.orderKey).title.textContent.localeCompare(readerCards.get(b.dataset.orderKey).title.textContent)))g.grid.append(el);drawOrganizer()};
+const groupRights={start:"play",stop:"play",mute:"audio",unmute:"audio",volume:"audio",source:"source",quality:"source",orientation:"configuration"};
+function groupChoices(){const op=q("group-operation").value,eligible=latestRows.filter(s=>s.rights.includes(groupRights[op]));q("group-choices").replaceChildren();for(const s of eligible){const l=document.createElement("label"),i=document.createElement("input");l.className="check";i.type="checkbox";i.value=s.id+":"+s.output;l.append(i,s.name);q("group-choices").append(l)}q("group-volume-label").hidden=op!=="volume";q("group-value-label").hidden=!["source","quality","orientation"].includes(op);const choices=op==="source"?[...new Set(eligible.flatMap(s=>s.sources))].map(x=>[x,x]):op==="quality"?[["0","High"],["1","Low"]]:[["landscape","Paysage"],["portrait-left","Portrait gauche"],["portrait-right","Portrait droite"]];q("group-value").replaceChildren(...choices.map(x=>new Option(x[1],x[0])));q("group-error").textContent=""}
+q("group-action").onclick=()=>{const opts=[...q("group-operation").options];for(const o of opts)o.disabled=!latestRows.some(s=>s.rights.includes(groupRights[o.value]));if(q("group-operation").selectedOptions[0]?.disabled)q("group-operation").value=opts.find(o=>!o.disabled)?.value||"";groupChoices();q("group-dialog").showModal()};q("group-operation").onchange=groupChoices;q("close-group").onclick=()=>q("group-dialog").close();q("group-all").onclick=()=>q("group-choices").querySelectorAll("input").forEach(i=>i.checked=true);q("group-none").onclick=()=>q("group-choices").querySelectorAll("input").forEach(i=>i.checked=false);
+q("apply-group").onclick=async()=>{const op=q("group-operation").value,ids=[...q("group-choices").querySelectorAll("input:checked")].map(i=>i.value),v=q("group-value").value;const changes=op==="start"?{enabled:true}:op==="stop"?{enabled:false}:op==="mute"?{muted:true}:op==="unmute"?{muted:false}:op==="volume"?{volume:Number(q("group-volume").value)}:op==="source"?{source:v}:op==="quality"?{bandwidth:v}:{orientation:v};if(!ids.length){q("group-error").textContent="Sélectionne au moins un écran.";return}if(!confirm("Appliquer à "+ids.length+" écran(s) ?"))return;try{await api("/api/operator/group",{ids,changes});q("group-dialog").close();await refresh()}catch(e){q("group-error").textContent=e.message}};
+
+function getGroup(name){let g=groups.get(name);if(!g){const section=document.createElement("section"),title=document.createElement("h2"),grid=document.createElement("div");section.className="screen-group";title.className="screen-group-title";title.textContent=name||"Sans groupe";grid.className="grid";section.append(title,grid);q("screens").append(section);g={section,grid};groups.set(name,g);title.append(dragHandle(section,name,"groups"))}return g}
+function getReader(s){const key=JSON.stringify([s.group||"",s.id]);let r=readerCards.get(key);if(!r){const el=document.createElement("article"),head=document.createElement("div"),title=document.createElement("h2"),statuses=document.createElement("div"),body=document.createElement("div");el.className="operator-card";head.className="card-heading";statuses.className="operator-header-statuses";head.append(title);el.append(head,statuses,body);getGroup(s.group||"").grid.append(el);r={el,title,statuses,body,key,group:s.group||""};readerCards.set(key,r);head.append(dragHandle(el,key,"screens",r.group))}return r}
+async function refresh(){const rows=await api("/api/operator/screens"),keys=new Set(),activeReaders=new Map();latestRows=rows;sourceGallery(rows);q("group-action").disabled=!rows.some(s=>s.rights.some(p=>Object.values(groupRights).includes(p)));q("organize").disabled=!rows.length;q("count").textContent=rows.filter(s=>s.status!=="Hors ligne").length+" / "+rows.length+" écrans connectés";for(const s of rows){const k=s.id+":"+s.output;keys.add(k);const r=getReader(s);if(!activeReaders.has(r.key))activeReaders.set(r.key,[]);activeReaders.get(r.key).push(s);const signature=JSON.stringify([s.rights,s.sources,s.audio_devices,s.folders,s.identify,s.maintenance,s.settings,s.audio_route]);let c=cards.get(k);if(!c||c.signature!==signature&&!c.a.contains(document.activeElement)){const n=build(s);n.signature=signature;if(c)c.a.replaceWith(n.a);cards.set(k,n);c=n}if(c.a.parentElement!==r.body)r.body.append(c.a);c.title.textContent="Écran "+(Number(s.output)+1)+(s.output_name?" · "+s.output_name:"")+(s.width&&s.height?" · "+s.width+" × "+s.height:"")+" ";badge(c.status,s.status)}
 for(const [k,c] of cards)if(!keys.has(k)){c.a.remove();cards.delete(k)}
 for(const [k,r] of readerCards){const outputs=activeReaders.get(k);if(!outputs){r.el.remove();readerCards.delete(k);continue}r.title.textContent=outputs[0].reader_name;r.statuses.replaceChildren(...outputs.map(s=>{const b=document.createElement("span");badge(b,s.status,"Écran "+(Number(s.output)+1)+" : ");return b}))}
 for(const [name,g] of groups)if(!g.grid.children.length){g.section.remove();groups.delete(name)}
+if(!dragging&&!document.activeElement?.closest(".operator-card"))reorder();
 }
 q("logout").onclick=run(async()=>{await api("/api/session/deconnexion",{});location.href="/connexion"});refresh().catch(e=>q("message").textContent=e.message);setInterval(()=>refresh().catch(e=>q("message").textContent=e.message),3000);
 </script></html>"""
@@ -1315,9 +1349,9 @@ class Request(BaseHTTPRequestHandler):
                 try:
                     query = {k:v[0] for k,v in parse_qs(url.query,max_num_fields=4).items()}
                     target,_ = preview_target(query)
-                    if target[0] != "screen" or not self.allowed(target[1],target[2] if len(target)==3 else "0","preview"):
-                        raise PermissionError()
                     with LOCK:
+                        if not self.operator_preview_allowed(target):
+                            raise PermissionError()
                         preview_prune(time.time())
                         job = PREVIEWS.get(target)
                         self.reply(200,preview_status(job) if job else {"state":"empty"})
@@ -1670,19 +1704,41 @@ class Request(BaseHTTPRequestHandler):
                                  reader_name=row["name"], output_name=row.get("output_names",{}).get(index,""), group=physical_group(row,index) or "",
                                  status="Hors ligne" if not online or index!="0" and not out else "Lecture" if playing else "En attente" if settings.get("enabled") else "Arrêté",
                                  settings={k:v for k,v in settings.items() if k in {"enabled"} or k in {"source","bandwidth","mode"} and "source" in perms or k in {"volume","muted"} and "audio" in perms or k=="orientation" and "configuration" in perms},rights=perms,sources=report.get("sources",[]) if "source" in perms else [],
+                                 preview_sources=report.get("sources",[]) if "preview" in perms and online else [],
                                  audio_devices=report.get("audio_devices",[]) if "audio" in perms else [],
                                  audio_route=row.get("audio_routes",{}).get(index,"") if "audio" in perms else "",
                                  folders={k:v["name"] for k,v in media_folders(row).items()} if "media" in perms else {},
-                                 maintenance=whole("maintenance"),identify=whole("identify"),identified=row.get("identify") is True))
+                                 maintenance=whole("maintenance"),identify=whole("identify"),identified=row.get("identify") is True,
+                                 connector=out.get("connector",""), width=out.get("width"),height=out.get("height"),
+                                 display_capture=report.get("display_capture") is True if index=="0" else bool(out), capture_consent=report.get("capture_needs_consent") is True))
         return rows
+
+    def operator_preview_allowed(self,target):
+        if target[0]=="screen":
+            return self.allowed(target[1],target[2] if len(target)==3 else "0","preview")
+        return any(target[1] in row.get("report",{}).get("sources",[]) and
+                   any(self.allowed(key,i,"preview") for i in physical_outputs(row))
+                   for key,row in SCREENS.items() if row.get("token"))
 
     def operator_action(self,path,data):
         denied=(403,{"error":"Action non autorisée."})
         if path == "/api/preview":
             target,_=preview_target(data)
-            if target[0]!="screen" or not self.allowed(target[1],target[2] if len(target)==3 else "0","preview"):
+            if not self.operator_preview_allowed(target):
                 return denied
             return request_preview(data,time.time())
+        if path == "/api/operator/group":
+            ids,patch=data.get("ids"),data.get("changes")
+            fields={"enabled":"play","source":"source","bandwidth":"source","volume":"audio","muted":"audio","orientation":"configuration"}
+            if not isinstance(ids,list) or not 0<len(ids)<=250 or not isinstance(patch,dict) or not patch or any(k not in fields for k in patch):
+                return denied
+            for item in ids:
+                if not isinstance(item,str) or ":" not in item:
+                    return denied
+                key,index=item.split(":",1)
+                if not self.allowed(key,index,"view") or any(not self.allowed(key,index,fields[k]) for k in patch):
+                    return denied
+            return physical_batch(list(dict.fromkeys(ids)),{"changes":patch},time.time())
         if path != "/api/operator/action":
             return denied
         key,index,action=data.get("id"),data.get("output"),data.get("action")
