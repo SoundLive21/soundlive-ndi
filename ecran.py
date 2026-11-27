@@ -1976,6 +1976,8 @@ def desktop():
             self.identification_files = (None, None)
             self.identification_probes = {}
             self.identification_monitor = None
+            self.extra_identification_popups = {}
+            self.extra_identification_textures = {}
             self.identification_reason = ""
             self.identification_badge = self.make_identification_badge()
             badge, _, _ = self.identification_badge
@@ -2118,7 +2120,7 @@ def desktop():
             popup.add(badge[0])
             return popup, badge, layer_shell
 
-        def render_identification_texture(self, labels):
+        def render_identification_texture(self, labels, path=IDENTIFICATION_TEXTURE):
             import cairo
             gi.require_foreign("cairo")
             gi.require_version("PangoCairo", "1.0")
@@ -2150,10 +2152,12 @@ def desktop():
             rows = pixels.get_pixels()
             bitmap = b"".join(rows[start:start + width * 4] for start in range(0, stride * height, stride))
             header = struct.pack("<III", width, height, secrets.randbits(32))
-            replace_overlay_file(IDENTIFICATION_TEXTURE, header + bitmap)
+            replace_overlay_file(path, header + bitmap)
 
         def refresh_identification(self):
             labels = None if self.maintenance.active else self.identification
+            if labels and len(self.outputs) > 1:
+                labels = (labels[0], "Écran 1 · " + labels[1])
             waiting = self.window.get_visible()
             route = self.identification_output
             popup = self.identification_popup
@@ -2193,7 +2197,9 @@ def desktop():
                             box.set_size_request(width, -1)
                             window.resize(width, height)
                         display = self.window.get_display()
-                        monitor = display.get_monitor_at_window(self.window.get_window()) if self.window.get_window() else None
+                        primary = next((o for o in self.outputs if o["id"] == "0"), None)
+                        monitor_index = self.output_monitor(primary) if primary else None
+                        monitor = display.get_monitor(monitor_index) if monitor_index is not None else (display.get_monitor_at_window(self.window.get_window()) if self.window.get_window() else None)
                         if monitor is None:
                             monitor = display.get_primary_monitor()
                         if monitor and layer_shell and monitor != self.identification_monitor:
@@ -2214,7 +2220,77 @@ def desktop():
                         error = self.identification_reason or "Identification indisponible avec ce moteur de lecture."
             except (OSError, RuntimeError, ImportError, AttributeError, ValueError, GLib.Error) as failure:
                 error = str(failure)
-            self.identification_state = {"visible": visible, "error": error}
+            try:
+                extra_visible, extra_error = self.refresh_extra_identification()
+                if extra_error:
+                    error = " · ".join(filter(None, (error, extra_error)))
+                visible = visible and extra_visible
+            except (OSError, RuntimeError, ImportError, AttributeError, ValueError, GLib.Error) as failure:
+                visible = False
+                error = " · ".join(filter(None, (error, str(failure))))
+            self.identification_state = {"visible": visible, "error": error[:240]}
+
+        def refresh_extra_identification(self):
+            labels = None if self.maintenance.active else self.identification
+            outputs = {o["id"]: o for o in self.outputs if o["id"] != "0"}
+            display = self.window.get_display()
+            wayland = display.__gtype__.name != "GdkX11Display"
+            for index in set(self.extra_identification_popups) - set(outputs):
+                popup = self.extra_identification_popups.pop(index)
+                if popup:
+                    popup[0].destroy()
+            for index in set(self.extra_identification_textures) - set(outputs):
+                (STATE / ("identification-sortie-" + index + ".rgba")).unlink(missing_ok=True)
+                self.extra_identification_textures.pop(index, None)
+            errors = []
+            for index, output in outputs.items():
+                path = STATE / ("identification-sortie-" + index + ".rgba")
+                numbered = (labels[0], "Écran " + str(int(index) + 1) + " · " + labels[1]) if labels else None
+                popup = self.extra_identification_popups.get(index)
+                if not labels:
+                    if popup:
+                        popup[0].hide()
+                    path.unlink(missing_ok=True)
+                    self.extra_identification_textures.pop(index, None)
+                    continue
+                if index not in self.extra_identification_popups:
+                    popup = self.make_identification_popup(wayland)
+                    self.extra_identification_popups[index] = popup
+                monitor_index = self.output_monitor(output)
+                monitor = display.get_monitor(monitor_index) if monitor_index is not None else None
+                if popup and monitor:
+                    window, (box, name, group), layer_shell = popup
+                    name.set_text(numbered[0])
+                    group.set_text(numbered[1])
+                    box.show()
+                    box.set_size_request(-1, -1)
+                    width = box.get_preferred_width()[1]
+                    height = box.get_preferred_height_for_width(width)[1]
+                    box.set_size_request(width, -1)
+                    window.resize(width, height)
+                    if layer_shell:
+                        layer_shell.set_monitor(window, monitor)
+                    else:
+                        area = monitor.get_geometry()
+                        window.move(area.x + area.width - width - 18, area.y + area.height - height - 18)
+                        window.set_keep_above(True)
+                    window.show()
+                else:
+                    entry = self.extra_players.get(index)
+                    if entry and entry[0].poll() is None and entry[2].exists():
+                        if self.extra_identification_textures.get(index) != numbered:
+                            self.render_identification_texture(numbered, path)
+                            self.extra_identification_textures[index] = numbered
+                    else:
+                        waiting = self.extra_waiting.get(index)
+                        local = self.extra_media_players.get(index)
+                        if waiting and waiting[0].get_visible() and not (local and local.ready):
+                            # The waiting page already contains the reader name and numbered display.
+                            waiting[1][0].set_text(numbered[0])
+                            waiting[1][1].set_text("Écran " + str(int(index) + 1))
+                        else:
+                            errors.append("Écran " + str(int(index)+1) + " : surcouche indisponible.")
+            return not errors, " · ".join(errors)
 
         def identification_video(self, command, native):
             self.identification_reason = ""
@@ -2635,7 +2711,8 @@ def desktop():
                         [self.video_engine, config[0], config[1], str(config[6]), str(path)],
                         stdout=self.log, stderr=subprocess.STDOUT,
                         env={**os.environ, "SOUNDLIVE_DISPLAY_INDEX": index,
-                             "SOUNDLIVE_RENDER_PREVIEW": str(STATE / ("rendu-sortie-" + index))})
+                             "SOUNDLIVE_RENDER_PREVIEW": str(STATE / ("rendu-sortie-" + index)),
+                             "SOUNDLIVE_IDENTIFICATION_TEXTURE": str(STATE / ("identification-sortie-" + index + ".rgba"))})
                     self.extra_players[index] = (process, config, path)
                 except OSError as error:
                     self.error = str(error)[:240]
@@ -3039,6 +3116,7 @@ def run_windows_screen(tk, log):
         getattr(user, function).restype, getattr(user, function).argtypes = result, args
     identification = None
     identification_state = {"visible": False, "error": ""}
+    extra_badges = {}
     badge_target = None
     next_badge_check = 0
 
@@ -3046,37 +3124,63 @@ def run_windows_screen(tk, log):
         nonlocal badge_target, next_badge_check, identification_state
         if not identification:
             badge.withdraw()
+            for window, _ in extra_badges.values():
+                window.withdraw()
             badge_target = None
             identification_state = {"visible": False, "error": ""}
             return
         pid = player.pid if player and ready else 0
-        target = identification, pid
+        target = identification, pid, tuple((o["id"], o["x"], o["y"], o["width"], o["height"]) for o in displays)
         if badge_target == target and now < next_badge_check:
             return
         badge_target, next_badge_check = target, now + 1
-        try:
-            for label, text in zip(badge_labels, identification):
-                label.configure(text=text)
-            badge.update_idletasks()
-            hwnd = user.GetAncestor(badge.winfo_id(), 2) or badge.winfo_id()
-            style = user.GetWindowLongW(hwnd, -20)
-            # Allow clicks to reach the player and keep the current keyboard focus.
-            user.SetWindowLongW(hwnd, -20, style | 0x080000A0)
+        outputs = displays
+        if not outputs:
             try:
-                left, top, width, height = display_snapshot_windows(pid, False)["bounds"]
+                bounds = display_snapshot_windows(pid, False)["bounds"]
             except RuntimeError:
-                left, top, width, height = display_snapshot_windows(0, False)["bounds"]
-            badge.deiconify()
-            badge.update_idletasks()
-            x = left + max(0, width - badge.winfo_width() - 18)
-            y = top + max(0, height - badge.winfo_height() - 18)
-            if not user.SetWindowPos(hwnd, w.HWND(-1), x, y, 0, 0, 0x0011):
-                raise RuntimeError("Impossible de placer l’identification sur le moniteur.")
-        except (OSError, RuntimeError, ValueError, tk.TclError) as error:
-            badge.withdraw()
-            identification_state = {"visible": False, "error": str(error)}
-        else:
-            identification_state = {"visible": True, "error": ""}
+                bounds = display_snapshot_windows(0, False)["bounds"]
+            outputs = [dict(id="0", **dict(zip(("x","y","width","height"), bounds)))]
+        active = {o["id"] for o in outputs}
+        for index in set(extra_badges) - active:
+            extra_badges.pop(index)[0].destroy()
+        errors = []
+        for output in outputs:
+            index = output["id"]
+            if index == "0":
+                window, labels = badge, badge_labels
+            else:
+                if index not in extra_badges:
+                    window = tk.Toplevel(root, background="#17141a")
+                    window.withdraw()
+                    window.overrideredirect(True)
+                    window.attributes("-topmost", True)
+                    window.attributes("-alpha", .83)
+                    labels = tuple(tk.Label(window, justify="left", background="#17141a", fg=colour,
+                                            font=font, wraplength=420) for colour, font in
+                                   (("white", ("Segoe UI", 16, "bold")), ("#ffd4dc", ("Segoe UI", 12))))
+                    for label, padding in zip(labels, ((8, 1), (1, 8))):
+                        label.pack(anchor="w", padx=13, pady=padding)
+                    extra_badges[index] = window, labels
+                window, labels = extra_badges[index]
+            numbered = (identification[0], "Écran " + str(int(index)+1) + " · " + identification[1]) if len(outputs) > 1 else identification
+            try:
+                for label, text in zip(labels, numbered):
+                    label.configure(text=text)
+                window.update_idletasks()
+                hwnd = user.GetAncestor(window.winfo_id(), 2) or window.winfo_id()
+                style = user.GetWindowLongW(hwnd, -20)
+                user.SetWindowLongW(hwnd, -20, style | 0x080000A0)
+                window.deiconify()
+                window.update_idletasks()
+                x = output["x"] + max(0, output["width"] - window.winfo_width() - 18)
+                y = output["y"] + max(0, output["height"] - window.winfo_height() - 18)
+                if not user.SetWindowPos(hwnd, w.HWND(-1), x, y, 0, 0, 0x0011):
+                    raise RuntimeError("Impossible de placer l’identification sur le moniteur.")
+            except (OSError, RuntimeError, ValueError, tk.TclError) as error:
+                window.withdraw()
+                errors.append("Écran " + str(int(index)+1) + " : " + str(error))
+        identification_state = {"visible": not errors, "error": " · ".join(errors)[:240]}
 
     def show_regie_state(state):
         text, color = state
