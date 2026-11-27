@@ -1015,10 +1015,11 @@ async function loadNetwork() {
   fillPairAddresses();
   for (const card of cards.values()) if (card.data && !card.data.paired) renderPairing(card);
 }
+const pendingWifiSecrets = new Map();
 function renderPairing(card) {
   const row = card.data;
   const panel = card.ui.pending;
-  const revision = JSON.stringify([row.pairing, row.kind, row.installation_fingerprint, network, receiverPort]);
+  const revision = JSON.stringify([row.pairing, row.kind, row.installation_fingerprint, row.installation_network, network, receiverPort]);
   if (card.pairingRevision === revision) return;
   card.pairingRevision = revision;
   panel.replaceChildren();
@@ -1040,7 +1041,7 @@ function renderPairing(card) {
   const input = document.createElement("input");
   input.placeholder = network === null ? "Détection en cours…" : "Adresse IPv4 du PC";
   input.inputMode = "decimal";
-  input.value = card.pairingAddress || addresses[0]?.ip || "";
+  input.value = card.pairingAddress || row.installation_network?.regie || addresses[0]?.ip || "";
   let interfaces;
   if (addresses.length) {
     interfaces = document.createElement("select");
@@ -1072,8 +1073,13 @@ function renderPairing(card) {
     help.textContent = ip.startsWith("169.254.") ?
       "Adresse automatique. Vérifie que le récepteur est joignable sur ce réseau avant de l’associer." : "";
     if (isIPv4(ip) && receiverPort) {
-      code.textContent = installationCommand({kind:row.kind || "pi",regie:ip}, receiverPort,
-        row.pairing, row.installation_fingerprint);
+      const settings = {...(row.installation_network || {}), kind:row.kind || "pi",regie:ip};
+      const secret = pendingWifiSecrets.get(row.pairing);
+      if (secret && Date.now() < secret.until && settings.ssid) {
+        settings.wifi = "inline"; settings.wifi_secret = secret.value;
+      } else if (secret) pendingWifiSecrets.delete(row.pairing);
+      code.textContent = installationCommand(settings, receiverPort, row.pairing, row.installation_fingerprint);
+      if (settings.ssid && settings.wifi === "prompt") help.textContent += " La clé Wi-Fi sera demandée sur le lecteur (non conservée dans la régie).";
     } else if (isIPv4(ip)) {
       code.textContent = network === null ? "Recherche du port des récepteurs…" :
         "Port des récepteurs indisponible. Actualise la page pour réessayer.";
@@ -4103,7 +4109,12 @@ pairForm.onsubmit = action(() => {
     label:"Créer le code",
     async perform() {
       const {code, installation_fingerprint: fingerprint} = await call("/api/pair",
-        {name, kind, prepare_installation:true, exchange_ssh:kind !== "windows"});
+        {name, kind, prepare_installation:true, exchange_ssh:kind !== "windows",
+         installation_network:Object.fromEntries(["installation","regie","hostname","address","ssid","ethernet","wifi_interface","gateway","dns","dns2","wifi"].filter(k=>typeof values[k]==="string").map(k=>[k,k==="wifi" && values[k]==="inline"?"prompt":values[k]]))});
+      if (values.wifi === "inline" && values.wifi_secret) {
+        pendingWifiSecrets.set(code,{value:values.wifi_secret,until:Date.now()+900000});
+        setTimeout(()=>pendingWifiSecrets.delete(code),900000);
+      }
       pairForm.reset();
       dialog.close();
       await refresh(true);

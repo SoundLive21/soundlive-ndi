@@ -1341,6 +1341,7 @@ class Request(BaseHTTPRequestHandler):
                         report=report, extra_outputs=row.get("extra_outputs", {}), online=now - report.get("seen", 0) < ONLINE_AGE,
                         pairing=row.get("pairing") if now < row.get("pairing_until", 0) else None,
                         installation_fingerprint=row.get("installation_fingerprint"),
+                        installation_network=row.get("installation_network", {}),
                         paired="token" in row, version=row.get("version", 0), kind=row.get("kind"),
                         support=support_methods(row.get("kind"),
                                                 (report.get("diagnostic") or {}).get("desktop_protocol"),
@@ -1994,6 +1995,16 @@ class Request(BaseHTTPRequestHandler):
                 code = SSH_PAIRING_PREFIX + code
             SCREENS[key] = dict(name=safe_text(data["name"]), kind=kind, pairing=code,
                                 pairing_until=now + 900, exchange_ssh=exchange_ssh)
+            network = data.get("installation_network")
+            if isinstance(network, dict):
+                fields = ("installation", "regie", "hostname", "address", "ssid", "ethernet", "wifi_interface", "gateway", "dns", "dns2", "wifi")
+                settings = {field: network[field] for field in fields
+                            if isinstance(network.get(field), str) and len(network[field]) <= 128
+                            and not any(ord(char) < 32 for char in network[field])}
+                if settings.get("wifi") == "inline":
+                    settings["wifi"] = "prompt"
+                if settings.get("installation") in ("static", "basic"):
+                    SCREENS[key]["installation_network"] = settings
             if fingerprint:
                 SCREENS[key]["installation_fingerprint"] = fingerprint
             save()
