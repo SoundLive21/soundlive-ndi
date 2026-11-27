@@ -3054,7 +3054,11 @@ function renderExtraOutputs(card, row) {
       const body=document.createElement("div");
       select(el,".config").replaceWith(body);
       select(el,".pending").remove();
-      for (const selector of [".return-ndi",".info",".remove",".reboot",".poweroff",".os-upgrade",".client-upgrade"]) select(el,selector)?.remove();
+      for (const selector of [".os-upgrade",".client-upgrade"]) select(el,selector)?.remove();
+      select(el,".info").onclick=()=>card.ui.info.click();
+      select(el,".remove").onclick=()=>card.ui.remove.click();
+      select(el,".reboot").onclick=()=>card.ui.reboot.click();
+      select(el,".poweroff").onclick=()=>card.ui.poweroff.click();
       select(el,".identify").onclick=action(()=>changeIdentification(!card.data.identify,row.id));
       entry={el,title,badge,preview,controls,body,readerId:row.id};
       try { controls.open=localStorage.getItem("soundlive-controls-"+item.id)==="open"; } catch {}
@@ -3174,12 +3178,10 @@ function renderExtraOutputs(card, row) {
     ndi.disabled = !mediaFolder;
     ndi.onclick = action(() => confirmOutputNdi(card.data,output.id));
     line.append(ndi);
-    const identify=document.createElement("button");identify.type="button";identify.textContent=row.identify?"Masquer l’identification du lecteur":"Identifier le lecteur";identify.onclick=action(()=>changeIdentification(!card.data.identify,row.id));
-    const info=document.createElement("button");info.type="button";info.textContent="Informations du lecteur";info.onclick=()=>card.ui.info.click();
-    const reboot=document.createElement("button");reboot.type="button";reboot.textContent="Redémarrer le lecteur";reboot.disabled=!row.online||row.os_busy||row.report.can_reboot===false;reboot.onclick=()=>card.ui.reboot.click();
-    const poweroff=document.createElement("button");poweroff.type="button";poweroff.textContent="Éteindre le lecteur";poweroff.disabled=!row.online||row.os_busy||!row.report.can_poweroff;poweroff.onclick=()=>card.ui.poweroff.click();
-    const system=document.createElement("div");system.className="action-row";system.append(reboot,poweroff);
-    if(inline){box.append(line);}else{entry.body.replaceChildren(line,info,system);}
+    select(entry.el,".info").hidden=!row.paired;
+    select(entry.el,".reboot").disabled=!row.online||row.os_busy||row.report.can_reboot===false;
+    select(entry.el,".poweroff").disabled=!row.online||row.os_busy||!row.report.can_poweroff;
+    if(inline){box.append(line);}else{entry.body.replaceChildren(line);}
     select(entry.el,".identify").setAttribute("aria-pressed",String(row.identify));
     select(entry.el,".identify").hidden=!row.paired;
     select(entry.el,".device-kind").textContent=deviceLabels[row.kind]||"";
