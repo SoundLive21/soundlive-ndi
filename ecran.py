@@ -722,7 +722,7 @@ class PortalCapture:
             raise RuntimeError("Partage d’écran indisponible. Relance la capture et valide sur Ubuntu.") from error
 
 
-def display_snapshot_windows(player_pid, capture):
+def display_snapshot_windows(player_pid, capture, point=None):
     import ctypes as c
     from ctypes import wintypes as w
     import struct
@@ -747,6 +747,7 @@ def display_snapshot_windows(player_pid, capture):
         (user, "IsWindowVisible", w.BOOL, (w.HWND,)),
         (user, "IsIconic", w.BOOL, (w.HWND,)),
         (user, "MonitorFromWindow", w.HANDLE, (w.HWND, w.DWORD)),
+        (user, "MonitorFromPoint", w.HANDLE, (w.POINT, w.DWORD)),
         (user, "GetMonitorInfoW", w.BOOL, (w.HANDLE, c.POINTER(Monitor))),
         (user, "EnumDisplayDevicesW", w.BOOL, (w.LPCWSTR, w.DWORD, c.POINTER(Device), w.DWORD)),
         (user, "GetDC", w.HDC, (w.HWND,)),
@@ -780,7 +781,8 @@ def display_snapshot_windows(player_pid, capture):
         if not window:
             raise RuntimeError("Fenêtre du lecteur introuvable.")
     monitor = Monitor(size=c.sizeof(Monitor))
-    if not user.GetMonitorInfoW(user.MonitorFromWindow(window, 1), c.byref(monitor)):
+    handle = user.MonitorFromPoint(w.POINT(*point), 0) if point is not None else user.MonitorFromWindow(window, 1)
+    if not handle or not user.GetMonitorInfoW(handle, c.byref(monitor)):
         raise RuntimeError("Aucun moniteur détecté.")
     rect = monitor.area
     width, height = rect.right - rect.left, rect.bottom - rect.top
@@ -2362,6 +2364,16 @@ def desktop():
             if self.output_request and self.output_request.done():
                 try:
                     self.outputs = self.output_request.result()
+                    # GTK monitor enumeration runs on the GUI thread.
+                    display = self.window.get_display()
+                    for output in self.outputs:
+                        monitor_index = self.output_monitor(output)
+                        if monitor_index is None:
+                            continue
+                        monitor = display.get_monitor(monitor_index)
+                        output["model"] = " ".join(dict.fromkeys(filter(None, (monitor.get_manufacturer(), monitor.get_model()))))
+                        output["resolution_width"] = output["width"] * monitor.get_scale_factor()
+                        output["resolution_height"] = output["height"] * monitor.get_scale_factor()
                 except (OSError, ValueError, subprocess.SubprocessError):
                     self.outputs = []
                 self.output_request = None
@@ -2883,7 +2895,14 @@ def run_windows_screen(tk, log):
         for line in result.stdout.splitlines():
             index, x, y, width, height = map(int, line.split())
             if 0 <= index < 8 and width > 0 and height > 0:
-                found.append(dict(id=str(index), width=width, height=height, x=x, y=y))
+                output = dict(id=str(index), width=width, height=height, x=x, y=y)
+                try:
+                    info = display_snapshot_windows(0, False, point=(x + width // 2, y + height // 2))
+                    if info["bounds"] == (x, y, width, height):
+                        output["model"] = info["model"]
+                except (OSError, RuntimeError, ValueError):
+                    pass
+                found.append(output)
         return found
 
     def sync_waiting_outputs():
