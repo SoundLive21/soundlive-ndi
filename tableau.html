@@ -45,6 +45,11 @@ article{border:1px solid var(--edge);border-radius:16px;background:var(--panel);
 h2{margin:0;font-size:1.24rem;overflow-wrap:anywhere}.badge{flex:none;border-radius:20px;background:#382b36;color:#f5d1df;padding:5px 10px;font-size:.82rem}.badge.online{background:#20362a;color:var(--green)}
 .badge.stopped{background:#3d2918;color:#ffc078}
 .badge.waiting{background:#172f49;color:#a9d6ff}
+.card-heading .header-statuses{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;align-items:center;min-width:0}
+.card-heading .header-statuses[hidden],.card-heading .badge[hidden]{display:none}
+.header-statuses .badge{white-space:nowrap}
+.card-heading:has(.header-statuses:not([hidden])){flex-wrap:wrap}
+.card-heading .header-statuses:not([hidden]){flex-basis:100%;justify-content:flex-end}
 .address{color:var(--sub);font-family:monospace;margin:8px 0 18px}.small{font-size:.88rem;color:var(--sub)}label[hidden]{display:none}label{display:grid;gap:6px;font-size:.88rem;color:#e1d6e2;margin:12px 0}
 input,select,button{font:inherit;border-radius:8px;border:1px solid var(--edge);color:inherit}input:not([type=checkbox]):not([type=range]),select{padding:10px;background:#100d12;width:100%}input[type=range]{accent-color:var(--red);width:100%}input[type=checkbox]{accent-color:var(--red)}
 button{padding:9px 13px;cursor:pointer;background:#2b222f;font-weight:600;white-space:nowrap}button.primary{background:#df3453;color:#fff;border-color:#df3453}button:disabled{opacity:.44;cursor:default}button:hover:not(:disabled){filter:brightness(1.18)}
@@ -3405,7 +3410,33 @@ function render(row) {
   const splitGroups = own.some(o=>(o.group||"")!==(row.group||""));
   select(el,".manage-media").hidden = !row.paired;
   select(el,"h2").textContent = splitGroups ? own[0].name : row.name;
+  const headerOutputs = own.filter(o=>(o.group||"")===(row.group||""));
+  let headerStatuses = select(el,".header-statuses");
+  if (!headerStatuses) {
+    headerStatuses = document.createElement("div");
+    headerStatuses.className = "header-statuses";
+    headerStatuses.setAttribute("aria-label","Statuts des écrans");
+    ui.badge.after(headerStatuses);
+  }
+  const multiHeader = headerOutputs.length > 1;
+  ui.badge.hidden = multiHeader;
+  headerStatuses.hidden = !multiHeader;
   paintPhysicalStatus(ui.badge,physicalStatus(row,"0"));
+  if (multiHeader) {
+    const signature = JSON.stringify(headerOutputs.map(o=>[o.output,physicalStatus(row,o.output)]));
+    if (headerStatuses.dataset.signature !== signature) {
+      headerStatuses.replaceChildren();
+      for (const output of headerOutputs) {
+        const badge = document.createElement("span");
+        badge.className = "badge";
+        const state = physicalStatus(row,output.output);
+        paintPhysicalStatus(badge,state);
+        badge.textContent = "Écran "+(Number(output.output)+1)+" : "+state;
+        headerStatuses.append(badge);
+      }
+      headerStatuses.dataset.signature = signature;
+    }
+  }
   select(el, ".device-kind").textContent = deviceLabels[row.kind] || "";
   ui.address.textContent = row.report.ip || "";
   const currentVersion = row.update_availability === "current" && row.report.client_release;
