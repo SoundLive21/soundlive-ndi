@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[publish]'))
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, '[publish] '))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +57,11 @@ jobs:
           version=$(python3 -c 'from pathlib import Path; from versions_regie import software_version; print(software_version(Path("tableau.py").read_bytes(), "tableau.py"))')
           tag="v$version"
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Une release existe déjà pour $tag."
+            if gh release view "$tag" --json isDraft,isPrerelease,assets --jq '(.isDraft == false and .isPrerelease == false) and ([.assets[] | select(.state == "uploaded" and .size > 0) | .name] | contains(["SoundLive-NDI.zip","SoundLive-NDI.zip.sig","SoundLive-Ecrans.zip","SoundLive-Ecrans.zip.sig"]))' | grep -qx true; then
+              echo "::notice::Version $tag déjà publiée avec ses quatre fichiers. Aucune modification."
+              exit 0
+            fi
+            echo "::error::Release $tag existante mais incomplète. Vérification manuelle nécessaire."
             exit 1
           fi
           gh release create "$tag" "$RUNNER_TEMP/dist/"*.zip "$RUNNER_TEMP/dist/"*.sig --target "$GITHUB_SHA" --title "SoundLive-NDI $version" --generate-notes
