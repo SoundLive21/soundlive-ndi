@@ -1725,6 +1725,9 @@ class DashboardClient:
         uses_portal = (image_preview is None and not self.internal_preview_required and self.portal is not None
                        and self.display_info.get("portal") is True)
         monitor_capture, monitor_error = self.local_screen_capture or (self.display_info.get("capture") is True, "")
+        primary_output = next((o for o in report.get("outputs", []) if o["id"] == "0"), None)
+        physical_primary = bool(primary_output and primary_output.get("local") and primary_output.get("playing")
+                                and (WINDOWS or shutil.which("grim") or not self.internal_preview_required and monitor_capture))
         uses_monitor = not self.internal_preview_required and monitor_capture
         report.update(kind=DEVICE_KIND, latency_ms=self.latency_ms, latency_test=self.latency_test,
                       diagnostic=self.diagnostic.sample(server), can_update=self.can_update,
@@ -1732,13 +1735,13 @@ class DashboardClient:
                       update_issue=self.update_issue,
                       update_has_engine=self.has_versioned_engine,
                       orientation_status=self.orientation_report,
-                      display=self.display_info, display_capture=bool(image_preview or uses_internal or uses_portal or uses_monitor),
+                      display=self.display_info, display_capture=bool(image_preview or uses_internal or uses_portal or uses_monitor or physical_primary),
                       display_preview_kind="player" if image_preview or (self.internal_preview_required and not local_video) else "monitor",
-                      display_preview_error=("" if image_preview else
+                      display_preview_error=("" if image_preview or physical_primary else
                                              "Aperçu de la vidéo locale indisponible dans cette session Wayland."
                                              if local_video and self.internal_preview_required else
                                              self.internal_preview_error if self.internal_preview_required else monitor_error),
-                      capture_needs_consent=uses_portal and self.portal.stream is None)
+                      capture_needs_consent=uses_portal and not physical_primary and self.portal.stream is None)
         if (report.get("os_result") or {}).get("state") not in OsMaintenance.pending:
             report["os_health"] = self.os_update_check.report()
         if self.can_update:
@@ -1785,6 +1788,8 @@ class DashboardClient:
                             " ".join(str(target[k]) for k in ("x", "y", "width", "height")))
                     else:
                         mode, argument = "--capture-sortie", " ".join(str(target[k]) for k in ("x", "y", "width", "height"))
+                elif screen and physical_primary:
+                    mode, argument = "--capture-sortie", " ".join(str(primary_output[k]) for k in ("x", "y", "width", "height"))
                 elif screen and image_preview:
                     mode, argument = "local-image", image_preview
                 elif screen and uses_internal:
@@ -2632,20 +2637,37 @@ def desktop():
 
         def sync_local_outputs(self):
             wanted = {}
+            primary_managed = len(self.outputs) > 1 and self.media.enabled and self.settings["enabled"]
             if not self.maintenance.active:
                 for output in self.outputs:
                     index = output["id"]
-                    config = self.extra_media_settings.get(index)
-                    settings = self.extra_settings.get(index, {})
-                    if index != "0" and config and settings.get("enabled") is True:
+                    config = self.media.applied if index == "0" and primary_managed else self.extra_media_settings.get(index)
+                    settings = self.settings if index == "0" else self.extra_settings.get(index, {})
+                    if index == "0" and primary_managed and (self.player is not None or self.local_pixbuf is not None):
+                        self.terminate()
+                        continue
+                    if config and settings.get("enabled") is True:
                         wanted[index] = (config, settings, output)
             for index in list(self.extra_media_players):
                 if index not in wanted:
                     self.extra_media_players.pop(index).close()
+                    if index == "0" and self.player is None and self.local_pixbuf is None:
+                        self.playing_local = self.video_ready = False
+                        self.active_source = None
+                        self.waiting()
             for index, (config, settings, output) in wanted.items():
                 if index not in self.extra_media_players:
                     self.extra_media_players[index] = SecondaryMedia(self.media, self.log, (Gtk, GdkPixbuf))
-                self.extra_media_players[index].update(config, settings, output, self.output_monitor(output))
+                local = self.extra_media_players[index]
+                local.update(config, settings, output, self.output_monitor(output))
+                if index == "0":
+                    self.playing_local = self.video_ready = local.ready
+                    self.active_source = local.config["items"][local.index]["name"] if local.ready else None
+                    self.media.play_error = local.error
+                    if local.ready:
+                        self.window.hide()
+                    elif not self.window.get_visible():
+                        self.waiting()
 
         def start(self):
             if self.maintenance.active:
@@ -2760,7 +2782,7 @@ def desktop():
             if self.maintenance.active and self.player is None and self.local_pixbuf is None:
                 self.maintenance.start()
             if (not self.maintenance.active and self.media.enabled and self.settings["enabled"]
-                    and self.player is None and self.local_pixbuf is None
+                    and self.player is None and self.local_pixbuf is None and len(self.outputs) < 2
                     and GLib.get_monotonic_time() >= self.retry_at):
                 self.start()
             self.sync_outputs()
@@ -3222,20 +3244,34 @@ def run_windows_screen(tk, log):
             extra_players[index] = (process, config, path)
 
     def sync_local_outputs():
+        nonlocal ready, playing_local, local_name
         wanted = {}
+        primary_managed = len(displays) > 1 and media.enabled and settings["enabled"]
+        if primary_managed and player is not None:
+            stop_player()
         for output in displays:
             index = output["id"]
-            config = extra_media_settings.get(index)
-            selected = extra_settings.get(index, {})
-            if index != "0" and config and selected.get("enabled") is True:
+            config = media.applied if index == "0" and primary_managed else extra_media_settings.get(index)
+            selected = settings if index == "0" else extra_settings.get(index, {})
+            if config and selected.get("enabled") is True:
                 wanted[index] = (config, selected, output)
         for index in list(extra_media_players):
             if index not in wanted:
                 extra_media_players.pop(index).close()
+                if index == "0" and player is None:
+                    ready = playing_local = False
+                    local_name = ""
         for index, (config, selected, output) in wanted.items():
             if index not in extra_media_players:
                 extra_media_players[index] = SecondaryMedia(media, log)
-            extra_media_players[index].update(config, selected, output)
+            local = extra_media_players[index]
+            local.update(config, selected, output)
+            if index == "0":
+                ready = playing_local = local.ready
+                local_name = local.config["items"][local.index]["name"] if local.ready else ""
+                media.play_error = local.error
+                if ready:
+                    root.withdraw()
 
     def update():
         nonlocal request, discovery, next_poll, next_probe, player, settings, sources
@@ -3313,7 +3349,7 @@ def run_windows_screen(tk, log):
             if player and not ready and READY.exists():
                 ready = True
                 root.withdraw()
-            if not player and now >= retry_at and settings["enabled"]:
+            if not player and now >= retry_at and settings["enabled"] and not (media.enabled and len(displays) > 1):
                 if media.enabled:
                     try:
                         command, local_name = media.command(settings)
@@ -3349,7 +3385,8 @@ def run_windows_screen(tk, log):
                     error=failure, can_poweroff=True, can_reboot=True,
                     local_video=playing_local, media_status=media.report(), identification=identification_state,
                     outputs=report_outputs(displays, ready, playing_local, extra_players, extra_media_players)),
-                    player.pid if state == "Lecture" and player else os.getpid())
+                    player.pid if state == "Lecture" and player else extra_media_players["0"].process.pid
+                    if state == "Lecture" and "0" in extra_media_players and extra_media_players["0"].process else os.getpid())
                 next_poll = now + 2
         except (OSError, ValueError, subprocess.SubprocessError) as error:
             failure = str(error)[:240]
