@@ -32,7 +32,8 @@ def locations(role):
         root = local / "soundlive-ndi/client"
         links = [programs / "Startup" / name for name in
                  ("SoundLive-NDI.lnk", "SoundLive-Ecran.lnk")]
-        links.append(programs / "SoundLive-NDI Lecteur.lnk")
+        links.extend((programs / "SoundLive-NDI Lecteur.lnk",
+                      programs / "SoundLive-NDI - Raccorder le lecteur.lnk"))
         return root, links, [root.parent / "config", root.parent / "state"]
     config = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config"))
     data_home = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share"))
@@ -48,7 +49,8 @@ def locations(role):
     root = HOME / ".local/share/soundlive-ndi"
     links = [config / "autostart/ndi-ecran.desktop",
              config / "autostart/soundlive-ecran-actif.desktop",
-             HOME / ".local/bin/soundlive-ndi-ecran-actif"]
+             HOME / ".local/bin/soundlive-ndi-ecran-actif",
+             data_home / "applications/soundlive-ndi-raccordement.desktop"]
     return root, links, [config / "soundlive-ndi", state / "soundlive-ndi"]
 
 
@@ -111,7 +113,63 @@ def active_processes(root):
     return found
 
 
-def uninstall(role, purge=False, dry_run=False):
+def system_cleanup(role, dry_run=False):
+    """Retire uniquement les composants identifiés comme appartenant à SoundLive."""
+    if WINDOWS:
+        commands = []
+        if role == "lecteur":
+            commands.append(["powershell.exe", "-NoProfile", "-Command",
+                "$ErrorActionPreference='Stop'; $t=Get-ScheduledTask -TaskName 'SoundLive-NDI Network' -ErrorAction SilentlyContinue; "
+                "if ($t) { if ($t.State -eq 'Running') { Stop-ScheduledTask -TaskName 'SoundLive-NDI Network' }; "
+                "Unregister-ScheduledTask -TaskName 'SoundLive-NDI Network' -Confirm:$false }; "
+                "Get-NetFirewallRule -Name 'SoundLive-NDI-SSH','SoundLive-NDI-VNC','SoundLive-NDI-MSRDP' -ErrorAction SilentlyContinue | Remove-NetFirewallRule"])
+        else:
+            commands.append(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                             str(Path(__file__).resolve().parent / "regie-internet-windows.ps1"), "-Action", "desactiver"])
+        if dry_run:
+            print("Nettoyage système prévu :", role, "(tâches/règles dédiées ou NAT SoundLive)")
+            return
+        import ctypes
+        if not ctypes.windll.shell32.IsUserAnAdmin():
+            raise ValueError("Relance le menu en administrateur sous le même compte pour le nettoyage système.")
+        for command in commands:
+            subprocess.run(command, check=True, timeout=120)
+        if role == "lecteur":
+            folder = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "soundlive-ndi/Network"
+            for name in ("soundlive-ndi-network-windows.ps1", "configuration.json", "reseau.log"):
+                remove(folder / name)
+            if folder.is_dir() and not any(folder.iterdir()):
+                folder.rmdir()
+        return
+    if role == "regie":
+        if dry_run:
+            print("Nettoyage système prévu : désactivation du partage NAT SoundLive si configuré.")
+        elif Path("/run/soundlive-ndi-internet.json").exists():
+            subprocess.run(["sudo", "/usr/bin/python3", str(Path(__file__).resolve().parent / "regie-internet.py"), "desactiver"], check=True)
+        return
+    paths = ["/etc/systemd/system/soundlive-ndi-network.service",
+             "/etc/systemd/system/soundlive-ndi-network.timer",
+             "/etc/systemd/system/soundlive-ndi-maintenance@.service",
+             "/usr/local/sbin/soundlive-ndi-network",
+             "/usr/local/sbin/soundlive-ndi-maintenance",
+             "/etc/soundlive-ndi-network.conf",
+             "/etc/sudoers.d/soundlive-ecrans",
+             "/etc/sudoers.d/soundlive-ndi-maintenance",
+             "/etc/lightdm/lightdm.conf.d/60-soundlive-autologin.conf"]
+    if dry_run:
+        for path in paths:
+            print("Nettoyage système prévu :", path)
+        return
+    subprocess.run(["sudo", "-v"], check=True)
+    if Path(paths[1]).exists():
+        subprocess.run(["sudo", "systemctl", "disable", "--now", "soundlive-ndi-network.timer"], check=True)
+    if Path(paths[0]).exists():
+        subprocess.run(["sudo", "systemctl", "stop", "soundlive-ndi-network.service"], check=True)
+    subprocess.run(["sudo", "rm", "-f", "--", *paths], check=True)
+    subprocess.run(["sudo", "systemctl", "daemon-reload"], check=True)
+
+
+def uninstall(role, purge=False, dry_run=False, clean_system=False):
     root, links, data = locations(role)
     for path in [root, *links, *data]:
         assert_safe(path)
@@ -138,6 +196,8 @@ def uninstall(role, purge=False, dry_run=False):
         for path in paths:
             if path.exists():
                 print("À supprimer :", path)
+        if clean_system:
+            system_cleanup(role, True)
         return
     processes = active_processes(root)
     if processes:
@@ -145,6 +205,8 @@ def uninstall(role, purge=False, dry_run=False):
                          + ", ".join(processes) + ").")
     if root in Path(__file__).resolve().parents:
         raise ValueError("Exécute le désinstallateur depuis un kit séparé.")
+    if clean_system:
+        system_cleanup(role)
     for path in paths:
         remove(path)
     if WINDOWS and role == "regie":
@@ -155,7 +217,10 @@ def uninstall(role, purge=False, dry_run=False):
         except FileNotFoundError:
             pass
     print("Désinstallation locale terminée.", flush=True)
-    print("Les dépendances, réglages système et autorisations SSH sont conservés.")
+    if clean_system:
+        print("Composants système dédiés nettoyés. Vérifie les profils réseau, SSH, VNC/RDP, autologin et veille : les réglages antérieurs ne sont pas tous sauvegardés.")
+    else:
+        print("Les dépendances, réglages système et autorisations SSH sont conservés.")
     if not purge:
         print("Les données d'association et de configuration sont conservées.")
     else:
@@ -172,6 +237,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("role", choices=("regie", "lecteur"))
     parser.add_argument("--purger", action="store_true", help="Supprimer également les données locales")
+    parser.add_argument("--nettoyer-systeme", action="store_true", help="Retirer les services et réglages dédiés (administration requise)")
     parser.add_argument("--simulation", action="store_true", help="Afficher les fichiers sans les supprimer")
     args = parser.parse_args()
     if not args.simulation:
@@ -179,7 +245,10 @@ def main():
         if input("Confirme en saisissant " + expected + " : ") != expected:
             print("Annulé.")
             return
-    uninstall(args.role, args.purger, args.simulation)
+    if args.nettoyer_systeme and not args.simulation:
+        if input("Nettoyage système : peut interrompre le réseau ou l’accès distant. Exécute localement sur un poste dédié. Confirme NETTOYER : ") != "NETTOYER":
+            return
+    uninstall(args.role, args.purger, args.simulation, args.nettoyer_systeme)
 
 
 if __name__ == "__main__":
