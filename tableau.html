@@ -257,6 +257,36 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
 #session-time{color:#ffc078;font-variant-numeric:tabular-nums}
 @media(max-width:600px){.traffic-panel{grid-template-columns:1fr}}
 @media(max-width:460px){#count + #logout{margin-left:auto}}
+#users-dialog{width:min(1120px,96vw)}
+#users-dialog .users-layout{display:grid;grid-template-columns:230px minmax(0,1fr);gap:18px;margin-top:20px}
+#users-dialog .users-sidebar{background:#17121a;border:1px solid var(--edge);border-radius:12px;padding:12px;align-self:start}
+#users-dialog .users-tabs{display:flex;gap:4px;margin-bottom:12px}
+#users-dialog .users-tabs button{flex:1;padding:8px;font-size:.85rem}
+#users-dialog .users-tabs button[aria-selected=true]{background:#562536;border-color:#e65b77;color:#fff}
+#users-dialog .users-list{display:grid;gap:6px;max-height:46vh;overflow:auto;margin:12px 0}
+#users-dialog .users-list button{text-align:left;white-space:normal;overflow-wrap:anywhere}
+#users-dialog .users-list button[aria-current=true]{border-color:#ed7788;background:#3b202b}
+#users-dialog .users-admin{padding:12px;border:1px solid #71576a;border-radius:10px;margin-bottom:12px;background:#261e29}
+#users-dialog .users-admin strong{display:block;color:#ffd2df}
+#users-dialog .users-editor{min-width:0}
+#users-dialog .users-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+#users-dialog .users-members{display:flex;gap:8px;flex-wrap:wrap}
+#users-dialog .users-members label{display:flex;align-items:center;gap:6px;padding:8px;border:1px solid var(--edge);border-radius:8px;margin:0}
+#users-dialog .users-matrix{overflow:auto;max-height:38vh;border:1px solid var(--edge);border-radius:10px}
+#users-dialog table{border-collapse:separate;border-spacing:0;width:100%;font-size:.82rem}
+#users-dialog th,#users-dialog td{padding:10px 8px;text-align:center;border-bottom:1px solid var(--edge)}
+#users-dialog th{position:sticky;top:0;background:#302631;z-index:1}
+#users-dialog td:first-child,#users-dialog th:first-child{text-align:left;min-width:155px;position:sticky;left:0;background:#211a24}
+#users-dialog th:first-child{z-index:2}
+#users-dialog td input{width:17px;height:17px;cursor:pointer}
+#users-dialog .users-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+#users-dialog .users-tools input{flex:1;min-width:130px;width:auto}
+#users-dialog .users-footer{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid var(--edge);padding-top:14px;margin-top:18px}
+#users-dialog .users-footer .primary{margin-left:auto}
+#users-dialog .users-message[data-error=true]{color:#ff9eaa}
+#users-dialog .users-message{color:var(--green);min-height:1.3em}
+#users-dialog [hidden]{display:none!important}
+@media(max-width:720px){#users-dialog .users-layout,#users-dialog .users-fields{grid-template-columns:1fr}#users-dialog .users-list{max-height:160px}}
 </style>
 </head>
 <body>
@@ -333,6 +363,25 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
   <div id="screens"></div>
 </main>
 <footer class="project-credits">© 2026 Société SoundLive · Auteur : DUVERNOY Matthieu &amp; ChatGPT · <a href="mailto:contact@soundlive.fr">contact@soundlive.fr</a></footer>
+<dialog id="users-dialog" aria-labelledby="users-title">
+<div class="dialog-body">
+  <div class="dialog-heading"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="7" r="3"/><path d="M3 20v-3a6 6 0 0 1 12 0v3M16 4a3 3 0 0 1 0 6M17 13a5 5 0 0 1 4 5v2"/></svg><div><h2 id="users-title">Utilisateurs et groupes</h2><p class="small">Gère les accès à la régie et les permissions par écran.</p></div></div>
+  <div class="users-layout">
+    <aside class="users-sidebar"><div class="users-tabs" role="tablist"><button type="button" role="tab" id="users-tab-users" aria-selected="true">Utilisateurs</button><button type="button" role="tab" id="users-tab-groups" aria-selected="false">Groupes</button></div>
+      <div class="users-admin" id="users-admin"><strong>regie</strong><span class="small">Super-administrateur · protégé</span></div>
+      <div id="users-list" class="users-list"></div><button type="button" id="users-new" class="primary" style="width:100%">+ Nouvel utilisateur</button>
+    </aside>
+    <form id="users-editor" class="users-editor">
+      <h2 id="users-editor-title">Nouvel utilisateur</h2>
+      <div class="users-fields"><label>Identifiant<input id="users-name" required pattern="[A-Za-z0-9_.-]{1,32}" maxlength="32" autocomplete="off"></label><label id="users-password-label">Mot de passe<input id="users-password" type="password" autocomplete="new-password" maxlength="256"></label></div>
+      <div id="users-user-fields"><label class="check"><input id="users-enabled" type="checkbox" checked> Compte actif</label><h3>Groupes associés</h3><div id="users-members" class="users-members"></div><p class="small">Les droits des groupes s’ajoutent aux droits directs.</p></div>
+      <h3>Permissions par écran</h3><div class="users-tools"><input id="users-search" placeholder="Rechercher un écran" aria-label="Rechercher un écran"><button type="button" id="users-all">Tout cocher (filtre)</button><button type="button" id="users-none">Tout décocher (filtre)</button></div>
+      <div id="users-matrix" class="users-matrix"></div><p class="small">Les droits de maintenance et d’identification doivent couvrir tous les écrans du lecteur. Le droit de consultation est automatiquement ajouté aux autres droits.</p>
+      <div class="users-footer"><button type="button" id="users-delete" class="remove">Supprimer</button><button type="submit" id="users-save" class="primary">Enregistrer</button></div>
+    </form>
+  </div>
+  <p id="users-message" class="users-message" role="status"></p><div class="actions"><button type="button" id="users-close">Fermer</button></div>
+</div></dialog>
 <dialog id="identify-manager" aria-labelledby="identify-manager-title">
   <div class="dialog-body">
     <h2 id="identify-manager-title">Identifier les écrans</h2>
@@ -1473,7 +1522,57 @@ function renderSourceGallery(rows) {
   }
 }
 
-document.querySelector("#open-users").onclick = () => { location.assign("/utilisateurs"); };
+{
+  const u=id=>document.getElementById("users-"+id), modal=u("dialog");
+  const rights={view:"Voir",preview:"Aperçu",play:"Lecture / arrêt",source:"Source / qualité",audio:"Audio",media:"Médias",identify:"Identifier",maintenance:"Maintenance",configuration:"Orientation"};
+  let db,kind="users",selected="",busy=false,dirty=false;
+  const message=(text="",error=false)=>{u("message").textContent=text;u("message").dataset.error=String(error)};
+  const discard=()=>!dirty||confirm("Abandonner les modifications non enregistrées ?");
+  function list(){
+    u("admin").hidden=kind!=="users";
+    u("tab-users").setAttribute("aria-selected",String(kind==="users"));
+    u("tab-groups").setAttribute("aria-selected",String(kind==="groups"));
+    u("new").textContent=kind==="users"?"+ Nouvel utilisateur":"+ Nouveau groupe";
+    u("list").replaceChildren();
+    for(const name of Object.keys(db[kind]).sort()){
+      const b=document.createElement("button");b.type="button";b.textContent=name+(kind==="users"&&db.users[name].enabled===false?" · Désactivé":"");
+      b.setAttribute("aria-current",String(name===selected));
+      b.onclick=()=>{if(!busy&&discard()){selected=name;draw();}};u("list").append(b);
+    }
+  }
+  function filter(){const term=u("search").value.trim().toLocaleLowerCase();for(const tr of u("matrix").querySelectorAll("tbody tr"))tr.hidden=!tr.dataset.name.includes(term)}
+  function draw(){
+    dirty=false;list();const entry=db[kind][selected]||{},isUser=kind==="users";
+    u("editor-title").textContent=selected?selected:isUser?"Nouvel utilisateur":"Nouveau groupe";
+    u("name").value=selected;u("name").readOnly=!!selected;u("password").value="";u("password").required=isUser&&!selected;
+    u("password").placeholder=selected?"Laisser vide pour conserver":"8 caractères minimum";
+    u("password-label").hidden=!isUser;u("user-fields").hidden=!isUser;u("enabled").checked=entry.enabled!==false;
+    u("delete").disabled=!selected;u("members").replaceChildren();
+    for(const g of Object.keys(db.groups).sort()){const label=document.createElement("label"),i=document.createElement("input");i.type="checkbox";i.value=g;i.checked=(entry.groups||[]).includes(g);label.append(i,g);u("members").append(label)}
+    if(!Object.keys(db.groups).length)u("members").textContent="Aucun groupe créé.";
+    const table=document.createElement("table"),head=table.createTHead().insertRow(),body=table.createTBody();
+    for(const title of ["Écran",...Object.values(rights)]){const th=document.createElement("th");th.scope="col";th.textContent=title;head.append(th)}
+    for(const [id,name] of Object.entries(db.screens)){const tr=body.insertRow();tr.dataset.name=name.toLocaleLowerCase();tr.insertCell().textContent=name;
+      for(const p of Object.keys(rights)){const i=document.createElement("input");i.type="checkbox";i.dataset.screen=id;i.value=p;i.checked=(entry.grants?.[id]||[]).includes(p);i.setAttribute("aria-label",name+" · "+rights[p]);tr.insertCell().append(i)}}
+    u("matrix").replaceChildren(table);filter();message();
+  }
+  async function load(){db=await call("/api/users");if(!db[kind][selected])selected="";draw()}
+  function changeKind(next){if(busy||kind===next||!discard())return;kind=next;selected="";draw()}
+  async function perform(fn){if(busy)return;busy=true;u("save").disabled=u("delete").disabled=true;try{await fn()}catch(e){message(e.message,true)}finally{busy=false;u("save").disabled=false;u("delete").disabled=!selected}}
+  u("tab-users").onclick=()=>changeKind("users");u("tab-groups").onclick=()=>changeKind("groups");
+  u("new").onclick=()=>{if(!busy&&discard()){selected="";draw();u("name").focus()}};
+  u("editor").addEventListener("input",e=>{if(e.target!==u("search"))dirty=true});
+  u("search").oninput=filter;
+  for(const [id,checked] of [["all",true],["none",false]])u(id).onclick=()=>{for(const i of u("matrix").querySelectorAll("tbody tr:not([hidden]) input"))i.checked=checked;dirty=true};
+  u("editor").onsubmit=e=>{e.preventDefault();perform(async()=>{
+    const grants={};for(const i of u("matrix").querySelectorAll("input:checked"))(grants[i.dataset.screen]??=[]).push(i.value);
+    const name=u("name").value;await call("/api/users",{kind,name,password:u("password").value,enabled:u("enabled").checked,groups:[...u("members").querySelectorAll("input:checked")].map(i=>i.value),grants});
+    selected=name;dirty=false;await load();message("Modifications enregistrées.");
+  })};
+  u("delete").onclick=()=>{if(selected&&confirm("Supprimer "+selected+" ?"))perform(async()=>{await call("/api/users",{kind,name:selected,delete:true});selected="";dirty=false;await load();message("Élément supprimé.")})};
+  u("close").onclick=()=>{if(!busy&&discard())modal.close()};modal.addEventListener("cancel",e=>{if(busy||!discard())e.preventDefault()});
+  document.querySelector("#open-users").onclick=async()=>{if(modal.open)return;kind="users";selected="";dirty=false;u("editor").hidden=true;modal.showModal();message("Chargement…");try{await load();u("editor").hidden=false}catch(e){message(e.message,true)}};
+}
 const logoutButton = document.querySelector("#logout");
 const sessionDialog = document.querySelector("#session-warning");
 const sessionLogout = document.querySelector("#session-logout");
