@@ -3312,7 +3312,7 @@ function renderExtraOutputs(card, row) {
     actions.className = "action-row";
     actions.append(save, toggle);
     line.append(heading, label("Sources NDI détectées", source),
-      label("Qualité", bandwidth), label("Orientation de l’écran", orientation), label("Volume ", level), volume, audio, audioRouteControl(row,output.id), actions);
+      label("Qualité", bandwidth), label("Orientation de l’écran", orientation), audioRouteControl(row,output.id), label("Volume ", level), volume, audio, actions);
     const ndi = document.createElement("button");
     ndi.type = "button"; ndi.className = "primary full-action";
     ndi.textContent = "Revenir à la diffusion NDI";
@@ -3352,7 +3352,7 @@ function render(row) {
   const oldAudio = select(audioField, ".audio-route");
   const audioSignature = JSON.stringify([row.report.audio_devices,row.audio_routes?.["0"],row.online]);
   if (audioField.dataset.audioSignature !== audioSignature && !oldAudio?.contains(document.activeElement)) {
-    oldAudio?.remove(); audioField.append(audioRouteControl(row,"0")); audioField.dataset.audioSignature = audioSignature;
+    oldAudio?.remove(); select(audioField, "input.volume").closest("label").before(audioRouteControl(row,"0")); audioField.dataset.audioSignature = audioSignature;
   }
   const handle = select(el, ".card-heading .drag-handle");
   handle.title = "Déplacer " + row.name + " · Glisser ou utiliser les flèches";
