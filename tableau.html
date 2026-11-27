@@ -1321,6 +1321,7 @@ function renderPreview(view) {
 async function requestPreview(view, automatic = false) {
   if (!view.available || remoteSessionEnded || view.pending || (automatic && view.needsConsent)) return;
   const target = {[view.screen ? "screen" : "source"]:view.target};
+  if (view.output) target.output = view.output;
   view.pending = true;
   view.error = "";
   renderPreview(view);
@@ -1360,8 +1361,8 @@ async function refreshVisiblePreviews() {
     for (const view of previewCards.values()) if (previewVisible(view)) visible.add(view);
   }
   for (const card of cards.values()) {
-    if (card.el.closest(".screen-group")?.open && previewVisible(card.preview)) {
-      visible.add(card.preview);
+    if (card.el.closest(".screen-group")?.open) {
+      for (const view of [card.preview, ...card.extraPreviews.values()]) if (previewVisible(view)) visible.add(view);
     }
   }
   const now = Date.now();
@@ -1386,7 +1387,7 @@ async function refreshVisiblePreviews() {
 previewAuto.addEventListener("change", () => {
   try { localStorage.setItem("soundlive-preview-auto", previewAuto.checked ? "on" : "off"); } catch {}
   for (const view of previewCards.values()) renderPreview(view);
-  for (const card of cards.values()) renderPreview(card.preview);
+  for (const card of cards.values()) for (const view of [card.preview, ...card.extraPreviews.values()]) renderPreview(view);
   refreshVisiblePreviews();
 });
 previewSection.addEventListener("toggle", refreshVisiblePreviews);
@@ -2715,6 +2716,7 @@ function cardFor(id) {
   ui["return-ndi"].onclick = action(() => confirmReturnToNdi([{row:card.data}]));
   ui.identify.onclick = action(() => changeIdentification(!card.data.identify, id));
   card.preview = createPreview(select(el, ".screen-preview"), "Capture de l’écran", id, true);
+  card.extraPreviews = new Map();
   const controls = select(el, "details");
   try { controls.open = localStorage.getItem("soundlive-controls-" + id) === "open"; }
   catch { /* Storage can be unavailable in private mode. */ }
@@ -3082,6 +3084,23 @@ function render(row) {
     overview.nextAuto = 0;
   }
   renderPreview(overview);
+  const secondaryOutputs = (row.report.outputs || []).filter(o => o.id !== "0");
+  if (secondaryOutputs.length) select(overview.element, "strong").textContent = "Aperçu · Écran 1";
+  for (const [id, view] of card.extraPreviews) {
+    if (!secondaryOutputs.some(o => o.id === id)) { view.available = false; view.element.remove(); card.extraPreviews.delete(id); }
+  }
+  for (const output of secondaryOutputs) {
+    let view = card.extraPreviews.get(output.id);
+    if (!view) {
+      view = createPreview(overview.element.parentElement, "Aperçu · Écran " + (Number(output.id) + 1), row.id, true);
+      view.output = output.id;
+      card.extraPreviews.set(output.id, view);
+    }
+    view.available = row.online && row.paired;
+    view.unavailable = "Lecteur hors ligne.";
+    if (!view.available) view.snapshot = null;
+    renderPreview(view);
+  }
   select(stream, "span").textContent = playing && row.report.active_media ? "Média local en cours" :
     playing && row.report.active_source ? "Flux en cours" :
     row.media?.enabled ? "Liste de médias locaux sélectionnée" :
