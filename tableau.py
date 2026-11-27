@@ -122,7 +122,7 @@ function sourceGallery(rows){
 }
 async function captureSource(v,automatic=false){if(v.pending||!v.available||automatic&&v.consent)return;v.pending=true;v.button.disabled=true;v.status.textContent="Capture en cours…";try{let p=await api("/api/preview",{...v.target,previous:v.previous,automatic});const end=Date.now()+(p.consent?92000:18000);while(p.state==="pending"&&Date.now()<end){await new Promise(r=>setTimeout(r,950));p=await api("/api/preview?"+new URLSearchParams(v.target))}if(p.state!=="ready"||!p.image)throw Error(p.error||"Capture indisponible");v.previous=p.id;v.img.src="data:image/png;base64,"+p.image;v.img.hidden=false;v.placeholder.hidden=true;v.status.textContent="Image capturée à "+new Date(p.captured*1000).toLocaleTimeString("fr-FR");v.button.textContent="Actualiser l’aperçu";v.next=Date.now()+10000}catch(e){v.status.textContent=e.message;v.next=Date.now()+30000}finally{v.pending=false;v.button.disabled=!v.available}}
 setInterval(()=>{if(!q("source-previews").open||!q("auto-previews").checked||[...previewViews.values()].some(v=>v.pending))return;const v=[...previewViews.values()].find(v=>v.available&&v.next<=Date.now()&&v.el.getBoundingClientRect().bottom>0&&v.el.getBoundingClientRect().top<innerHeight);if(v)captureSource(v,true)},3000);
-function badge(node,state,label=""){node.className="badge"+(state==="Lecture"?" online":state==="Arrêté"?" stopped":state==="En attente"?" waiting":"");node.textContent=label+state}
+function badge(node,state,label=""){node.className="badge"+(state==="Lecture"?" online":state==="Arrêté"?" stopped":(state==="En attente"||state==="Démarrage")?" waiting":"");node.textContent=label+state}
 const groups=new Map(), readerCards=new Map();
 let layout={groups:[],screens:{}};try{layout=JSON.parse(localStorage.getItem("soundlive-operator-layout")||"null")||layout}catch{}
 const saveLayout=()=>{try{localStorage.setItem("soundlive-operator-layout",JSON.stringify(layout))}catch{}};
@@ -146,12 +146,31 @@ q("group-action").onclick=()=>{const opts=[...q("group-operation").options];for(
 q("apply-group").onclick=async()=>{const op=q("group-operation").value,ids=[...q("group-choices").querySelectorAll("input:checked")].map(i=>i.value),v=q("group-value").value;const changes=op==="start"?{enabled:true}:op==="stop"?{enabled:false}:op==="mute"?{muted:true}:op==="unmute"?{muted:false}:op==="volume"?{volume:Number(q("group-volume").value)}:op==="source"?{source:v}:op==="quality"?{bandwidth:v}:{orientation:v};if(!ids.length){q("group-error").textContent="Sélectionne au moins un écran.";return}if(!confirm("Appliquer à "+ids.length+" écran(s) ?"))return;try{await api("/api/operator/group",{ids,changes});q("group-dialog").close();await refresh()}catch(e){q("group-error").textContent=e.message}};
 
 function getGroup(name){let g=groups.get(name);if(!g){const section=document.createElement("section"),title=document.createElement("h2"),grid=document.createElement("div");section.className="screen-group";title.className="screen-group-title";title.textContent=name||"Sans groupe";grid.className="grid";section.append(title,grid);q("screens").append(section);g={section,grid};groups.set(name,g);title.append(dragHandle(section,name,"groups"))}return g}
+function renderReaderHealth(r,s){
+ const el=r.el, h=s.health||{}, d=h.diagnostic||{}, online=h.online;
+ const set=(selector,value,level)=>{const n=el.querySelector(selector);n.dataset.level=level;n.querySelector("strong").textContent=value};
+ const finite=Number.isFinite, severity=(v,a,b)=>!finite(v)?"unknown":v<a?"good":v<b?"warn":"bad", pct=v=>finite(v)?Math.round(v)+" %":"—";
+ const load=(used,total)=>finite(used)&&total>0?100*used/total:null;
+ el.querySelector(".device-kind").textContent=({pi:"Raspberry Pi",ubuntu:"PC Ubuntu",windows:"PC Windows"})[h.kind]||"";
+ el.querySelector(".address").textContent=h.ip||"";
+ el.querySelector(".client-release").textContent=h.version?"Lecteur v"+h.version:"";
+ el.querySelector(".metrics").hidden=false;
+ set(".connection",online?(finite(h.latency)?Math.round(h.latency)+" ms":"—"):"Hors ligne",online?severity(h.latency,30,100):"bad");
+ const cpu=online?d.cpu_pct:null,ram=online?load(d.ram_used,d.ram_total):null,disk=online?load(d.disk_used,d.disk_total):null;
+ set(".cpu",pct(cpu),severity(cpu,65,85));set(".ram",pct(ram),severity(ram,65,85));set(".disk",pct(disk),severity(disk,h.disk_limit-10,h.disk_limit));
+ el.querySelector(".disk-free").textContent=online&&finite(d.disk_free)?(d.disk_free/2**30).toLocaleString("fr-FR",{maximumFractionDigits:1})+" Gio libres":"";
+ const links=online?(d.interfaces||[]):[],link=links.find(i=>i.to_regie)||links[0];
+ el.querySelector(".screen-traffic").hidden=false;
+ for(const [cls,field,dir] of [[".rate-rx","rx_mbps","rx"],[".rate-tx","tx_mbps","tx"]]){const v=link?.[field];set(cls,finite(v)?v.toLocaleString("fr-FR",{maximumFractionDigits:2})+" Mbit/s":"—",finite(v)?dir:"unknown")}
+ const caption=el.querySelector(".traffic-interface-label");caption.dataset.kind=link?.kind||"";caption.querySelector("span").textContent=!online?"Hors ligne":link?[link.name,link.kind==="wifi"?"Wi-Fi":link.kind==="ethernet"?"Ethernet":"",link.ssid].filter(Boolean).join(" · "):"Mesure indisponible";
+}
 function getReader(s){
  const key=JSON.stringify([s.group||"",s.id]);let r=readerCards.get(key);
  if(!r){
   const el=q("card").content.firstElementChild.cloneNode(true),head=el.querySelector(".card-heading"),title=head.querySelector("h2"),badge=head.querySelector(".badge"),statuses=document.createElement("div"),details=el.querySelector(".screen-controls"),body=el.querySelector(".config");
   el.classList.add("operator-card");head.querySelector(".rename-reader").remove();statuses.className="header-statuses";head.append(statuses);
-  for(const child of [...el.children])if(![head,details].includes(child))child.remove();
+  for(const child of [...el.children])if(![head,details].includes(child)&&!child.matches(".device-meta,.metrics,.screen-traffic"))child.remove();
+   el.querySelector(".identify").remove();for(const b of el.querySelectorAll(".metrics button,.screen-traffic button")){const d=document.createElement("div");d.className=b.className;d.innerHTML=b.innerHTML;b.replaceWith(d)}
   for(const child of [...details.children])if(child!==body&&child.tagName!=="SUMMARY")child.remove();
   details.open=true;body.replaceChildren();body.onsubmit=e=>e.preventDefault();
   getGroup(s.group||"").grid.append(el);r={el,title,badge,statuses,body,key,group:s.group||""};readerCards.set(key,r);head.insertBefore(dragHandle(el,key,"screens",r.group),badge)
@@ -159,7 +178,7 @@ function getReader(s){
 }
 async function refresh(){const rows=await api("/api/operator/screens"),keys=new Set(),activeReaders=new Map();latestRows=rows;sourceGallery(rows);q("group-action").disabled=!rows.some(s=>s.rights.some(p=>Object.values(groupRights).includes(p)));q("organize").disabled=!rows.length;q("count").textContent=rows.filter(s=>s.status!=="Hors ligne").length+" / "+rows.length+" écrans connectés";for(const s of rows){const k=s.id+":"+s.output;keys.add(k);const r=getReader(s);if(!activeReaders.has(r.key))activeReaders.set(r.key,[]);activeReaders.get(r.key).push(s);const signature=JSON.stringify([s.rights,s.sources,s.audio_devices,s.folders,s.identify,s.identified,s.maintenance,s.settings,s.audio_route,s.display_capture,s.capture_consent]);let c=cards.get(k);if(!c||c.signature!==signature&&!c.a.contains(document.activeElement)){const n=build(s);n.signature=signature;if(c)c.a.replaceWith(n.a);cards.set(k,n);c=n}if(c.a.parentElement!==r.body)r.body.append(c.a);c.title.textContent="Écran "+(Number(s.output)+1)+(s.output_name?" · "+s.output_name:"")+(s.width&&s.height?" · "+s.width+" × "+s.height:"")+" ";badge(c.status,s.status)}
 for(const [k,c] of cards)if(!keys.has(k)){c.a.remove();cards.delete(k)}
-for(const [k,r] of readerCards){const outputs=activeReaders.get(k);if(!outputs){r.el.remove();readerCards.delete(k);continue}r.title.textContent=outputs[0].reader_name;r.badge.hidden=outputs.length>1;r.statuses.hidden=outputs.length===1;badge(r.badge,outputs[0].status);r.statuses.replaceChildren(...outputs.map(s=>{const b=document.createElement("span");badge(b,s.status,"Écran "+(Number(s.output)+1)+" : ");return b}))}
+for(const [k,r] of readerCards){const outputs=activeReaders.get(k);if(!outputs){r.el.remove();readerCards.delete(k);continue}r.title.textContent=outputs[0].reader_name;renderReaderHealth(r,outputs[0]);r.badge.hidden=outputs.length>1;r.statuses.hidden=outputs.length===1;badge(r.badge,outputs[0].status);r.statuses.replaceChildren(...outputs.map(s=>{const b=document.createElement("span");badge(b,s.status,"Écran "+(Number(s.output)+1)+" : ");return b}))}
 for(const [name,g] of groups)if(!g.grid.children.length){g.section.remove();groups.delete(name)}
 if(!dragging&&!document.activeElement?.closest(".operator-card"))reorder();
 }
@@ -1757,9 +1776,13 @@ class Request(BaseHTTPRequestHandler):
                 playing=out.get("playing",report.get("state")=="Lecture" if index=="0" else False)
                 perms=sorted(self.grants[key+":"+index])
                 whole=lambda right: all(self.allowed(key,i,right) for i in physical_outputs(row))
-                rows.append(dict(id=key,output=index,name=row.get("output_names",{}).get(index) or row["name"]+" · Écran "+str(int(index)+1),
+                diagnostic=report.get("diagnostic") or {}
+                health=dict(online=online,kind=row.get("kind"),ip=report.get("ip"),version=report.get("client_release"),latency=report.get("latency_ms"),disk_limit=MEDIA_DISK_PERCENT,
+                            diagnostic={**{k:diagnostic.get(k) for k in ("cpu_pct","ram_used","ram_total","disk_used","disk_total","disk_free")},
+                                        "interfaces":[{k:link.get(k) for k in ("name","kind","ssid","to_regie","rx_mbps","tx_mbps")} for link in diagnostic.get("interfaces",[]) if link.get("connected")]})
+                rows.append(dict(health=health,id=key,output=index,name=row.get("output_names",{}).get(index) or row["name"]+" · Écran "+str(int(index)+1),
                                  reader_name=row["name"], output_name=row.get("output_names",{}).get(index,""), group=physical_group(row,index) or "",
-                                 status="Hors ligne" if not online or index!="0" and not out else "Lecture" if playing else "En attente" if settings.get("enabled") else "Arrêté",
+                                 status="Hors ligne" if not online or index!="0" and not out else "Lecture" if playing else "Démarrage" if index=="0" and settings.get("enabled") and report.get("state")=="Démarrage" else "En attente" if settings.get("enabled") else "Arrêté",
                                  settings={k:v for k,v in settings.items() if k in {"enabled"} or k in {"source","bandwidth","mode"} and "source" in perms or k in {"volume","muted"} and "audio" in perms or k=="orientation" and "configuration" in perms},rights=perms,sources=available_sources if "source" in perms else [],
                                  preview_sources=available_sources,
                                  audio_devices=report.get("audio_devices",[]) if "audio" in perms else [],
