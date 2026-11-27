@@ -1367,9 +1367,7 @@ async function refreshVisiblePreviews() {
     for (const view of previewCards.values()) if (previewVisible(view)) visible.add(view);
   }
   for (const card of cards.values()) {
-    if (card.el.closest(".screen-group")?.open) {
-      for (const view of [card.preview, ...card.extraPreviews.values()]) if (previewVisible(view)) visible.add(view);
-    }
+    for (const view of [card.preview, ...card.extraPreviews.values()]) if (view.element.closest(".screen-group")?.open && previewVisible(view)) visible.add(view);
   }
   const now = Date.now();
   let nextPreview;
@@ -3040,7 +3038,7 @@ function renderExtraOutputs(card, row) {
   box.hidden = true;
   if ([...secondaryCards.values()].some(c=>c.readerId===row.id && c.el.contains(document.activeElement))) return;
   const physical = physicalRows([row]).filter(o=>o.output!=="0");
-  const signature = JSON.stringify([outputs, row.extra_outputs, row.extra_media, row.report.sources, row.media?.enabled,row.output_groups,row.online,row.name,row.identify]);
+  const signature = JSON.stringify([physical.map(o=>o.id),outputs, row.extra_outputs, row.extra_media, row.report.sources, row.media?.enabled,row.output_groups,row.online,row.name,row.identify]);
   if (box.dataset.signature === signature) return;
   box.dataset.signature = signature;
   box.replaceChildren();
@@ -3172,7 +3170,7 @@ function renderExtraOutputs(card, row) {
     ndi.disabled = !mediaFolder;
     ndi.onclick = action(() => confirmOutputNdi(card.data,output.id));
     line.append(ndi);
-    const media = document.createElement("button"); media.type="button";media.className="full-action";media.textContent="Images et vidéos";media.onclick=()=>openMediaManager([row.id],output.id);
+    const media = document.createElement("button"); media.type="button";media.className="full-action";media.textContent="Images et vidéos";media.onclick=()=>openMediaManager([row.id],output.id,[row.id+":"+output.id]);
     const identify=document.createElement("button");identify.type="button";identify.textContent=row.identify?"Masquer l’identification du lecteur":"Identifier le lecteur";identify.onclick=action(()=>changeIdentification(!card.data.identify,row.id));
     const info=document.createElement("button");info.type="button";info.textContent="Informations du lecteur";info.onclick=()=>card.ui.info.click();
     entry.body.replaceChildren(line,media,identify,info);
@@ -3366,7 +3364,7 @@ function physicalRows(rows, explicitPrimary = false) {
       id:output === "0" && !explicitPrimary ? row.id : row.id + ":" + output,
       name:row.name + (multiple ? " · Écran " + (Number(output)+1) : ""),
       group:output==="0" ? row.group : Object.hasOwn(row.output_groups || {},output) ? row.output_groups[output] : row.group,
-      group_order:row.physical_order?.[output]?.group ?? row.group_order,
+      group_order:row.physical_order ? row.physical_order[output]?.group : row.group_order,
       screen_order:row.physical_order?.[output]?.screen ?? (output==="0" ? row.screen_order : null)};
   }));
 }
