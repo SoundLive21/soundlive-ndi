@@ -831,7 +831,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
       </form>
 
       <div class="action-row"><button class="info" type="button" hidden>Informations</button><button class="remove" type="button">Retirer</button></div>
-      <div class="action-row"><button class="reboot" type="button">Redémarrer</button><button class="poweroff" type="button">Éteindre</button></div>
+      <div class="action-row" hidden><button class="reboot" type="button" hidden>Redémarrer</button><button class="poweroff" type="button" hidden>Éteindre</button></div>
     </details>
   </article>
 </template>
@@ -3270,6 +3270,8 @@ function renderExtraOutputs(card, row) {
     ndi.onclick = action(() => confirmOutputNdi(card.data,output.id));
     line.append(ndi);
     select(entry.el,".info").hidden=!row.paired;
+    select(entry.el,".reboot").parentElement.hidden=!row.paired;
+    select(entry.el,".reboot").hidden=select(entry.el,".poweroff").hidden=!row.paired;
     select(entry.el,".reboot").disabled=!row.online||row.os_busy||row.report.can_reboot===false;
     select(entry.el,".poweroff").disabled=!row.online||row.os_busy||!row.report.can_poweroff;
     if(inline){box.append(line);}else{entry.body.replaceChildren(line);}
@@ -3418,6 +3420,8 @@ function render(row) {
   updateStatus.hidden = !updateStatus.textContent || availability === "maintenance";
   form.hidden = !row.options;
   ui.pending.hidden = row.paired;
+  ui.reboot.parentElement.hidden = !row.paired;
+  ui.reboot.hidden = ui.poweroff.hidden = !row.paired;
   if (!row.paired) {
     if (row.pairing && !card.pairingRevision) select(el, "details").open = true;
     renderPairing(card);
@@ -3441,7 +3445,6 @@ function render(row) {
   syncSourceChoice(card);
   ui.toggle.textContent = row.options.enabled ? "Stop" : "Reprendre";
   ui.toggle.setAttribute("aria-label", row.options.enabled ? "Stopper la diffusion" : "Reprendre la diffusion");
-  ui.reboot.parentElement.hidden = !row.paired;
   ui.reboot.disabled = !row.online || row.os_busy || row.report.can_reboot === false;
   ui.poweroff.disabled = !row.online || row.os_busy || !row.report.can_poweroff;
   ui.poweroff.title = row.online && !row.report.can_poweroff ? "Extinction distante indisponible sur ce lecteur." : "";
