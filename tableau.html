@@ -1883,10 +1883,18 @@ function renderDiagnostics(card) {
   select(diagnostics, "#diagnostics-state").textContent = row.online ?
     (report.diagnostic ? report.state : "Mets à jour ce récepteur pour recevoir ses informations système.") :
     (report.diagnostic ? "Hors ligne · dernières informations reçues" : "Hors ligne");
+  const outputs = [...(report.outputs || [])].sort((a,b) => Number(a.id) - Number(b.id));
+  const multiple = outputs.length > 1;
+  const primary = outputs.find(o => o.id === "0");
+  const outputResolution = o => displayResolution({width:o.resolution_width || o.width, height:o.resolution_height || o.height});
   const facts = [
     ["Récepteur", deviceLabels[row.kind] || "—"],
-    ["Résolution de l’écran", displayResolution(report.display)],
-    ["Type / modèle de l’écran", report.display?.model || "—"],
+    [multiple ? "Résolution de l’écran 1" : "Résolution de l’écran", primary ? outputResolution(primary) : displayResolution(report.display)],
+    [multiple ? "Type / modèle de l’écran 1" : "Type / modèle de l’écran", primary?.model || (!multiple ? report.display?.model : "") || "—"],
+    ...outputs.filter(o => o.id !== "0").flatMap(o => [
+      ["Résolution de l’écran " + (Number(o.id) + 1), outputResolution(o)],
+      ["Type / modèle de l’écran " + (Number(o.id) + 1), o.model || "—"]
+    ]),
     ["Sortie d’affichage", report.display?.connector || "—"],
     ...systemFacts(data, "Disque système"),
   ];
