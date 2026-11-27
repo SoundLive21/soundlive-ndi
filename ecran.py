@@ -796,6 +796,9 @@ class PortalCapture:
                              {"types": GLib.Variant("u", 1), "multiple": GLib.Variant("b", True)}, 4)
                 result = self.request("Start", "(osa{sv})", (self.session, ""), {}, 55)
                 self.stream = result["streams"]
+                print("Capture Wayland : moniteurs autorisés " + repr(self.stream), flush=True)
+                if not self.stream:
+                    raise RuntimeError("Aucun moniteur autorisé par le portail.")
             response, fds = self.bus.call_with_unix_fd_list_sync(
                 self.name, self.path, self.interface, "OpenPipeWireRemote",
                 GLib.Variant("(oa{sv})", (self.session, {})), GLib.VariantType.new("(h)"),
@@ -807,14 +810,17 @@ class PortalCapture:
                     x, y, width, height = geometry
                     matches = [(n,p) for n,p in streams if tuple(p.get("position", ())) == (x,y)]
                     if len(matches) != 1:
-                        raise RuntimeError("Moniteur non autorisé ou position non identifiable. Autorise tous les écrans dans le portail.")
+                        # SDL and the portal may use different scale factors. Match a unique size only when position metadata is absent.
+                        matches = [(n,p) for n,p in streams if not p.get("position") and tuple(p.get("size", ())) == (width,height)]
+                    if len(matches) != 1:
+                        raise RuntimeError(f"Moniteur non identifiable : position {x},{y}, taille {width}x{height}. Autorise tous les écrans ; consulte lancement.log.")
                     node, props = matches[0]
                 elif len(streams) == 1:
                     node, props = streams[0]
                 else:
                     raise RuntimeError("Moniteur principal non identifiable.")
                 serial = props.get("pipewire-serial")
-                target = f"target-object={serial}" if serial is not None else f"path={node}"
+                target = f"path={node}"
                 result = subprocess.run(
                     [gst, "-q", "pipewiresrc", f"fd={fd}", target, "num-buffers=1",
                      "!", "videoconvert", "!", "videoscale", "add-borders=true",
@@ -826,15 +832,19 @@ class PortalCapture:
             if result.returncode or not result.stdout.startswith(b"\x89PNG\r\n\x1a\n"):
                 if b"no element" in result.stderr or b"no property" in result.stderr:
                     raise RuntimeError("Un module GStreamer manque sur Ubuntu. Installe les paquets indiqués dans le README.")
-                raise RuntimeError("PipeWire n’a pas pu lire l’écran partagé. Relance la capture.")
+                detail = result.stderr.decode("utf-8", "replace").strip()[-180:]
+                raise RuntimeError("PipeWire : capture impossible. " + detail)
             return result.stdout
         except (GLib.Error, KeyError, ValueError, OSError, RuntimeError, subprocess.SubprocessError) as error:
-            if self.session:
-                self.close(self.session, "Session")
-            self.session = self.stream = None
+            print("Capture Wayland : " + repr(error), flush=True)
+            # Keep a granted session on mapping / frame errors. Only reopen when the portal rejects the session itself.
+            if not self.stream or isinstance(error, GLib.Error):
+                if self.session:
+                    self.close(self.session, "Session")
+                self.session = self.stream = None
             if isinstance(error, RuntimeError):
                 raise
-            raise RuntimeError("Partage d’écran indisponible. Relance la capture et valide sur Ubuntu.") from error
+            raise RuntimeError("Capture Wayland : " + str(error)[:200]) from error
 
 
 def display_snapshot_windows(player_pid, capture, point=None):
