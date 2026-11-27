@@ -643,16 +643,35 @@ def media_folders(row):
         name="Général", items=row.get("media", {}).get("items", []))}
 
 
+def extra_media_folders(row, folders=None):
+    folders = media_folders(row) if folders is None else folders
+    selected = row.get("extra_media") or {}
+    return {index: folder for index, folder in selected.items()
+            if index in tuple(map(str, range(1, 8))) and isinstance(folder, str)
+            and folder in folders and folders[folder]["items"]}
+
+
+def extra_media_configs(row):
+    folders = media_folders(row)
+    return {index: media_config(dict(enabled=True, items=folders[folder]["items"], **folders[folder].get("timing", {})))
+            for index, folder in extra_media_folders(row, folders).items()}
+
+
 def catalog_items(row):
     return [item for folder in media_folders(row).values() for item in folder["items"]]
 
 
-def save_media(row, folders, active, enabled, *, resume=False, empty=False):
-    fields = ("media", "media_folders", "media_folder", "media_generation")
+def save_media(row, folders, active, enabled, *, resume=False, empty=False, extra_media=None, extra_outputs=None):
+    fields = ("media", "media_folders", "media_folder", "media_generation", "extra_media", "extra_outputs")
     previous = {field: row[field] for field in fields if field in row}
     settings, version = row["options"], row["version"]
     row.update(media_folders=folders, media_folder=active,
                media=media_config(dict(enabled=enabled, items=folders[active]["items"], **folders[active].get("timing", {}))))
+    if extra_media is not None:
+        row["extra_media"] = extra_media
+    row["extra_media"] = extra_media_folders(row, folders)
+    if extra_outputs is not None:
+        row["extra_outputs"] = extra_outputs
     if empty:
         row["media_generation"] = row.get("media_generation", 0) + 1
     if resume and not settings["enabled"]:
@@ -1209,6 +1228,7 @@ class Request(BaseHTTPRequestHandler):
                         os_update=os_status(row, now), os_busy=os_busy(row, now),
                         media=screen_media(row), media_revision=media_revision(screen_media(row)),
                         media_folders=media_folders(row), media_folder=row.get("media_folder", MEDIA_DEFAULT_FOLDER),
+                        extra_media=extra_media_folders(row),
                         media_disk=media_capacity(row),
                     ))
             self.reply(200, rows)
@@ -1678,6 +1698,8 @@ class Request(BaseHTTPRequestHandler):
             raise ValueError("Ce dossier n’existe plus.")
         folder = folders[folder_id]
         removed = []
+        extra_media, extra_outputs = extra_media_folders(row, folders), None
+        resume_primary = False
         if action in ("create", "rename"):
             name = safe_text(data["name"], 64)
             if not name.isprintable():
@@ -1709,13 +1731,40 @@ class Request(BaseHTTPRequestHandler):
             timing = media_timing(dict(image_seconds=data["image_seconds"], video_seconds=data["video_seconds"]))
             folders[folder_id] = {**folder, "timing": timing}
         elif action == "play":
-            enabled = data["enabled"]
-            if type(enabled) is not bool:
+            playing = data["enabled"]
+            if type(playing) is not bool:
                 raise ValueError("Mode de lecture locale invalide.")
-            if enabled and not folder["items"]:
+            targets = data.get("outputs", ["0"])
+            if (not isinstance(targets, list) or not targets or len(targets) > 8
+                    or any(index not in tuple(map(str, range(8))) for index in targets)):
+                raise ValueError("Sélection de sorties vidéo invalide.")
+            targets = set(targets)
+            if playing and not folder["items"]:
                 raise ValueError("Ajoute d’abord une image ou une vidéo à ce dossier.")
-            if enabled:
-                active = folder_id
+            secondary = targets - {"0"}
+            if secondary:
+                report = row.get("report", {})
+                available = {o["id"] for o in report.get("outputs", [])}
+                if playing and (not secondary <= available or release_number(report.get("client_release")) < (1, 4, 118)):
+                    raise ValueError("Mets à jour le lecteur et vérifie que les écrans sélectionnés sont connectés.")
+                extra_outputs = dict(row.get("extra_outputs") or {})
+                for index in secondary:
+                    settings = dict(extra_outputs.get(index) or {})
+                    if playing:
+                        extra_media[index] = folder_id
+                        settings.setdefault("mode", "independent")
+                        settings.setdefault("source", "")
+                        settings["enabled"] = True
+                    else:
+                        extra_media.pop(index, None)
+                        if settings.get("mode") != "same" and not settings.get("source"):
+                            settings["enabled"] = False
+                    extra_outputs[index] = settings
+            if "0" in targets:
+                enabled = playing
+                if playing:
+                    active = folder_id
+                    resume_primary = True
         elif action == "remove-files":
             files = data.get("files")
             if not isinstance(files, list) or not files or any(not isinstance(value, str) for value in files):
@@ -1754,8 +1803,8 @@ class Request(BaseHTTPRequestHandler):
             folders[source] = {**original, "items": items}
         else:
             raise ValueError("Action média inconnue.")
-        save_media(row, folders, active, enabled, resume=action == "play" and enabled,
-                   empty=action == "empty-all")
+        save_media(row, folders, active, enabled, resume=resume_primary,
+                   empty=action == "empty-all", extra_media=extra_media, extra_outputs=extra_outputs)
         for item in removed:
             try:
                 (MEDIA_ROOT / key / item["id"]).unlink(missing_ok=True)
@@ -1977,7 +2026,7 @@ class Request(BaseHTTPRequestHandler):
                                  automatic=item["automatic"], output=item.get("output", "0")) for item in PREVIEWS.values()
                             if item["reader"] == key and item["state"] == "pending"), None)
             return 200, dict(options=row["options"], extra_outputs=row.get("extra_outputs", {}), identify=row.get("identify") is True,
-                             media=screen_media(row),
+                             media=screen_media(row), extra_media=extra_media_configs(row),
                              media_catalog=catalog_items(row),
                              preview_request=preview,
                              waiting=dict(name=row["name"], group=row.get("group"),
@@ -2003,7 +2052,7 @@ class Request(BaseHTTPRequestHandler):
                 raise ValueError("Mode de sortie invalide.")
             if not isinstance(source, str) or len(source) > 256 or any(ord(c) < 32 for c in source):
                 raise ValueError("Source NDI invalide.")
-            if enabled and mode == "independent" and not source.strip():
+            if enabled and mode == "independent" and not source.strip() and index not in extra_media_folders(row):
                 raise ValueError("Sélectionne une source NDI.")
             bandwidth = data.get("bandwidth", row["options"]["bandwidth"])
             volume, muted = data.get("volume", 0), data.get("muted", True)
