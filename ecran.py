@@ -1624,7 +1624,7 @@ class SecondaryMedia:
         self.window = Gtk.Window(decorated=False, accept_focus=False, focus_on_map=False)
         if image:
             try:
-                picture = GdkPixbuf.Pixbuf.new_from_file(str(path))
+                picture = load_local_image(path, width, height)
             except GLib.Error as error:
                 raise RuntimeError(error.message) from error
             self.window.add(Gtk.Image.new_from_pixbuf(fit_local_image(picture, width, height)))
