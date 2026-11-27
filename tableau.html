@@ -292,7 +292,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
 </style>
 </head>
 <body>
-<header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release" id="regie-version" aria-live="polite">v<span id="regie-release">__SOFTWARE_VERSION__</span><span id="regie-version-status"></span></span><span class="connected-user">Connecté : <strong>__CONNECTED_USER__</strong></span><span id="count">Écrans connectés</span><button type="button" id="open-users">Utilisateurs</button><button id="logout" type="button" __REMOTE_ONLY__>Me déconnecter</button></header>
+<header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release" id="regie-version" aria-live="polite">v<span id="regie-release">__SOFTWARE_VERSION__</span><span id="regie-version-status"></span></span><span id="count">Écrans connectés</span><button type="button" id="open-users">Utilisateurs</button><span class="connected-user">Connecté : <strong>__CONNECTED_USER__</strong></span><button id="logout" type="button" __REMOTE_ONLY__>Me déconnecter</button></header>
 <div id="toasts" popover="manual" hidden></div>
 <template id="toast-template">
   <div class="toast">
@@ -1553,9 +1553,9 @@ function renderSourceGallery(rows) {
     for(const g of Object.keys(db.groups).sort()){const label=document.createElement("label"),i=document.createElement("input");i.type="checkbox";i.value=g;i.checked=(entry.groups||[]).includes(g);label.append(i,g);u("members").append(label)}
     if(!Object.keys(db.groups).length)u("members").textContent="Aucun groupe créé.";
     const table=document.createElement("table"),head=table.createTHead().insertRow(),body=table.createTBody();
-    for(const title of ["Écran",...Object.values(rights)]){const th=document.createElement("th");th.scope="col";th.textContent=title;head.append(th)}
-    for(const [id,name] of Object.entries(db.screens)){const tr=body.insertRow();tr.dataset.name=name.toLocaleLowerCase();tr.insertCell().textContent=name;
-      for(const p of Object.keys(rights)){const i=document.createElement("input");i.type="checkbox";i.dataset.screen=id;i.value=p;i.checked=(entry.grants?.[id]||[]).includes(p);i.setAttribute("aria-label",name+" · "+rights[p]);tr.insertCell().append(i)}}
+    for(const title of ["Écran","Tous",...Object.values(rights)]){const th=document.createElement("th");th.scope="col";th.textContent=title;head.append(th)}
+    for(const [id,name] of Object.entries(db.screens)){const tr=body.insertRow();tr.dataset.name=name.toLocaleLowerCase();tr.insertCell().textContent=name;const all=document.createElement("input");all.type="checkbox";all.className="row-all";all.setAttribute("aria-label","Tous les droits · "+name);tr.insertCell().append(all);
+      for(const p of Object.keys(rights)){const i=document.createElement("input");i.type="checkbox";i.dataset.screen=id;i.value=p;i.checked=(entry.grants?.[id]||[]).includes(p);i.setAttribute("aria-label",name+" · "+rights[p]);tr.insertCell().append(i)}const boxes=[...tr.querySelectorAll("input[data-screen]")];const sync=()=>{all.checked=boxes.every(i=>i.checked);all.indeterminate=!all.checked&&boxes.some(i=>i.checked)};all.onchange=()=>{boxes.forEach(i=>i.checked=all.checked);sync();dirty=true};boxes.forEach(i=>i.addEventListener("change",sync));tr.syncRights=sync;sync()}
     u("matrix").replaceChildren(table);filter();message();
   }
   async function load(){db=await call("/api/users");if(!db[kind][selected])selected="";draw()}
@@ -1565,9 +1565,9 @@ function renderSourceGallery(rows) {
   u("new").onclick=()=>{if(!busy&&discard()){selected="";draw();u("name").focus()}};
   u("editor").addEventListener("input",e=>{if(e.target!==u("search"))dirty=true});
   u("search").oninput=filter;
-  for(const [id,checked] of [["all",true],["none",false]])u(id).onclick=()=>{for(const i of u("matrix").querySelectorAll("tbody tr:not([hidden]) input"))i.checked=checked;dirty=true};
+  for(const [id,checked] of [["all",true],["none",false]])u(id).onclick=()=>{for(const tr of u("matrix").querySelectorAll("tbody tr:not([hidden])")){tr.querySelectorAll("input[data-screen]").forEach(i=>i.checked=checked);tr.syncRights()}dirty=true};
   u("editor").onsubmit=e=>{e.preventDefault();perform(async()=>{
-    const grants={};for(const i of u("matrix").querySelectorAll("input:checked"))(grants[i.dataset.screen]??=[]).push(i.value);
+    const grants={};for(const i of u("matrix").querySelectorAll("input[data-screen]:checked"))(grants[i.dataset.screen]??=[]).push(i.value);
     const name=u("name").value;await call("/api/users",{kind,name,password:u("password").value,enabled:u("enabled").checked,groups:[...u("members").querySelectorAll("input:checked")].map(i=>i.value),grants});
     selected=name;dirty=false;await load();message("Modifications enregistrées.");
   })};
