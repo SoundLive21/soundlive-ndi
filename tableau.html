@@ -3319,7 +3319,7 @@ function render(row) {
   identification.hidden = !identification.textContent;
   const own = physicalRows([row]);
   const splitGroups = own.some(o=>(o.group||"")!==(row.group||""));
-  select(el,".manage-media").hidden = !row.paired || !splitGroups;
+  select(el,".manage-media").hidden = !row.paired;
   select(el,"h2").textContent = splitGroups ? own[0].name : row.name;
   ui.badge.textContent = row.online ? row.report.state : row.paired ? "Hors ligne" : "À associer";
   ui.badge.classList.toggle("online",row.online);
