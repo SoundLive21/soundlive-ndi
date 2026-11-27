@@ -80,7 +80,7 @@ q("remove").onclick=async()=>{if(!confirm("Supprimer cet élément ?"))return;tr
 </script></html>"""
 OPERATOR_PAGE = """<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>SoundLive NDI · Opérateur</title><style>__SHARED_STYLE__
 .operator-controls{display:grid;gap:8px}.operator-controls label{margin:8px 0}.operator-preview img{display:block;width:100%;max-height:280px;object-fit:contain;border-radius:8px;background:#100d12}.operator-preview img[hidden]{display:none}.operator-output{margin-top:16px}.operator-output legend{font-weight:600}.operator-output .actions{margin-top:8px}.operator-header-statuses{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}.operator-preview{margin:8px 0}.operator-preview button{width:100%}.operator-card h2{min-width:0}.operator-card .badge{white-space:nowrap}.operator-controls button{white-space:normal}
-</style><header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release">v__OP_VERSION__</span><span class="connected-user">Connecté : <strong>__CONNECTED_USER__</strong></span><span id="count"></span><button id="logout">Me déconnecter</button></header><main><div class="heading"><h1>Gestion des écrans NDI</h1><div class="heading-actions"><button id="organize">Organiser les écrans</button><button id="group-action">Actions de groupe</button></div></div><details class="preview-section" id="source-previews" open hidden><summary>Aperçu des sources NDI disponibles</summary><label class="check"><input type="checkbox" id="auto-previews" checked> Actualiser automatiquement les aperçus visibles</label><p id="source-empty" class="muted" hidden>Aucune source NDI détectée par les lecteurs autorisés.</p><div class="preview-grid" id="source-grid"></div></details><p id="message" role="status"></p><div id="screens"></div></main><footer class="project-credits">© 2026 Société SoundLive · Auteur : DUVERNOY Matthieu &amp; ChatGPT · <a href="mailto:contact@soundlive.fr">contact@soundlive.fr</a></footer><dialog id="organizer" style="width:min(640px,92vw)"><div class="dialog-body"><h2>Organiser les écrans</h2><p>Personnalise l’ordre des groupes et des encarts dans ton navigateur.</p><div id="organizer-list"></div><div class="actions"><button id="reset-layout">Réinitialiser</button><button id="close-organizer" class="primary">Fermer</button></div></div></dialog><dialog id="group-dialog" style="width:min(650px,92vw)"><div class="dialog-body"><h2>Actions de groupe</h2><label>Action<select id="group-operation"><option value="start">Lecture</option><option value="stop">Arrêter</option><option value="mute">Couper le son</option><option value="unmute">Activer le son</option><option value="volume">Volume</option><option value="source">Source NDI</option><option value="quality">Qualité</option><option value="orientation">Orientation</option></select></label><label id="group-value-label" hidden>Valeur<select id="group-value"></select></label><label id="group-volume-label" hidden>Volume en %<input id="group-volume" type="number" min="0" max="100" value="50"></label><div class="actions"><button id="group-all">Tout sélectionner</button><button id="group-none">Tout désélectionner</button></div><div id="group-choices"></div><p id="group-error" role="status"></p><div class="actions"><button id="close-group">Fermer</button><button id="apply-group" class="primary">Appliquer</button></div></div></dialog>__SHARED_TEMPLATES__<script>
+</style><header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release">v__OP_VERSION__</span><span class="connected-user">Connecté : <strong>__CONNECTED_USER__</strong></span><span id="count"></span><button id="logout">Me déconnecter</button></header><main><div class="heading"><h1>Gestion des écrans NDI</h1><div class="heading-actions"><button id="organize">Organiser les écrans</button><button id="group-action">Actions de groupe</button></div></div><details class="preview-section" id="source-previews" open hidden><summary>Aperçu des sources NDI disponibles</summary><label class="check"><input type="checkbox" id="auto-previews" checked> Actualiser automatiquement les aperçus visibles</label><p id="source-empty" class="muted" hidden>Aucune source NDI détectée par les lecteurs connectés.</p><div class="preview-grid" id="source-grid"></div></details><p id="message" role="status"></p><div id="screens"></div></main><footer class="project-credits">© 2026 Société SoundLive · Auteur : DUVERNOY Matthieu &amp; ChatGPT · <a href="mailto:contact@soundlive.fr">contact@soundlive.fr</a></footer><dialog id="organizer" style="width:min(640px,92vw)"><div class="dialog-body"><h2>Organiser les écrans</h2><p>Personnalise l’ordre des groupes et des encarts dans ton navigateur.</p><div id="organizer-list"></div><div class="actions"><button id="reset-layout">Réinitialiser</button><button id="close-organizer" class="primary">Fermer</button></div></div></dialog><dialog id="group-dialog" style="width:min(650px,92vw)"><div class="dialog-body"><h2>Actions de groupe</h2><label>Action<select id="group-operation"><option value="start">Lecture</option><option value="stop">Arrêter</option><option value="mute">Couper le son</option><option value="unmute">Activer le son</option><option value="volume">Volume</option><option value="source">Source NDI</option><option value="quality">Qualité</option><option value="orientation">Orientation</option></select></label><label id="group-value-label" hidden>Valeur<select id="group-value"></select></label><label id="group-volume-label" hidden>Volume en %<input id="group-volume" type="number" min="0" max="100" value="50"></label><div class="actions"><button id="group-all">Tout sélectionner</button><button id="group-none">Tout désélectionner</button></div><div id="group-choices"></div><p id="group-error" role="status"></p><div class="actions"><button id="close-group">Fermer</button><button id="apply-group" class="primary">Appliquer</button></div></div></dialog>__SHARED_TEMPLATES__<script>
 const q=id=>document.getElementById(id);let cards=new Map(),latestRows=[];
 async function api(path,data){const r=await fetch(path,data===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});if(r.status===401){location.href="/connexion";throw Error("Session expirée")}const v=await r.json();if(!r.ok)throw Error(v.error||r.status);return v}
 const run=f=>async()=>{try{await f();q("message").textContent=""}catch(e){q("message").textContent=e.message}};
@@ -114,14 +114,14 @@ function makeOperatorPreview(title,target,available=true,consent=false){
 }
 const previewViews=new Map();
 function sourceGallery(rows){
- const names=new Set(rows.flatMap(s=>s.preview_sources||[]));q("source-previews").hidden=!rows.some(s=>s.rights.includes("preview"));q("source-empty").hidden=names.size>0;
- for(const [name,v] of previewViews)if(!names.has(name)){v.el.remove();previewViews.delete(name)}
+ const names=new Set(rows.flatMap(s=>s.preview_sources||[])),canPreview=rows.some(s=>s.rights.includes("preview"));q("source-previews").hidden=false;q("source-empty").hidden=names.size>0;
+ for(const [name,v] of previewViews)if(!names.has(name)||v.available!==canPreview){v.el.remove();previewViews.delete(name)}
  for(const name of [...names].sort())if(!previewViews.has(name)){
-  const v=makeOperatorPreview(name,{source:name});previewViews.set(name,v);q("source-grid").append(v.el);
+  const v=makeOperatorPreview(name,{source:name},canPreview);if(!canPreview)v.placeholder.querySelector("span").textContent="Droit d’aperçu requis";previewViews.set(name,v);q("source-grid").append(v.el);
  }
 }
 async function captureSource(v,automatic=false){if(v.pending||!v.available||automatic&&v.consent)return;v.pending=true;v.button.disabled=true;v.status.textContent="Capture en cours…";try{let p=await api("/api/preview",{...v.target,previous:v.previous,automatic});const end=Date.now()+(p.consent?92000:18000);while(p.state==="pending"&&Date.now()<end){await new Promise(r=>setTimeout(r,950));p=await api("/api/preview?"+new URLSearchParams(v.target))}if(p.state!=="ready"||!p.image)throw Error(p.error||"Capture indisponible");v.previous=p.id;v.img.src="data:image/png;base64,"+p.image;v.img.hidden=false;v.placeholder.hidden=true;v.status.textContent="Image capturée à "+new Date(p.captured*1000).toLocaleTimeString("fr-FR");v.button.textContent="Actualiser l’aperçu";v.next=Date.now()+10000}catch(e){v.status.textContent=e.message;v.next=Date.now()+30000}finally{v.pending=false;v.button.disabled=!v.available}}
-setInterval(()=>{if(!q("source-previews").open||!q("auto-previews").checked||[...previewViews.values()].some(v=>v.pending))return;const v=[...previewViews.values()].find(v=>v.next<=Date.now()&&v.el.getBoundingClientRect().bottom>0&&v.el.getBoundingClientRect().top<innerHeight);if(v)captureSource(v,true)},3000);
+setInterval(()=>{if(!q("source-previews").open||!q("auto-previews").checked||[...previewViews.values()].some(v=>v.pending))return;const v=[...previewViews.values()].find(v=>v.available&&v.next<=Date.now()&&v.el.getBoundingClientRect().bottom>0&&v.el.getBoundingClientRect().top<innerHeight);if(v)captureSource(v,true)},3000);
 function badge(node,state,label=""){node.className="badge"+(state==="Lecture"?" online":state==="Arrêté"?" stopped":state==="En attente"?" waiting":"");node.textContent=label+state}
 const groups=new Map(), readerCards=new Map();
 let layout={groups:[],screens:{}};try{layout=JSON.parse(localStorage.getItem("soundlive-operator-layout")||"null")||layout}catch{}
@@ -1728,8 +1728,20 @@ class Request(BaseHTTPRequestHandler):
     def allowed(self, key, index, right):
         return isinstance(key,str) and isinstance(index,str) and right in self.grants.get(key+":"+index,set())
 
+    def available_ndi_sources(self):
+        now = time.time()
+        names = set()
+        for row in SCREENS.values():
+            report = row.get("report", {})
+            if row.get("token") and now - report.get("seen", 0) < ONLINE_AGE:
+                names.update(source for source in report.get("sources", []) if source)
+                if report.get("active_source"):
+                    names.add(report["active_source"])
+        return sorted(names, key=str.casefold)
+
     def operator_screens(self):
         rows=[]
+        available_sources = self.available_ndi_sources()
         for key,row in SCREENS.items():
             if not row.get("token"):
                 continue
@@ -1748,8 +1760,8 @@ class Request(BaseHTTPRequestHandler):
                 rows.append(dict(id=key,output=index,name=row.get("output_names",{}).get(index) or row["name"]+" · Écran "+str(int(index)+1),
                                  reader_name=row["name"], output_name=row.get("output_names",{}).get(index,""), group=physical_group(row,index) or "",
                                  status="Hors ligne" if not online or index!="0" and not out else "Lecture" if playing else "En attente" if settings.get("enabled") else "Arrêté",
-                                 settings={k:v for k,v in settings.items() if k in {"enabled"} or k in {"source","bandwidth","mode"} and "source" in perms or k in {"volume","muted"} and "audio" in perms or k=="orientation" and "configuration" in perms},rights=perms,sources=sorted(set(report.get("sources",[])) | ({report["active_source"]} if report.get("active_source") else set())) if "source" in perms and online else [],
-                                 preview_sources=sorted(set(report.get("sources",[])) | ({report["active_source"]} if report.get("active_source") else set())) if "preview" in perms and online else [],
+                                 settings={k:v for k,v in settings.items() if k in {"enabled"} or k in {"source","bandwidth","mode"} and "source" in perms or k in {"volume","muted"} and "audio" in perms or k=="orientation" and "configuration" in perms},rights=perms,sources=available_sources if "source" in perms else [],
+                                 preview_sources=available_sources,
                                  audio_devices=report.get("audio_devices",[]) if "audio" in perms else [],
                                  audio_route=row.get("audio_routes",{}).get(index,"") if "audio" in perms else "",
                                  folders={k:v["name"] for k,v in media_folders(row).items()} if "media" in perms else {},
@@ -1761,10 +1773,9 @@ class Request(BaseHTTPRequestHandler):
     def operator_preview_allowed(self,target):
         if target[0]=="screen":
             return self.allowed(target[1],target[2] if len(target)==3 else "0","preview")
-        return any((target[1] in row.get("report",{}).get("sources",[]) or target[1] == row.get("report",{}).get("active_source")) and
-                   time.time()-row.get("report",{}).get("seen",0)<ONLINE_AGE and
-                   any(self.allowed(key,i,"preview") for i in physical_outputs(row))
-                   for key,row in SCREENS.items() if row.get("token"))
+        return target[1] in self.available_ndi_sources() and any(
+            self.allowed(key,i,"view") and self.allowed(key,i,"preview")
+            for key,row in SCREENS.items() if row.get("token") for i in physical_outputs(row))
 
     def operator_action(self,path,data):
         denied=(403,{"error":"Action non autorisée."})
