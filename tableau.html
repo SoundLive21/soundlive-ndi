@@ -177,6 +177,8 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .update-status[data-state="failed"],.update-status[data-state="expired"]{color:#ff8fa0}
 .update-status[data-state="available"]{color:#ffc078}
 .os-health{margin:10px 0 8px}
+.media-output-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:10px;margin-bottom:16px}
+.media-output-cards p{margin:5px 0;overflow-wrap:anywhere}
 .reader-error{margin:0 0 10px;color:#ff8fa0;overflow-wrap:anywhere}
 .os-health[data-state="available"]{color:#ffc078}
 .os-health[data-state="current"]{color:var(--green)}
@@ -563,8 +565,10 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
     </div>
     <p class="small" id="media-targets"></p>
     <div class="media-disks" id="media-disks" aria-label="Espace disque"></div>
+    <section aria-label="Diffusion par écran"><h3>Diffusion actuelle par écran</h3><div id="media-output-cards" class="media-output-cards"></div></section>
+    <h3>Bibliothèque de médias</h3>
     <label>Dossier<select id="media-folders"></select></label>
-    <label id="media-output-label" hidden>Diffuser sur<select id="media-output"><option value="0">Écran 1</option></select></label>
+    <label id="media-output-label" hidden>Diffusion simultanée<select id="media-output"><option value="0">Écran 1</option></select></label>
     <div id="media-folder-edit">
       <div class="actions">
         <button type="button" id="media-create-open">Créer un nouveau dossier</button>
@@ -2135,13 +2139,15 @@ function mediaDiskCard(name, disk, offline) {
   return card;
 }
 function mediaSelect(selectBox, options, desired) {
+  const previous = selectBox.value;
   const signature = JSON.stringify(options);
   if (selectBox.dataset.options !== signature) {
     selectBox.dataset.options = signature;
     selectBox.replaceChildren(...options.map(([key, label]) => new Option(label,key)));
   }
   if (options.some(([key]) => key === desired)) selectBox.value = desired;
-  else if (!options.some(([key]) => key === selectBox.value)) selectBox.selectedIndex = 0;
+  else if (options.some(([key]) => key === previous)) selectBox.value = previous;
+  else selectBox.selectedIndex = 0;
 }
 function mediaURL(entry) {
   return "/api/media-preview?" + new URLSearchParams({id:entry.row.id,file:entry.item.id});
@@ -2279,6 +2285,63 @@ function mediaOutputName(ids) {
 function mediaOutputFolder(row, id) {
   return id === "0" ? (row.media?.enabled ? row.media_folder : null) : row.extra_media?.[id];
 }
+function renderMediaOutputCards(rows, folder) {
+  const box = select(mediaDialog, "#media-output-cards");
+  const entries = rows.flatMap(row => mediaOutputIds(row).map(output => ({row,output})));
+  const signature = JSON.stringify(entries.map(({row,output}) => [row.id,row.name,row.online,output,
+    mediaOutputFolder(row,output),row.media_folders?.[mediaOutputFolder(row,output)]?.name,
+    row.report.outputs?.find(o=>o.id===output),row.options,row.extra_outputs?.[output],
+    row.report.active_media, row.report.active_source, row.report.state,
+    folder?.targets.find(t=>t.row.id===row.id)?.id,folder?.targets.find(t=>t.row.id===row.id)?.folder.items.length,mediaBusy]));
+  if (box.dataset.signature === signature) return;
+  box.dataset.signature = signature;
+  box.replaceChildren();
+  for (const {row,output} of entries) {
+    const target = folder?.targets.find(t=>t.row.id===row.id);
+    const selected = mediaOutputFolder(row,output);
+    const report = row.report.outputs?.find(o=>o.id===output);
+    const settings = output === "0" ? row.options : row.extra_outputs?.[output];
+    const playing = output === "0" ? row.report.state === "Lecture" : report?.playing;
+    const local = output === "0" ? !!row.report.active_media : report?.local;
+    const field = document.createElement("fieldset");
+    field.className = "video-output";
+    const title = document.createElement("legend");
+    title.textContent = row.name + " · Écran " + (Number(output)+1);
+    const status = document.createElement("p");
+    status.className = "small";
+    status.textContent = !row.online ? "Hors ligne" : !settings?.enabled ? "Diffusion arrêtée" :
+      selected ? (playing && local ? "Lecture locale" : "Média local en attente") :
+      playing ? "Diffusion NDI" : "En attente du flux NDI";
+    const current = document.createElement("p");
+    current.textContent = selected ? "Dossier : " + (row.media_folders?.[selected]?.name || selected) :
+      "Source : " + (settings?.mode === "same" ? row.options?.source : settings?.source || "Aucune");
+    const file = document.createElement("p");
+    file.className = "small";
+    const name = output === "0" ? row.report.active_media : report?.active_media;
+    file.textContent = name && local && playing ? "Fichier en cours : " + name : report?.media_error || "";
+    const actions = document.createElement("div");
+    actions.className = "action-row";
+    const play = document.createElement("button");
+    play.type = "button"; play.className = "primary"; play.textContent = "Diffuser ici";
+    play.disabled = mediaBusy || !target?.folder.items.length;
+    play.onclick = action(() => showAction({
+      title:"Diffuser sur " + title.textContent,
+      detail:"Dossier « " + folder.name + " ». Les autres écrans restent inchangés.",
+      label:"Diffuser",perform:()=>mediaBatch([target],t=>mediaChange(t,{action:"play",enabled:true,outputs:[output]}),"Lecture demandée")
+    }));
+    const ndi = document.createElement("button");
+    ndi.type="button"; ndi.textContent="Revenir au NDI";
+    ndi.disabled = mediaBusy || !selected;
+    ndi.onclick = action(() => showAction({
+      title:"Revenir au NDI sur " + title.textContent,
+      detail:"Seul cet écran quittera la lecture locale.",
+      label:"Revenir au NDI",perform:()=>mediaBatch([{row}],()=>returnToNdi(row,[output]),"Retour au NDI demandé")
+    }));
+    actions.append(play,ndi);
+    field.append(title,status,current,file,actions);
+    box.append(field);
+  }
+}
 function renderMediaManager(preferFolder) {
   if (!mediaDialog.open) return;
   const rows = mediaRows();
@@ -2296,6 +2359,7 @@ function renderMediaManager(preferFolder) {
   const folders = [...groups].map(([key, folder]) => [key,folder.name]);
   mediaSelect(mediaFolders, folders, preferFolder);
   const folder = groups.get(mediaFolders.value);
+  renderMediaOutputCards(rows, folder);
   if (!folder) return;
   const timings = folder.targets.map(({folder}) => [folder.timing?.image_seconds ?? 10, folder.timing?.video_seconds ?? 0]);
   const timingKey = JSON.stringify([mediaFolders.value, timings]);
@@ -2358,7 +2422,7 @@ function renderMediaManager(preferFolder) {
   mediaDestination.disabled = mediaBusy || !destinations.length;
   select(mediaDialog,"#media-file-remove").disabled = mediaBusy;
 }
-function openMediaManager(ids) {
+function openMediaManager(ids, output = "0") {
   if (mediaBusy) return;
   mediaIds = ids;
   mediaOutput.value = "0";
@@ -2373,6 +2437,8 @@ function openMediaManager(ids) {
   const initial = rows[0]?.media_folders?.[current];
   mediaDialog.showModal();
   renderMediaManager(initial ? folderKey(current,initial) : "general");
+  if ([...mediaOutput.options].some(option=>option.value===output)) mediaOutput.value=output;
+  renderMediaManager();
   mediaReadRegieDisk();
 }
 mediaDialog.addEventListener("close", () => {
