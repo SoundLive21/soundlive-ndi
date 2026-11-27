@@ -62,3 +62,20 @@ with patch.dict(t.SCREENS, {"test":row}, clear=True), patch.dict(t.PREVIEWS, {},
     assert t.PREVIEWS[("screen","test","1")]["output"] == "1"
 
 print("Tests destinations médias et aperçus : OK.")
+
+with patch.dict(t.SCREENS, {"test":row}, clear=True), patch.object(t,"save"):
+    now = time.time()
+    assert t.batch("/api/screen-groups", {"ids":["test:0"],"group":"Salle"},now)[0] == 200
+    assert t.batch("/api/screen-groups", {"ids":["test:1"],"group":"Hall"},now)[0] == 200
+    assert t.physical_group(row,"0") == "Salle"
+    assert t.physical_group(row,"1") == "Hall"
+    primary = dict(row["options"])
+    assert t.batch("/api/group", {"ids":["test:1"],"changes":{"enabled":False,"volume":25}},now)[0] == 200
+    assert row["options"] == primary
+    assert row["extra_outputs"]["1"]["enabled"] is False
+    assert row["extra_outputs"]["1"]["volume"] == 25
+    secondary = dict(row["extra_outputs"]["1"])
+    assert t.batch("/api/group", {"ids":["test:0"],"changes":{"volume":65}},now)[0] == 200
+    assert row["options"]["volume"] == 65
+    assert row["extra_outputs"]["1"] == secondary
+print("Tests groupes physiques : OK.")
