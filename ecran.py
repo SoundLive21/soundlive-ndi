@@ -569,14 +569,15 @@ def local_image_preview(pixbuf, screen_size):
     return bytes(png)
 
 
-def player_render_preview():
+def player_render_preview(base=None):
+    base = base or RENDER_PREVIEW
     import struct
     import zlib
 
     token = secrets.token_hex(12)
-    request = RENDER_PREVIEW.with_suffix(".request")
-    temporary = RENDER_PREVIEW.with_suffix(".new")
-    output = RENDER_PREVIEW.with_suffix(".rgb")
+    request = base.with_suffix(".request")
+    temporary = base.with_suffix(".new")
+    output = base.with_suffix(".rgb")
     temporary.write_text(token + "\n", encoding="ascii")
     temporary.replace(request)
     try:
@@ -1586,7 +1587,16 @@ class DashboardClient:
             if isinstance(job, str) and (screen or isinstance(source, str)) and job != self.preview_job:
                 self.preview_job = job
                 argument = str(display_pid) if screen else source
-                if screen and image_preview:
+                output = preview.get("output", "0")
+                if screen and output != "0":
+                    target = next((o for o in report.get("outputs", []) if o["id"] == output), None)
+                    if target is None:
+                        mode, argument = "missing-output", None
+                    elif target.get("playing") and not WINDOWS:
+                        mode, argument = "secondary-player", STATE / ("rendu-sortie-" + output)
+                    else:
+                        mode, argument = "--capture-sortie", " ".join(str(target[k]) for k in ("x", "y", "width", "height"))
+                elif screen and image_preview:
                     mode, argument = "local-image", image_preview
                 elif screen and uses_internal:
                     mode = "waiting" if report["state"] != "Lecture" else "player"
@@ -1631,6 +1641,10 @@ class DashboardClient:
         try:
             if mode == "player":
                 png = player_render_preview()
+            elif mode == "secondary-player":
+                png = player_render_preview(argument)
+            elif mode == "missing-output":
+                raise RuntimeError("Écran déconnecté.")
             elif mode == "local-image":
                 png = local_image_preview(*argument)
             elif mode == "unavailable":
@@ -2414,7 +2428,8 @@ def desktop():
                     process = subprocess.Popen(
                         [self.video_engine, config[0], config[1], str(config[6]), str(path)],
                         stdout=self.log, stderr=subprocess.STDOUT,
-                        env={**os.environ, "SOUNDLIVE_DISPLAY_INDEX": index})
+                        env={**os.environ, "SOUNDLIVE_DISPLAY_INDEX": index,
+                             "SOUNDLIVE_RENDER_PREVIEW": str(STATE / ("rendu-sortie-" + index))})
                     self.extra_players[index] = (process, config, path)
                 except OSError as error:
                     self.error = str(error)[:240]
@@ -2983,7 +2998,8 @@ def run_windows_screen(tk, log):
             path.unlink(missing_ok=True)
             process = subprocess.Popen([PLAYER, config[0], config[1], str(config[2]), str(path)],
                 stdout=log, stderr=subprocess.STDOUT, creationflags=flags,
-                env={**os.environ, "SOUNDLIVE_DISPLAY_INDEX": index})
+                env={**os.environ, "SOUNDLIVE_DISPLAY_INDEX": index,
+                     "SOUNDLIVE_RENDER_PREVIEW": str(STATE / ("rendu-sortie-" + index))})
             extra_players[index] = (process, config, path)
 
     def update():
@@ -3134,6 +3150,26 @@ if __name__ == "__main__":
             sys.exit(activate_os_maintenance())
         if len(sys.argv) == 3 and sys.argv[1] == "--apercu-ndi":
             sys.stdout.buffer.write(capture_ndi_preview(sys.argv[2]))
+        elif len(sys.argv) == 3 and sys.argv[1] == "--capture-sortie":
+            x, y, width, height = map(int, sys.argv[2].split())
+            if WINDOWS:
+                png = display_snapshot_windows(0, True, point=(x + width // 2, y + height // 2))
+            else:
+                import gi
+                gi.require_version("Gdk", "3.0")
+                from gi.repository import Gdk
+                Gdk.init_check([])
+                display = Gdk.Display.get_default()
+                if display is None:
+                    raise RuntimeError("Session graphique indisponible.")
+                for index in range(display.get_n_monitors()):
+                    rect = display.get_monitor(index).get_geometry()
+                    if (rect.x, rect.y, rect.width, rect.height) == (x, y, width, height):
+                        png = display_snapshot_linux(-index-1, True)
+                        break
+                else:
+                    raise RuntimeError("Sortie vidéo introuvable.")
+            sys.stdout.buffer.write(png)
         elif len(sys.argv) == 3 and sys.argv[1] in ("--info-ecran", "--capture-ecran"):
             capture = sys.argv[1] == "--capture-ecran"
             backend = display_snapshot_windows if WINDOWS else display_snapshot_linux
