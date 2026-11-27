@@ -96,7 +96,7 @@ fi
 
 kind=$1
 shift
-hote= ip= ssid= regie= code= eth= wlan= gateway= dns= dns2= ssh_public= wifi_file=
+hote= ip= ssid= regie= code= eth= wlan= gateway= dns= dns2= ssh_public= wifi_file= wifi_secret=
 verify=false dhcp=true wifi_open=false wifi_prompt=false attendre=false desktop_remote=false install_only=false
 while (( $# )); do
     case "$1" in
@@ -108,8 +108,8 @@ while (( $# )); do
         --wifi-ouvert) wifi_open=true; shift; continue ;;
         --bureau-distant) desktop_remote=true; shift; continue ;;
         --saisir-cle-wifi) wifi_prompt=true; shift; continue ;;
-        --hote|--ip|--wifi|--regie|--code|--ethernet|--interface-wifi|--passerelle|--dns|--dns2|--cle-ssh|--cle-wifi-fichier)
-            if [[ $# -lt 2 || $2 == --* ]]; then usage >&2; exit 2; fi ;;
+        --hote|--ip|--wifi|--regie|--code|--ethernet|--interface-wifi|--passerelle|--dns|--dns2|--cle-ssh|--cle-wifi-fichier|--cle-wifi)
+            if [[ $# -lt 2 || ( $1 != --cle-wifi && $2 == --* ) ]]; then usage >&2; exit 2; fi ;;
         *) usage >&2; exit 2 ;;
     esac
     case "$1" in
@@ -125,6 +125,7 @@ while (( $# )); do
         --dns2) dns2=$2 ;;
         --cle-ssh) ssh_public=$2 ;;
         --cle-wifi-fichier) wifi_file=$2 ;;
+        --cle-wifi) wifi_secret=$2 ;;
     esac
     shift 2
 done
@@ -174,13 +175,16 @@ except ValueError as error:
     raise SystemExit(str(error))
 PY
 if [[ -n $dns2 ]]; then dns="$dns,$dns2"; fi
-if [[ -z $ssid && ( -n $wlan || -n $wifi_file || $wifi_open == true || $wifi_prompt == true ) ]]; then
+if [[ -z $ssid && ( -n $wlan || -n $wifi_secret || -n $wifi_file || $wifi_open == true || $wifi_prompt == true ) ]]; then
     echo 'Sans SSID, ne renseigne aucune option Wi-Fi : le lecteur utilisera Ethernet seul.' >&2
     exit 2
 fi
 if { $wifi_open && { $wifi_prompt || [[ -n $wifi_file ]]; }; } || { $wifi_prompt && [[ -n $wifi_file ]]; }; then
     echo 'Choisis une seule méthode pour la clé Wi-Fi.' >&2
     exit 2
+fi
+if [[ -n $wifi_secret ]] && { $wifi_open || $wifi_prompt || [[ -n $wifi_file ]]; }; then
+    echo "Choisis une seule méthode pour la clé Wi-Fi." >&2; exit 2
 fi
 for input in "$ssh_public" "$wifi_file"; do
     if [[ -n $input && ! -f $input ]]; then
@@ -275,10 +279,13 @@ wifi_profile() {
 }
 
 wifi_uuid= wifi_keyfile=
-if [[ -n $ssid ]] && { $wifi_open || $wifi_prompt || [[ -n $wifi_file ]] || ! wifi_uuid=$(wifi_profile); }; then
+if [[ -n $ssid ]] && { $wifi_open || $wifi_prompt || [[ -n $wifi_file || -n $wifi_secret ]] || ! wifi_uuid=$(wifi_profile); }; then
     wifi_keyfile="$work/wifi.nmconnection"
     if $wifi_open; then
         password=
+    elif [[ -n $wifi_secret ]]; then
+        password=$wifi_secret
+        unset wifi_secret
     elif [[ -n $wifi_file ]]; then
         IFS= read -r password < "$wifi_file" || [[ -n $password ]]
         password=${password%$'\r'}

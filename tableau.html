@@ -430,10 +430,12 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
         <label>IPv4 fixe avec préfixe<input name="address" maxlength="18" placeholder="10.10.2.105/24" spellcheck="false" required></label>
         <label>Nom du réseau Wi-Fi (SSID, facultatif : vide = Ethernet seul)<input name="ssid" maxlength="32" placeholder="SOUNDLIVE" spellcheck="false"></label>
         <label>Clé Wi-Fi<select name="wifi">
+          <option value="inline">La saisir ici</option>
           <option value="prompt">La saisir sur le lecteur</option>
           <option value="saved">Réutiliser le profil enregistré</option>
           <option value="open">Réseau ouvert</option>
         </select></label>
+        <label id="pair-wifi-secret" hidden>Mot de passe Wi-Fi<input type="password" name="wifi_secret" maxlength="64" autocomplete="new-password" spellcheck="false"><span class="small">La commande générée contient la clé : ne la partage pas.</span></label>
         <label>Interface Ethernet (facultative)<input name="ethernet" maxlength="80" placeholder="Automatique, ex. eth0 / Ethernet" spellcheck="false"></label>
         <label>Interface Wi-Fi (facultative)<input name="wifi_interface" maxlength="80" placeholder="Automatique, ex. wlan0 / Wi-Fi" spellcheck="false"></label>
         <label>Passerelle IPv4 (facultative)<input name="gateway" maxlength="15" inputmode="decimal" placeholder="10.10.2.87"></label>
@@ -3946,6 +3948,12 @@ function pairFields() {
   pairNetwork.hidden = pairNetwork.disabled = mode.value !== "static";
   const hasWifi = !!pairForm.elements.namedItem("ssid").value.trim();
   pairForm.elements.namedItem("wifi").disabled = !hasWifi;
+  const secret = pairForm.elements.namedItem("wifi_secret");
+  const showSecret = mode.value === "static" && hasWifi && pairForm.elements.namedItem("wifi").value === "inline";
+  select(pairForm,"#pair-wifi-secret").hidden = !showSecret;
+  secret.disabled = !showSecret;
+  secret.required = showSecret;
+  if (!showSecret) secret.value = "";
   const wifiInterface = pairForm.elements.namedItem("wifi_interface");
   if (!hasWifi) wifiInterface.value = "";
   wifiInterface.disabled = !hasWifi;
@@ -3985,6 +3993,9 @@ function validatePairSettings(values) {
   }
   if (values.ssid && values.ssid.startsWith("--")) {
     return pairError("ssid", "Le script de préparation interprète un SSID commençant par deux tirets comme une option.");
+  }
+  if (values.ssid && values.wifi === "inline" && !/^(?:[ -~]{8,63}|[0-9a-fA-F]{64})$/.test(values.wifi_secret || "")) {
+    return pairError("wifi_secret", "Clé WPA2 : 8 à 63 caractères ASCII ou 64 caractères hexadécimaux.");
   }
   if (!values.ssid && values.wifi_interface) {
     return pairError("ssid", "Indique le SSID ou laisse aussi l’interface Wi-Fi vide.");
@@ -4026,6 +4037,7 @@ function installationCommand(values, port, code, fingerprint) {
     const ps = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                 ".\\preparer-lecteur-windows.ps1", "-Hote", values.hostname, "-Ip", values.address];
     if (values.ssid) ps.push("-Wifi", values.ssid);
+    if (values.ssid && values.wifi === "inline") ps.push("-CleWifi", values.wifi_secret);
     if (values.ssid && values.wifi === "prompt") ps.push("-SaisirCleWifi");
     if (values.ssid && values.wifi === "open") ps.push("-WifiOuvert");
     for (const [field, flag] of [["ethernet", "-Ethernet"], ["wifi_interface", "-InterfaceWifi"],
@@ -4041,6 +4053,7 @@ function installationCommand(values, port, code, fingerprint) {
   if (values.installation !== "static") return [...args, address, code].map(bashArg).join(" ");
   args.push("--preparer", "--hote", values.hostname, "--ip", values.address);
   if (values.ssid) args.push("--wifi", values.ssid);
+  if (values.ssid && values.wifi === "inline") args.push("--cle-wifi", values.wifi_secret);
   if (values.ssid && values.wifi === "prompt") args.push("--saisir-cle-wifi");
   if (values.ssid && values.wifi === "open") args.push("--wifi-ouvert");
   for (const [field, flag] of [["ethernet", "--ethernet"], ["wifi_interface", "--interface-wifi"],

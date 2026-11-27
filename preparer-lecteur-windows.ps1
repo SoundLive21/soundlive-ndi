@@ -13,6 +13,7 @@ param(
     [string]$ProfilWifiXml,
     [switch]$WifiOuvert,
     [string]$CleWifiFichier,
+    [string]$CleWifi,
     [switch]$SaisirCleWifi,
     [string]$CleSsh,
     [ValidatePattern('^[a-f0-9]{64}$')][string]$EmpreinteRegie,
@@ -38,10 +39,10 @@ if ($wifiEnabled -and ([Text.Encoding]::UTF8.GetByteCount($Wifi) -notin (1..32) 
     throw 'Le SSID doit comporter 1 a 32 octets.'
 }
 if (-not $wifiEnabled -and ($InterfaceWifi -or $ProfilWifi -or $ProfilWifiXml -or
-        $WifiOuvert -or $CleWifiFichier -or $SaisirCleWifi)) {
+        $WifiOuvert -or $CleWifiFichier -or $CleWifi -or $SaisirCleWifi)) {
     throw 'Sans SSID, ne renseigne aucune option Wi-Fi : Ethernet seul sera configure.'
 }
-if (@($ProfilWifiXml, $CleWifiFichier, $WifiOuvert.IsPresent, $SaisirCleWifi.IsPresent).Where({ $_ }).Count -gt 1) {
+if (@($ProfilWifiXml, $CleWifiFichier, $CleWifi, $WifiOuvert.IsPresent, $SaisirCleWifi.IsPresent).Where({ $_ }).Count -gt 1) {
     throw 'Choisis une seule methode de configuration du Wi-Fi.'
 }
 
@@ -319,7 +320,7 @@ try {
         try {
             $source = $ProfilWifiXml
             $wifiXml = Join-Path $temp 'wifi.xml'
-            if (-not $source -and -not $CleWifiFichier -and -not $SaisirCleWifi -and -not $WifiOuvert) {
+            if (-not $source -and -not $CleWifiFichier -and -not $CleWifi -and -not $SaisirCleWifi -and -not $WifiOuvert) {
                 $profiles = if ($ProfilWifi) { @($ProfilWifi) } else { @($wifiName, $Wifi) }
                 foreach ($profile in $profiles) {
                     & netsh.exe wlan export profile "name=$profile" "interface=$($wireless.Name)" "folder=$temp" | Out-Null
@@ -350,7 +351,9 @@ try {
             $encryption = 'none'
             $sharedKey = ''
             if (-not $WifiOuvert) {
-                if ($CleWifiFichier) {
+                if ($CleWifi) {
+                    $password = $CleWifi
+                } elseif ($CleWifiFichier) {
                     $password = Get-Content -Encoding UTF8 -LiteralPath $CleWifiFichier -TotalCount 1
                 } else {
                     $secret = Read-Host "Mot de passe Wi-Fi WPA2 pour $Wifi" -AsSecureString
