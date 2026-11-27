@@ -49,6 +49,7 @@ from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
 SOFTWARE_VERSION = "1.4.115"
+# Publication : arrêt indépendant des sorties vidéo.
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
