@@ -567,7 +567,6 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
 <dialog id="media-manager" aria-labelledby="media-title">
   <div class="dialog-body">
     <div class="media-heading"><h2 id="media-title">Images et vidéos</h2>
-      <form method="dialog"><button>Fermer</button></form>
     </div>
     <p class="small" id="media-targets"></p>
     <div class="media-disks" id="media-disks" aria-label="Espace disque"></div>
@@ -631,6 +630,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
       </section>
     </div>
     <p class="small" id="media-result" role="status"></p>
+    <form method="dialog" class="actions"><button class="primary">Fermer</button></form>
   </div>
 </dialog>
 <dialog id="media-folder-name" aria-labelledby="media-folder-name-title">
