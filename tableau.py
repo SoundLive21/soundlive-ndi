@@ -1988,6 +1988,7 @@ class Request(BaseHTTPRequestHandler):
                         outputs.append(dict(id=output["id"], width=output["width"], height=output["height"],
                                             playing=output.get("playing") is True, local=output.get("local") is True,
                                             media_error=str(output.get("media_error") or "")[:240],
+                                            active_media=str(output.get("active_media") or "")[:256] if output.get("local") is True else "",
                                             model=output["model"][:160] if isinstance(output.get("model"), str) else "",
                                             connector=output["connector"][:128] if isinstance(output.get("connector"), str) else "",
                                             **{k: output[k] for k in ("resolution_width", "resolution_height")
