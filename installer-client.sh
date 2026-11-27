@@ -125,9 +125,11 @@ if [[ ${1:-} == --reparer-identification && $# -eq 1 ]]; then
     exec bash "$base/installer-ubuntu.sh" --mettre-a-jour-rendu
 fi
 network_options=()
+reboot_after=false
 fingerprint=
 while (( $# )); do
     case "$1" in
+        --redemarrer) reboot_after=true; shift; continue ;;
         --empreinte-regie)
             if [[ ! ${2:-} =~ ^[a-f0-9]{64}$ ]]; then
                 echo "L’empreinte des clés doit être celle donnée par la régie." >&2
@@ -171,13 +173,22 @@ if [[ -n $fingerprint ]]; then
         exit 2
     fi
 fi
+run_installer() {
+    if $reboot_after; then
+        bash "$@"
+        echo "Installation terminée. Redémarrage du lecteur."
+        sudo systemctl reboot
+        exit 0
+    fi
+    exec bash "$@"
+}
 case "$kind" in
     pi)
         if [[ ${1:-} == --mettre-a-jour* ]]; then
             source "$base/installation-lecteur-linux.sh"
             if installed_sdl_directory "$HOME/.local/share" "$desktop" >/dev/null; then
                 export SOUNDLIVE_DEVICE_KIND=pi
-                exec bash "$base/installer-ubuntu.sh" "$@"
+                run_installer "$base/installer-ubuntu.sh" "$@"
             fi
         fi
         if [[ ${1:-} == --mettre-a-jour-rendu ]]; then
@@ -185,11 +196,11 @@ case "$kind" in
             exit 2
         fi
         if [[ -x /opt/ndi-pi/bin/ffplay && -r /opt/ndi-pi/lib/libndi.so.6 ]]; then
-            exec bash "$base/installer-pi.sh" "$@"
+            run_installer "$base/installer-pi.sh" "$@"
         fi
         export SOUNDLIVE_DEVICE_KIND=pi
-        exec bash "$base/installer-ubuntu.sh" "$@"
+        run_installer "$base/installer-ubuntu.sh" "$@"
         ;;
-    ubuntu) exec bash "$base/installer-ubuntu.sh" "$@" ;;
+    ubuntu) run_installer "$base/installer-ubuntu.sh" "$@" ;;
     *) echo "Plateforme attendue : pi ou ubuntu. Sous Windows, utilise installer-client.cmd."; exit 2 ;;
 esac

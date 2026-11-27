@@ -1093,7 +1093,24 @@ function renderPairing(card) {
     updateCommand();
   });
   if (interfaces) panel.append(label);
-  panel.append(manualLabel, code, help);
+  panel.append(manualLabel);
+  if (row.installation_network?.ssid && ["prompt","inline"].includes(row.installation_network.wifi)) {
+    const wifiLabel = document.createElement("label");
+    wifiLabel.textContent = "Clé Wi-Fi (facultative pour compléter la commande)";
+    const wifiInput = document.createElement("input");
+    wifiInput.type = "password"; wifiInput.autocomplete = "new-password"; wifiInput.maxLength = 64;
+    wifiInput.value = pendingWifiSecrets.get(row.pairing)?.value || "";
+    wifiInput.addEventListener("input", () => {
+      const value = wifiInput.value;
+      if (/^(?:[ -~]{8,63}|[0-9a-fA-F]{64})$/.test(value)) {
+        pendingWifiSecrets.set(row.pairing,{value,until:Date.now()+900000});
+        setTimeout(()=>pendingWifiSecrets.delete(row.pairing),900000);
+      } else pendingWifiSecrets.delete(row.pairing);
+      updateCommand();
+    });
+    wifiLabel.append(wifiInput); panel.append(wifiLabel);
+  }
+  panel.append(code, help);
   const sshLink = document.createElement("a");
   sshLink.target = "_blank";
   sshLink.rel = "noopener noreferrer";
@@ -4039,7 +4056,7 @@ function installationCommand(values, port, code, fingerprint) {
   const address = "http://" + values.regie + ":" + port;
   const keys = fingerprint ? ["--empreinte-regie", fingerprint] : [];
   if (values.kind === "windows") {
-    if (values.installation !== "static") return [".\\installer-client.cmd", ...keys, address, code].join(" ");
+    if (values.installation !== "static") return [".\\installer-client.cmd", ...keys, address, code, "--redemarrer"].join(" ");
     const ps = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                 ".\\preparer-lecteur-windows.ps1", "-Hote", values.hostname, "-Ip", values.address];
     if (values.ssid) ps.push("-Wifi", values.ssid);
@@ -4051,12 +4068,12 @@ function installationCommand(values, port, code, fingerprint) {
       if (values[field]) ps.push(flag, values[field]);
     }
     if (fingerprint) ps.push("-EmpreinteRegie", fingerprint);
-    ps.push("-Regie", address, "-Code", code);
+    ps.push("-Regie", address, "-Code", code, "-Redemarrer");
     return "& " + ps.map(powershellArg).join(" ");
   }
   const args = ["bash", "installer-client.sh", "--plateforme", values.kind];
   args.push(...keys);
-  if (values.installation !== "static") return [...args, address, code].map(bashArg).join(" ");
+  if (values.installation !== "static") return [...args, "--redemarrer", address, code].map(bashArg).join(" ");
   args.push("--preparer", "--hote", values.hostname, "--ip", values.address);
   if (values.ssid) args.push("--wifi", values.ssid);
   if (values.ssid && values.wifi === "inline") args.push("--cle-wifi", values.wifi_secret);
@@ -4066,7 +4083,7 @@ function installationCommand(values, port, code, fingerprint) {
       ["gateway", "--passerelle"], ["dns", "--dns"], ["dns2", "--dns2"]]) {
     if (values[field]) args.push(flag, values[field]);
   }
-  args.push("--regie", address, "--code", code);
+  args.push("--regie", address, "--code", code, "--redemarrer");
   return args.map(bashArg).join(" ");
 }
 pairForm.addEventListener("change", event => {

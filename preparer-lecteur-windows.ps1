@@ -28,9 +28,11 @@ param(
     [string]$Lecteur,
     [string]$NdiSdk = "$env:ProgramFiles\NDI\NDI 6 SDK",
     [string]$SdlSdk,
+    [switch]$Redemarrer,
     [switch]$Verifier
 )
 $ErrorActionPreference = 'Stop'
+if ($PSBoundParameters.ContainsKey('CleWifi') -and -not $CleWifi) { throw 'Argument CleWifi vide.' }
 if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') { throw 'Utilise PowerShell Windows x64.' }
 $wifiName = 'SOUNDLIVE-WIFI'
 $wiredName = 'SOUNDLIVE-ETHERNET'
@@ -353,6 +355,7 @@ try {
             if (-not $WifiOuvert) {
                 if ($CleWifi) {
                     $password = $CleWifi
+                    Write-Host "Cle Wi-Fi fournie dans la commande : aucune saisie necessaire."
                 } elseif ($CleWifiFichier) {
                     $password = Get-Content -Encoding UTF8 -LiteralPath $CleWifiFichier -TotalCount 1
                 } else {
@@ -509,4 +512,10 @@ try {
         Restore-InstallationNetwork
         if ($pausedTask) { Start-ScheduledTask -TaskName $taskName }
     }
+}
+
+if ($Redemarrer) {
+    Write-Host 'Configuration terminee. Redemarrage du lecteur.'
+    & shutdown.exe /r /t 10
+    if ($LASTEXITCODE -ne 0) { throw 'Impossible de programmer le redemarrage.' }
 }

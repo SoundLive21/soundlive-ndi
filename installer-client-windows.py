@@ -134,6 +134,7 @@ def main():
     cli.add_argument("code", nargs="?")
     cli.add_argument("--mettre-a-jour", action="store_true")
     cli.add_argument("--installer-seul", action="store_true")
+    cli.add_argument("--redemarrer", action="store_true")
     cli.add_argument("--reseau-auto", action="store_true")
     cli.add_argument("--empreinte-regie")
     cli.add_argument("--acces-deja-prepare", action="store_true", help=argparse.SUPPRESS)
@@ -238,6 +239,8 @@ def main():
     options = ["-SansAssistantAutologon"] if args.mettre_a_jour or remote_deploy else []
     subprocess.run([*command, str(session), *options], check=True)
     print("Lecteur installé. Redémarre Windows après configuration de l'autologin.")
+    if args.redemarrer:
+        subprocess.run(["shutdown.exe", "/r", "/t", "10"], check=True)
 
 
 if __name__ == "__main__":

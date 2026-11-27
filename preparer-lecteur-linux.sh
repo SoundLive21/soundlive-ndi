@@ -97,10 +97,11 @@ fi
 kind=$1
 shift
 hote= ip= ssid= regie= code= eth= wlan= gateway= dns= dns2= ssh_public= wifi_file= wifi_secret=
-verify=false dhcp=true wifi_open=false wifi_prompt=false attendre=false desktop_remote=false install_only=false
+verify=false dhcp=true wifi_open=false wifi_prompt=false attendre=false desktop_remote=false install_only=false reboot_after=false
 while (( $# )); do
     case "$1" in
         --aide|--help) usage; exit 0 ;;
+        --redemarrer) reboot_after=true; shift; continue ;;
         --installer-seul) install_only=true; shift; continue ;;
         --verifier) verify=true; shift; continue ;;
         --sans-dhcp-install) dhcp=false; shift; continue ;;
@@ -125,7 +126,7 @@ while (( $# )); do
         --dns2) dns2=$2 ;;
         --cle-ssh) ssh_public=$2 ;;
         --cle-wifi-fichier) wifi_file=$2 ;;
-        --cle-wifi) wifi_secret=$2 ;;
+        --cle-wifi) [[ -n $2 ]] || { echo "Argument --cle-wifi vide." >&2; exit 2; }; wifi_secret=$2 ;;
     esac
     shift 2
 done
@@ -286,6 +287,7 @@ if [[ -n $ssid ]] && { $wifi_open || $wifi_prompt || [[ -n $wifi_file || -n $wif
     elif [[ -n $wifi_secret ]]; then
         password=$wifi_secret
         unset wifi_secret
+        echo "Clé Wi-Fi fournie dans la commande : aucune saisie nécessaire."
     elif [[ -n $wifi_file ]]; then
         IFS= read -r password < "$wifi_file" || [[ -n $password ]]
         password=${password%$'\r'}
@@ -372,4 +374,9 @@ fi
 if [[ -n $ssh_public ]]; then
     printf 'Cible SSH : %s@%s\nEmpreinte de ce lecteur :\n' "$(id -un)" "${ip%/*}"
     ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+fi
+
+if $reboot_after; then
+    echo "Configuration terminée. Redémarrage du lecteur."
+    sudo systemctl reboot
 fi
