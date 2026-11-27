@@ -266,7 +266,7 @@ try {
             $previousInstallRoutes | Remove-NetRoute -Confirm:$false
             Set-NetIPInterface -InterfaceIndex $wired.ifIndex -AddressFamily IPv4 -PolicyStore ActiveStore -Dhcp Enabled
             Set-DnsClientServerAddress -InterfaceIndex $wired.ifIndex -ResetServerAddresses
-            Write-Host 'Phase installation sur Ethernet en DHCP.'
+            Write-Host 'Configuration DHCP temporaire sur Ethernet (ActiveStore). Les parametres fixes seront appliques ensuite.'
             $lease = $null
             for ($wait = 0; $wait -lt 20; $wait++) {
                 $lease = Get-NetIPAddress -InterfaceIndex $wired.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
@@ -276,6 +276,7 @@ try {
             }
             if (-not $lease) {
                 Restore-InstallationNetwork
+                if ($pausedTask) { Start-ScheduledTask -TaskName $taskName; $pausedTask = $false }
                 Write-Warning 'Aucun bail DHCP Ethernet. Utilisation de la connexion actuelle pour les telechargements.'
             }
         }
@@ -454,6 +455,8 @@ try {
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -User SYSTEM -RunLevel Highest -Force | Out-Null
     Start-ScheduledTask -TaskName $taskName
     $staticInstalled = $true
+    $dhcpChanged = $false
+    Write-Host 'Phase DHCP temporaire terminee : configuration IPv4 fixe appliquee.'
     $ready = $false
     for ($attempt = 0; $attempt -lt 20; $attempt++) {
         $active = Get-NetIPAddress -AddressFamily IPv4 -IPAddress $address -ErrorAction SilentlyContinue |

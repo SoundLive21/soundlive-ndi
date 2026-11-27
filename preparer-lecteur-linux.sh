@@ -234,6 +234,10 @@ if $verify; then
     exit 0
 fi
 association="${XDG_CONFIG_HOME:-$HOME/.config}/soundlive-ndi/association.json"
+if [[ -r $association ]]; then
+    echo "Reconfiguration : association existante conservée."
+    code=
+fi
 if [[ -z $code && ! -r $association && $install_only != true ]]; then
     echo "Indique le code d'association donné par la régie avec --code." >&2
     exit 2
@@ -324,18 +328,23 @@ if $dhcp; then
         if systemctl is-active --quiet soundlive-ndi-network.timer; then
             sudo systemctl stop soundlive-ndi-network.timer soundlive-ndi-network.service
             timer_paused=true
+            echo "Bascule automatique suspendue pendant la phase DHCP temporaire."
         fi
         previous_eth=$(nmcli -t -e no -f DEVICE,UUID connection show --active | awk -F: -v eth="$eth" '$1 == eth { print $2; exit }')
         dhcp_uuid=$(cat /proc/sys/kernel/random/uuid)
         sudo nmcli connection add type ethernet ifname "$eth" con-name "SoundLive installation ${dhcp_uuid:0:8}" \
             connection.uuid "$dhcp_uuid" connection.autoconnect no ipv4.method auto ipv4.may-fail no \
             ipv4.route-metric 25 ipv6.method disabled >/dev/null
-        echo 'Phase installation sur Ethernet en DHCP.'
+        echo "Profil DHCP temporaire créé : SoundLive installation ${dhcp_uuid:0:8}."
         if ! sudo nmcli --wait 25 connection up uuid "$dhcp_uuid" ifname "$eth"; then
             sudo nmcli connection delete uuid "$dhcp_uuid" >/dev/null
             dhcp_uuid=
             if [[ -n $previous_eth ]]; then
                 sudo nmcli --wait 12 connection up uuid "$previous_eth" ifname "$eth" || true
+            fi
+            if $timer_paused; then
+                sudo systemctl start soundlive-ndi-network.timer
+                timer_paused=false
             fi
             echo 'Aucun bail DHCP Ethernet. Utilisation de la connexion actuelle pour les téléchargements.' >&2
         fi
@@ -377,6 +386,13 @@ if [[ -n $ssh_public ]]; then
     ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 fi
 
+if [[ -n $dhcp_uuid ]]; then
+    if sudo nmcli connection show uuid "$dhcp_uuid" >/dev/null 2>&1; then
+        sudo nmcli connection delete uuid "$dhcp_uuid" >/dev/null
+    fi
+    dhcp_uuid=
+    echo "Profil DHCP temporaire supprimé."
+fi
 if $reboot_after; then
     echo "Configuration terminée. Redémarrage du lecteur."
     sudo systemctl reboot
