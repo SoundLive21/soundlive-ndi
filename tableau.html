@@ -60,6 +60,9 @@ button{padding:9px 13px;cursor:pointer;background:#2b222f;font-weight:600;white-
 .video-output .action-row .primary{width:auto}
 .action-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
 .action-row button,.full-action{white-space:normal}
+.ssh-prepare-button{display:block;text-align:center;padding:9px 13px;border:1px solid var(--edge);border-radius:8px;background:#2b222f;color:inherit;font:inherit;font-weight:600;text-decoration:none;white-space:normal;cursor:pointer}
+.ssh-prepare-button:hover{filter:brightness(1.18)}
+.ssh-prepare-button:focus-visible{outline:2px solid #ff91a5;outline-offset:3px}
 .full-action{width:100%;margin-top:12px}
 .button-red{background:#a62541;border-color:#bc3d55;color:#fff}
 #media-manager{width:min(920px,94vw)}
@@ -1083,6 +1086,7 @@ function renderPairing(card) {
   const sshLink = document.createElement("a");
   sshLink.target = "_blank";
   sshLink.rel = "noopener noreferrer";
+  sshLink.className = "ssh-prepare-button";
   sshLink.textContent = "Préparer la clé SSH (/addsshkey)";
   const deployment = document.createElement("button");
   deployment.type = "button";
