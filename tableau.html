@@ -810,9 +810,10 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
       <label><span>Volume <output></output></span><input class="volume" type="range" min="0" max="100"></label>
       <label class="check"><input type="checkbox" class="muted"> Couper le son</label>
       <div class="action-row"><button class="primary" type="submit">Appliquer</button><button class="toggle" type="button"></button></div>
+      <button class="return-ndi primary full-action" type="button" hidden>Revenir à la diffusion NDI</button>
       </fieldset>
       </form>
-      <button class="return-ndi primary full-action" type="button" hidden>Revenir à la diffusion NDI</button>
+
       <button class="manage-media full-action" type="button" hidden aria-haspopup="dialog">Images et vidéos</button>
       <div class="action-row"><button class="info" type="button" hidden>Informations</button><button class="remove" type="button">Retirer</button></div>
       <div class="action-row"><button class="reboot" type="button">Redémarrer</button><button class="poweroff" type="button">Éteindre</button></div>
@@ -2490,6 +2491,14 @@ const selectedMediaEntry = () => mediaEntries(selectedMediaFolder()).get(mediaFi
 const mediaChange = (target, data) => call("/api/media-settings",{id:target.row.id,folder:target.id,...data});
 const returnToNdi = (row, outputs) => call("/api/media-settings",{id:row.id,action:"play",enabled:false,outputs});
 
+function confirmOutputNdi(row, output) {
+  if (!mediaOutputFolder(row,output)) return;
+  showAction({title:"Revenir à la diffusion NDI",detail:row.name + " · Écran " + (Number(output)+1) + "\nLes autres écrans restent inchangés.",label:"Revenir au NDI",successTitle:"Retour au NDI demandé",async perform(){
+    await returnToNdi(row,[output]);
+    await refresh(true);
+    return "Retour au NDI demandé pour cet écran.";
+  }});
+}
 function confirmReturnToNdi(targets, perOutput = false) {
   const active = targets.map(target => ({...target, outputs:(perOutput ? mediaSelectedOutputs(target.row) : mediaOutputIds(target.row).concat(Object.keys(target.row.extra_media || {}))).filter(id => mediaOutputFolder(target.row,id))})).filter(target => target.outputs.length);
   if (mediaBusy || !active.length) return;
@@ -2813,7 +2822,7 @@ function cardFor(id) {
   heading.insertBefore(handle, ui.badge);
   const mediaButton = select(el, ".manage-media");
   mediaButton.onclick = () => openMediaManager([id]);
-  ui["return-ndi"].onclick = action(() => confirmReturnToNdi([{row:card.data}]));
+  ui["return-ndi"].onclick = action(() => confirmOutputNdi(card.data,"0"));
   ui.identify.onclick = action(() => changeIdentification(!card.data.identify, id));
   card.preview = createPreview(select(el, ".screen-preview"), "Capture de l’écran", id, true);
   card.extraPreviews = new Map();
@@ -3130,6 +3139,12 @@ function renderExtraOutputs(card, row) {
     actions.append(save, toggle);
     line.append(heading, label("Sources NDI détectées", source),
       label("Qualité", bandwidth), label("Orientation de l’écran", orientation), label("Volume ", level), volume, audio, actions);
+    const ndi = document.createElement("button");
+    ndi.type = "button"; ndi.className = "primary full-action";
+    ndi.textContent = "Revenir à la diffusion NDI";
+    ndi.disabled = !mediaFolder;
+    ndi.onclick = action(() => confirmOutputNdi(card.data,output.id));
+    line.append(ndi);
     box.append(line);
   }
 }
@@ -3144,7 +3159,8 @@ function render(row) {
   const handle = select(el, ".card-heading .drag-handle");
   handle.title = "Déplacer " + row.name + " · Glisser ou utiliser les flèches";
   handle.setAttribute("aria-label",handle.title);
-  ui["return-ndi"].hidden = !row.paired || !(row.media?.enabled || Object.keys(row.extra_media || {}).length);
+  ui["return-ndi"].hidden = !row.paired;
+  ui["return-ndi"].disabled = !row.media?.enabled;
   ui.identify.hidden = !row.paired;
   ui.identify.setAttribute("aria-pressed", String(row.identify));
   ui.identify.setAttribute("aria-label", "Identification de " + row.name);
