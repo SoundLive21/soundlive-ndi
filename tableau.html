@@ -3035,9 +3035,10 @@ function outputLegend(legend, number, output) {
 function renderExtraOutputs(card, row) {
   const box = card.outputs;
   const outputs = row.report.outputs || [];
-  box.hidden = true;
-  if ([...secondaryCards.values()].some(c=>c.readerId===row.id && c.el.contains(document.activeElement))) return;
+  if (box.contains(document.activeElement) || [...secondaryCards.values()].some(c=>c.readerId===row.id && c.el.contains(document.activeElement))) return;
   const physical = physicalRows([row]).filter(o=>o.output!=="0");
+  const primaryGroup = row.group || "";
+  box.hidden = !physical.some(o=>(o.group || "")===primaryGroup);
   const signature = JSON.stringify([physical.map(o=>o.id),outputs, row.extra_outputs, row.extra_media, row.report.sources, row.media?.enabled,row.output_groups,row.online,row.name,row.identify]);
   if (box.dataset.signature === signature) return;
   box.dataset.signature = signature;
@@ -3047,19 +3048,25 @@ function renderExtraOutputs(card, row) {
     const output = outputs.find(o=>o.id===item.output) || {id:item.output};
     let entry = secondaryCards.get(item.id);
     if (!entry) {
-      const el = document.createElement("article");
-      el.className = card.el.className; el.dataset.screen=item.id;
-      const heading=document.createElement("div"); heading.className="card-heading";
-      const title=document.createElement("h2"); heading.append(title);
-      const badge=document.createElement("span"); badge.className="badge"; heading.append(badge);
-      heading.append(sortHandle(el,()=>el.parentElement,item.id,()=>screenKeys(el.parentElement),(source,destination)=>moveScreenOrder("screens",screenKeys(el.parentElement),source,destination,physicalData(item.id)?.group || ""),"Déplacer l’écran"));
-      const preview=document.createElement("div"); preview.className="screen-preview";
-      const controls=document.createElement("details"); controls.className="screen-controls";
-      const summary=document.createElement("summary"); summary.textContent="Commandes et réglages"; controls.append(summary);
-      const body=document.createElement("div"); controls.append(body);
-      el.append(heading,preview,controls); entry={el,title,badge,preview,controls,body,readerId:row.id};
+      const el = document.querySelector("#card").content.firstElementChild.cloneNode(true);
+      el.dataset.screen=item.id;
+      const heading=select(el,".card-heading"), title=select(el,"h2"), badge=select(el,".badge");
+      heading.insertBefore(sortHandle(el,()=>el.parentElement,item.id,()=>screenKeys(el.parentElement),(source,destination)=>moveScreenOrder("screens",screenKeys(el.parentElement),source,destination,physicalData(item.id)?.group || ""),"Déplacer l’écran"),badge);
+      const preview=select(el,".screen-preview");
+      const controls=select(el,".screen-controls");
+      const body=document.createElement("div");
+      select(el,".config").replaceWith(body);
+      select(el,".pending").remove();
+      for (const selector of [".return-ndi",".manage-media",".info",".remove",".reboot",".poweroff",".os-upgrade",".client-upgrade"]) select(el,selector)?.remove();
+      select(el,".identify").onclick=action(()=>changeIdentification(!card.data.identify,row.id));
+      entry={el,title,badge,preview,controls,body,readerId:row.id};
+      try { controls.open=localStorage.getItem("soundlive-controls-"+item.id)==="open"; } catch {}
+      controls.addEventListener("toggle",()=>{try{localStorage.setItem("soundlive-controls-"+item.id,controls.open?"open":"closed");}catch{}});
       secondaryCards.set(item.id,entry);
     }
+    const inline = (item.group || "") === primaryGroup;
+    entry.el.hidden = inline;
+    if (inline) entry.el.remove();
     entry.title.textContent=item.name;
     entry.badge.textContent=!row.online || !outputs.some(o=>o.id===output.id) ? "Hors ligne" : output.playing ? "Lecture" : row.extra_outputs?.[output.id]?.enabled ? "En attente" : "Arrêté";
     entry.badge.classList.toggle("online",row.online && outputs.some(o=>o.id===output.id));
@@ -3173,7 +3180,19 @@ function renderExtraOutputs(card, row) {
     const media = document.createElement("button"); media.type="button";media.className="full-action";media.textContent="Images et vidéos";media.onclick=()=>openMediaManager([row.id],output.id,[row.id+":"+output.id]);
     const identify=document.createElement("button");identify.type="button";identify.textContent=row.identify?"Masquer l’identification du lecteur":"Identifier le lecteur";identify.onclick=action(()=>changeIdentification(!card.data.identify,row.id));
     const info=document.createElement("button");info.type="button";info.textContent="Informations du lecteur";info.onclick=()=>card.ui.info.click();
-    entry.body.replaceChildren(line,media,identify,info);
+    const reboot=document.createElement("button");reboot.type="button";reboot.textContent="Redémarrer le lecteur";reboot.disabled=!row.online||row.os_busy||row.report.can_reboot===false;reboot.onclick=()=>card.ui.reboot.click();
+    const poweroff=document.createElement("button");poweroff.type="button";poweroff.textContent="Éteindre le lecteur";poweroff.disabled=!row.online||row.os_busy||!row.report.can_poweroff;poweroff.onclick=()=>card.ui.poweroff.click();
+    const system=document.createElement("div");system.className="action-row";system.append(reboot,poweroff);
+    if(inline){line.append(media);box.append(line);}else{entry.body.replaceChildren(line,media,info,system);}
+    select(entry.el,".identify").setAttribute("aria-pressed",String(row.identify));
+    select(entry.el,".identify").hidden=!row.paired;
+    select(entry.el,".device-kind").textContent=deviceLabels[row.kind]||"";
+    select(entry.el,".address").textContent=row.report.ip||"";
+    const stream=select(entry.el,".current-stream");stream.hidden=false;
+    select(stream,"span").textContent=mediaFolder?"Média local":"Source NDI";
+    select(stream,"strong").textContent=output.active_media|| (mediaFolder?row.media_folders?.[mediaFolder]?.name:current.mode==="same"?row.options?.source:current.source)||"—";
+    select(entry.el,".reader-error").textContent=output.media_error||"";
+    select(entry.el,".reader-error").hidden=!output.media_error;
   }
 }
 
@@ -3200,7 +3219,8 @@ function render(row) {
     (displayed.visible ? "Identification affichée." : "Identification en cours…");
   identification.hidden = !identification.textContent;
   select(el, ".manage-media").hidden = !row.paired;
-  select(el,"h2").textContent = physicalRows([row])[0].name;
+  const own = physicalRows([row]);
+  select(el,"h2").textContent = own.every(o=>(o.group||"")===(row.group||"")) ? row.name : own[0].name;
   ui.badge.textContent = row.online ? row.report.state : row.paired ? "Hors ligne" : "À associer";
   ui.badge.classList.toggle("online",row.online);
   ui.badge.classList.toggle("stopped", row.online && row.report.state === "Arrêté");
@@ -3213,6 +3233,13 @@ function render(row) {
       row.online ? "Version du lecteur non communiquée" : "" : "";
   renderMetrics(card);
   renderReceiverTraffic(card);
+  for(const entry of secondaryCards.values()) if(entry.readerId===row.id&&!entry.el.hidden){
+    for(const selector of [".metrics",".screen-traffic",".client-release",".os-health",".reader-update-status",".os-update-status"]){
+      const from=select(el,selector),to=select(entry.el,selector);
+      if(from&&to){to.innerHTML=from.innerHTML;to.hidden=from.hidden;}
+    }
+    for(const selector of [".rate-rx",".rate-tx"]) {const button=select(entry.el,selector);if(button)button.onclick=()=>select(el,selector)?.click();}
+  }
   const stream = select(el, ".current-stream");
   stream.hidden = !row.options;
   const playing = row.online && row.report.state === "Lecture";
@@ -3244,12 +3271,14 @@ function render(row) {
     let view = card.extraPreviews.get(output.id);
     if (!view) {
       const secondary = secondaryCards.get(row.id+":"+output.id);
-      view = createPreview(secondary?.preview || overview.element.parentElement, "Aperçu · Écran " + (Number(output.id) + 1), row.id, true);
+      view = createPreview(secondary && !secondary.el.hidden ? secondary.preview : overview.element.parentElement, "Aperçu · Écran " + (Number(output.id) + 1), row.id, true);
       view.output = output.id;
       card.extraPreviews.set(output.id, view);
     }
     const secondary = secondaryCards.get(row.id+":"+output.id);
-    if (secondary && view.element.parentElement!==secondary.preview) secondary.preview.append(view.element);
+    const destination=secondary && !secondary.el.hidden ? secondary.preview : overview.element.parentElement;
+    if(view.element.parentElement!==destination) destination.append(view.element);
+    if(secondary && !secondary.el.hidden) secondary.preview.hidden=false;
     view.available = row.online && row.paired;
     view.unavailable = "Lecteur hors ligne.";
     if (!view.available) view.snapshot = null;
@@ -3390,7 +3419,8 @@ function orderedScreenGroups(rows) {
     screenNames.compare(a.name,b.name) || screenNames.compare(a.id,b.id))]));
 }
 function positionScreens(rows) {
-  const sections = orderedScreenGroups(physicalRows(rows));
+  const physical=physicalRows(rows);
+  const sections = orderedScreenGroups(physical.filter(o=>o.output==="0" || (o.group||"")!==(cards.get(o.readerId)?.data.group||"")));
   let nextSection = holder.firstElementChild;
   for (const [name, members] of sections) {
     if (!screenSections.has(name)) {
@@ -3412,7 +3442,8 @@ function positionScreens(rows) {
     const {el, count, grid} = screenSections.get(name);
     if (el !== nextSection) holder.insertBefore(el, nextSection);
     nextSection = el.nextElementSibling;
-    count.textContent = members.length + (members.length === 1 ? " écran" : " écrans");
+    const countScreens=physical.filter(o=>(o.group||"")===name).length;
+    count.textContent = countScreens + (countScreens === 1 ? " écran" : " écrans");
     let nextCard = grid.firstElementChild;
     for (const row of members) {
       const card = row.output === "0" ? cards.get(row.readerId).el : secondaryCards.get(row.id)?.el;
