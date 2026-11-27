@@ -158,7 +158,8 @@ if $render_only; then
 else
     sudo apt update
     sudo apt install -y gcc binutils pkg-config libsdl2-dev python3 python3-gi python3-gi-cairo gir1.2-gtk-3.0 \
-        avahi-daemon libavahi-client3 curl ca-certificates x11-xserver-utils ffmpeg tigervnc-viewer
+        avahi-daemon libavahi-client3 curl ca-certificates x11-xserver-utils ffmpeg tigervnc-viewer \
+        gir1.2-gstreamer-1.0 gstreamer1.0-gtk3 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav grim
     if [[ $SOUNDLIVE_DEVICE_KIND == pi ]] && apt-cache show gir1.2-gtklayershell-0.1 >/dev/null 2>&1; then
         sudo apt install -y gir1.2-gtklayershell-0.1
     fi
