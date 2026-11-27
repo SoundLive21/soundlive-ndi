@@ -3138,6 +3138,33 @@ function outputLegend(legend, number, output, name) {
   }
   legend.replaceChildren(title);
 }
+function physicalStatus(row, index) {
+  if (!row.paired) return "À associer";
+  if (!row.online) return "Hors ligne";
+  const output = (row.report.outputs || []).find(o => o.id === index);
+  if (index === "0") {
+    if (!output) return row.report.state || "En attente";
+    if (output.playing) return "Lecture";
+    return row.options?.enabled === false ? "Arrêté" :
+      row.report.state === "Démarrage" ? "Démarrage" : "En attente";
+  }
+  if (!output) return "Hors ligne";
+  if (output.playing) return "Lecture";
+  return row.extra_outputs?.[index]?.enabled === true ? "En attente" : "Arrêté";
+}
+function paintPhysicalStatus(badge, state) {
+  badge.textContent = state;
+  badge.classList.toggle("online", state === "Lecture");
+  badge.classList.toggle("waiting", state === "En attente" || state === "Démarrage");
+  badge.classList.toggle("stopped", state === "Arrêté");
+}
+function outputStatusLegend(legend, row, index) {
+  const badge = document.createElement("span");
+  badge.className = "badge output-status";
+  badge.style.marginInlineStart = "8px";
+  paintPhysicalStatus(badge, physicalStatus(row,index));
+  legend.append(badge);
+}
 function audioRouteControl(row, index) {
   const devices = row.report.audio_devices || [];
   const label = document.createElement("label");
@@ -3169,6 +3196,11 @@ function renderExtraOutputs(card, row) {
     button.hidden = !row.paired;
     button.disabled = identifyBusy || !row.paired;
     button.title = (row.identify ? "Masquer l’identification de " : "Identifier ") + entry.title.textContent;
+    paintPhysicalStatus(entry.badge, physicalStatus(row,entry.outputId));
+  }
+  for (const field of box.querySelectorAll("fieldset[data-output-id]")) {
+    const badge = select(field,".output-status");
+    if (badge) paintPhysicalStatus(badge,physicalStatus(row,field.dataset.outputId));
   }
   if (box.contains(document.activeElement) || [...secondaryCards.values()].some(c=>c.readerId===row.id && c.el.contains(document.activeElement))) return;
   const physical = physicalRows([row]).filter(o=>o.output!=="0");
@@ -3200,7 +3232,7 @@ function renderExtraOutputs(card, row) {
       select(el,".poweroff").onclick=()=>card.ui.poweroff.click();
       select(el,".rename-reader").onclick=()=>openRenameReader(card.data);
       select(el,".identify").onclick=action(()=>changeIdentification(!card.data.identify,row.id));
-      entry={el,title,badge,preview,controls,body,readerId:row.id};
+      entry={el,title,badge,preview,controls,body,readerId:row.id,outputId:item.output};
       try { controls.open=localStorage.getItem("soundlive-controls-"+item.id)==="open"; } catch {}
       controls.addEventListener("toggle",()=>{try{localStorage.setItem("soundlive-controls-"+item.id,controls.open?"open":"closed");}catch{}});
       secondaryCards.set(item.id,entry);
@@ -3210,16 +3242,15 @@ function renderExtraOutputs(card, row) {
     select(entry.el,".manage-media").hidden=inline||!row.paired;
     if (inline) entry.el.remove();
     entry.title.textContent=item.name;
-    entry.badge.textContent=!row.online || !outputs.some(o=>o.id===output.id) ? "Hors ligne" : output.playing ? "Lecture" : row.extra_outputs?.[output.id]?.enabled ? "En attente" : "Arrêté";
-    entry.badge.classList.toggle("online",row.online && outputs.some(o=>o.id===output.id));
-    entry.badge.classList.toggle("waiting",entry.badge.textContent==="En attente");
-    entry.badge.classList.toggle("stopped",entry.badge.textContent==="Arrêté");
+    paintPhysicalStatus(entry.badge,physicalStatus(row,output.id));
     const current = row.extra_outputs?.[output.id] || {};
     const mediaFolder = row.extra_media?.[output.id];
     const line = document.createElement("fieldset");
     const heading = document.createElement("legend");
     line.className = "video-output";
     outputLegend(heading, Number(output.id) + 1, output,row.output_names?.[output.id]);
+    line.dataset.outputId = output.id;
+    outputStatusLegend(heading,row,output.id);
     const source = document.createElement("select");
     const sources = [...new Set([current.source, ...(row.report.sources || [])].filter(Boolean))];
     source.append(new Option("Ne pas diffuser de flux", "off"),
@@ -3348,6 +3379,7 @@ function render(row) {
   const primaryDisplay = (row.report.outputs || []).length <= 1 ? row.report.display : null;
   const primaryDetails = primary ? {...primary, connector:primary.connector || primaryDisplay?.connector} : primaryDisplay;
   outputLegend(select(form, ".primary-output legend"), 1, primaryDetails,row.output_names?.["0"]);
+  outputStatusLegend(select(form, ".primary-output legend"),row,"0");
   const audioField = select(form, ".primary-output");
   const oldAudio = select(audioField, ".audio-route");
   const audioSignature = JSON.stringify([row.report.audio_devices,row.audio_routes?.["0"],row.online]);
@@ -3373,10 +3405,7 @@ function render(row) {
   const splitGroups = own.some(o=>(o.group||"")!==(row.group||""));
   select(el,".manage-media").hidden = !row.paired;
   select(el,"h2").textContent = splitGroups ? own[0].name : row.name;
-  ui.badge.textContent = row.online ? row.report.state : row.paired ? "Hors ligne" : "À associer";
-  ui.badge.classList.toggle("online",row.online);
-  ui.badge.classList.toggle("stopped", row.online && row.report.state === "Arrêté");
-  ui.badge.classList.toggle("waiting", row.online && row.report.state === "En attente");
+  paintPhysicalStatus(ui.badge,physicalStatus(row,"0"));
   select(el, ".device-kind").textContent = deviceLabels[row.kind] || "";
   ui.address.textContent = row.report.ip || "";
   const currentVersion = row.update_availability === "current" && row.report.client_release;
