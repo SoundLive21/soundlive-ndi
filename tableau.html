@@ -855,6 +855,10 @@ function identifyControls() {
   for (const card of cards.values()) {
     if (card.data) card.ui.identify.disabled = identifyBusy || !card.data.paired;
   }
+  for (const entry of secondaryCards.values()) {
+    const row = cards.get(entry.readerId)?.data;
+    if (row) select(entry.el, ".identify").disabled = identifyBusy || !row.paired;
+  }
   return all;
 }
 async function changeIdentification(enabled, id) {
@@ -3032,6 +3036,15 @@ function outputLegend(legend, number, output) {
 function renderExtraOutputs(card, row) {
   const box = card.outputs;
   const outputs = row.report.outputs || [];
+  // Identification is reader-wide and must update even while a secondary control has focus.
+  for (const entry of secondaryCards.values()) {
+    if (entry.readerId !== row.id) continue;
+    const button = select(entry.el, ".identify");
+    button.setAttribute("aria-pressed", String(row.identify));
+    button.hidden = !row.paired;
+    button.disabled = identifyBusy || !row.paired;
+    button.title = (row.identify ? "Masquer l’identification de " : "Identifier ") + entry.title.textContent;
+  }
   if (box.contains(document.activeElement) || [...secondaryCards.values()].some(c=>c.readerId===row.id && c.el.contains(document.activeElement))) return;
   const physical = physicalRows([row]).filter(o=>o.output!=="0");
   const primaryGroup = row.group || "";
@@ -3184,6 +3197,8 @@ function renderExtraOutputs(card, row) {
     if(inline){box.append(line);}else{entry.body.replaceChildren(line);}
     select(entry.el,".identify").setAttribute("aria-pressed",String(row.identify));
     select(entry.el,".identify").hidden=!row.paired;
+    select(entry.el,".identify").disabled=identifyBusy||!row.paired;
+    select(entry.el,".identify").title=(row.identify?"Masquer l’identification de ":"Identifier ")+item.name;
     select(entry.el,".device-kind").textContent=deviceLabels[row.kind]||"";
     select(entry.el,".address").textContent=row.report.ip||"";
     const stream=select(entry.el,".current-stream");stream.hidden=false;
