@@ -60,6 +60,7 @@ button{padding:9px 13px;cursor:pointer;background:#2b222f;font-weight:600;white-
 .video-output .action-row .primary{width:auto}
 .action-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
 .action-row button,.full-action{white-space:normal}
+.action-row[hidden]{display:none}
 .ssh-prepare-button{display:block;text-align:center;padding:9px 13px;border:1px solid var(--edge);border-radius:8px;background:#2b222f;color:inherit;font:inherit;font-weight:600;text-decoration:none;white-space:normal;cursor:pointer}
 .ssh-prepare-button:hover{filter:brightness(1.18)}
 .ssh-prepare-button:focus-visible{outline:2px solid #ff91a5;outline-offset:3px}
@@ -3440,6 +3441,7 @@ function render(row) {
   syncSourceChoice(card);
   ui.toggle.textContent = row.options.enabled ? "Stop" : "Reprendre";
   ui.toggle.setAttribute("aria-label", row.options.enabled ? "Stopper la diffusion" : "Reprendre la diffusion");
+  ui.reboot.parentElement.hidden = !row.paired;
   ui.reboot.disabled = !row.online || row.os_busy || row.report.can_reboot === false;
   ui.poweroff.disabled = !row.online || row.os_busy || !row.report.can_poweroff;
   ui.poweroff.title = row.online && !row.report.can_poweroff ? "Extinction distante indisponible sur ce lecteur." : "";
