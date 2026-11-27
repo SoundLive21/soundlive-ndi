@@ -1341,7 +1341,7 @@ class LocalMedia:
         still = ["-pattern_type", "none"] if image else []
         volume = 0 if settings["muted"] else settings["volume"]
         return ([self.ffplay, "-hide_banner", "-nostats", "-fs", "-showmode", "video",
-                 "-volume", str(volume), "-protocol_whitelist", "file", "-f", container, *still,
+                 "-framedrop", "-volume", str(volume), "-protocol_whitelist", "file", "-f", container, *still,
                  *seek, "-i", str(path)], name)
 
     def finished(self, code, error=None):
@@ -1514,9 +1514,23 @@ class SecondaryMedia:
             self.process = None
 
     def advance(self):
+        next_index = (self.index + 1) % len(self.config["items"])
+        next_path = self.cache.path(self.config["items"][next_index])
+        if not WINDOWS and self.ready and self.window is not None and self.pipeline is None and MEDIA_EXTENSIONS[next_path.suffix] == "image2":
+            from gi.repository import GLib
+            _, _, width, height = self.signature[1]
+            try:
+                picture = load_local_image(next_path, width, height)
+                fitted = fit_local_image(picture, width, height)
+            except GLib.Error as error:
+                raise RuntimeError(error.message) from error
+            self.window.get_child().set_from_pixbuf(fitted)
+            self.index = next_index
+            self.deadline = time.monotonic() + self.config.get("image_seconds", 10)
+            return
         self.close()
-        self.index = (self.index + 1) % len(self.config["items"])
-        self.retry = time.monotonic() + .15
+        self.index = next_index
+        self.retry = time.monotonic()
 
     def fail(self, error):
         self.close()
@@ -1606,7 +1620,7 @@ class SecondaryMedia:
                 raise RuntimeError(self.cache.missing_ffplay())
             command = [self.cache.ffplay, "-hide_banner", "-nostats", "-fs",
                        "-left", str(x), "-top", str(y), "-x", str(width), "-y", str(height),
-                       "-showmode", "video", "-volume", str(volume), "-protocol_whitelist", "file",
+                       "-showmode", "video", "-framedrop", "-volume", str(volume), "-protocol_whitelist", "file",
                        "-f", MEDIA_EXTENSIONS[path.suffix]]
             if image:
                 command += ["-pattern_type", "none"]
@@ -2866,8 +2880,18 @@ def desktop():
                         self.retry_at = GLib.get_monotonic_time() + 2 * GLib.USEC_PER_SEC
                 elif self.media.elapsed():
                     self.media.finished(0)
-                    self.terminate()
-                    self.waiting()
+                    try:
+                        path, name = self.media.selected_file()
+                        if MEDIA_EXTENSIONS[path.suffix] == "image2":
+                            self.show_local_image(path, name)
+                        else:
+                            self.terminate()
+                            self.waiting()
+                    except (OSError, GLib.Error) as error:
+                        self.media.finished(1, error)
+                        self.terminate()
+                        self.waiting()
+                        self.retry_at = GLib.get_monotonic_time() + 2 * GLib.USEC_PER_SEC
             if self.maintenance.active and self.player is None and self.local_pixbuf is None:
                 self.maintenance.start()
             if (not self.maintenance.active and self.media.enabled and self.settings["enabled"]
