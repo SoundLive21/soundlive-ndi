@@ -51,7 +51,7 @@ button{padding:9px 13px;cursor:pointer;background:#2b222f;font-weight:600;white-
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}button.remove{color:#efacb7}.check{display:flex;align-items:center;gap:6px}
 .video-output{min-width:0;margin:12px 0;padding:12px 14px 16px;border:1px solid #59404e;border-radius:12px;background:#17121b}
 .video-output legend{padding:0 8px;color:#f5d1df;font-size:1rem;font-weight:700}
-.video-output legend .output-title{display:inline-flex;align-items:center;gap:8px}
+.video-output legend .output-title{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
 .video-output legend svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .video-output legend small{font-size:.78rem;font-weight:400;color:var(--sub)}
 .video-output .check{display:flex;align-items:center;justify-content:flex-start;gap:6px}
@@ -3097,8 +3097,11 @@ function outputLegend(legend, number, output, name) {
   title.append(icon, document.createTextNode(outputLabel(number,name)));
   if (output) {
     const size = document.createElement("small");
-    size.textContent = output.width + " × " + output.height;
-    title.append(size);
+    const details = [];
+    if (output.width && output.height) details.push(output.width + " × " + output.height);
+    if (output.connector) details.push(output.connector);
+    size.textContent = details.join(" · ");
+    if (details.length) title.append(size);
   }
   legend.replaceChildren(title);
 }
@@ -3285,7 +3288,9 @@ function render(row) {
   card.data = row;
   renderExtraOutputs(card, row);
   const primary = (row.report.outputs || []).find(o => o.id === "0");
-  outputLegend(select(form, ".primary-output legend"), 1, primary,row.output_names?.["0"]);
+  const primaryDisplay = (row.report.outputs || []).length <= 1 ? row.report.display : null;
+  const primaryDetails = primary ? {...primary, connector:primary.connector || primaryDisplay?.connector} : primaryDisplay;
+  outputLegend(select(form, ".primary-output legend"), 1, primaryDetails,row.output_names?.["0"]);
   const handle = select(el, ".card-heading .drag-handle");
   handle.title = "Déplacer " + row.name + " · Glisser ou utiliser les flèches";
   handle.setAttribute("aria-label",handle.title);
