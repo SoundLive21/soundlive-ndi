@@ -441,10 +441,99 @@ def group_device_action(targets, operation, now):
     return results
 
 
+def physical_outputs(row):
+    return ["0", *sorted({o["id"] for o in row.get("report", {}).get("outputs", [])
+                          if o.get("id") in tuple(map(str, range(1, 8)))}
+                         | set(row.get("output_groups", {})), key=int)]
+
+
+def physical_group(row, index):
+    return row.get("group") if index == "0" else row.get("output_groups", {}).get(index, row.get("group"))
+
+
+def physical_selection(devices):
+    selected = {}
+    for key in devices:
+        reader, sep, index = key.partition(":")
+        index = index if sep else "0"
+        row = SCREENS.get(reader)
+        if row is None or index not in physical_outputs(row):
+            raise ValueError("Écran physique inconnu.")
+        selected[(reader, index)] = row
+    return selected
+
+
+def physical_batch(devices, data, now):
+    selected = physical_selection(devices)
+    patch = data.get("changes")
+    fields = {"source", "muted", "enabled", "bandwidth", "volume", "orientation"}
+    if not isinstance(patch, dict) or not patch or not set(patch) <= fields:
+        raise ValueError("Aucun réglage de groupe valide.")
+    staged = {}
+    results = []
+    for (key, index), row in selected.items():
+        if "options" not in row:
+            raise ValueError("Lecteur non associé.")
+        if key not in staged:
+            staged[key] = dict(options=dict(row["options"]), extra_outputs=dict(row.get("extra_outputs", {})),
+                               media=dict(row.get("media", {})), extra_media=dict(row.get("extra_media", {})))
+        state = staged[key]
+        if index == "0":
+            changes = options({**state["options"], **patch})
+            error = resolution_rejection(row, changes, now, data.get("resolution"))
+            if error:
+                return 409, {"error": error}
+            # A source change on the primary must not change the secondary outputs following it.
+            if "source" in patch and changes["source"] != state["options"]["source"]:
+                for other in physical_outputs(row):
+                    if other == "0" or (key, other) in selected:
+                        continue
+                    existing = dict(state["extra_outputs"].get(other, {}))
+                    if existing.get("mode") == "same":
+                        existing.update(mode="independent", source=state["options"]["source"])
+                        state["extra_outputs"][other] = existing
+            state["options"] = changes
+            if "source" in patch:
+                state["media"]["enabled"] = False
+        else:
+            current = dict(state["extra_outputs"].get(index, {}))
+            defaults = dict(source=state["options"]["source"] if current.get("mode") == "same" else current.get("source") or state["options"]["source"],
+                            enabled=current.get("enabled", False), bandwidth=current.get("bandwidth", state["options"]["bandwidth"]),
+                            volume=current.get("volume", 0), muted=current.get("muted", True),
+                            orientation=current.get("orientation", "landscape"))
+            changes = options({**defaults, **patch})
+            if "source" in patch:
+                current["mode"] = "independent"
+                state["extra_media"].pop(index, None)
+            current.update(changes)
+            current.setdefault("mode", "independent")
+            state["extra_outputs"][index] = current
+        results.append(dict(id=key + ":" + index, name=row["name"] + " · Écran " + str(int(index)+1),
+                            state="saved", online=now-row.get("report", {}).get("seen", 0)<ONLINE_AGE))
+    previous = {key: {field: SCREENS[key].get(field) for field in (*state, "version")} for key,state in staged.items()}
+    try:
+        for key,state in staged.items():
+            SCREENS[key].update(state, version=SCREENS[key].get("version",0)+1)
+        save()
+    except OSError:
+        for key,old in previous.items():
+            for field,value in old.items():
+                if value is None:
+                    SCREENS[key].pop(field,None)
+                else:
+                    SCREENS[key][field]=value
+        raise
+    return 200, {"results": results}
+
+
 def batch(path, data, now):
     devices = data.get("ids")
     if not isinstance(devices, list) or not devices or len(devices) > 250 or any(not isinstance(key, str) for key in devices):
         raise ValueError("Sélectionne au moins un écran.")
+    if path == "/api/group" and "changes" in data and any(":" in key for key in devices):
+        return physical_batch(devices, data, now)
+    if path != "/api/screen-groups" and any(":" in key for key in devices):
+        devices = list(dict.fromkeys(key for key, _ in physical_selection(devices)))
     targets = {key: SCREENS.get(key) for key in devices}
     if path == "/api/screen-groups":
         if any(":" in key for key in devices):
@@ -453,7 +542,7 @@ def batch(path, data, now):
                 reader, separator, index = key.partition(":")
                 row = SCREENS.get(reader)
                 index = index if separator else "0"
-                if not row or index not in tuple(map(str, range(8))) or (index != "0" and not any(o["id"] == index for o in row.get("report", {}).get("outputs", []))):
+                if not row or index not in tuple(map(str, range(8))) or index not in physical_outputs(row):
                     raise ValueError("Écran physique inconnu.")
                 selected.append((reader, row, index))
             name = data.get("group")
@@ -465,9 +554,9 @@ def batch(path, data, now):
                 if index == "0":
                     # Preserve the previous inherited assignment of other connected outputs.
                     groups = row.setdefault("output_groups", {})
-                    for output in row.get("report", {}).get("outputs", []):
-                        if output["id"] != "0":
-                            groups.setdefault(output["id"], row.get("group"))
+                    for other in physical_outputs(row):
+                        if other != "0":
+                            groups.setdefault(other, row.get("group"))
                     if name:
                         row["group"] = name
                     else:
@@ -635,11 +724,11 @@ def order_screens(data):
     if not isinstance(order, list) or any(not isinstance(value, str) for value in order):
         raise ValueError("Ordre d’affichage invalide.")
     if scope == "groups":
-        expected = {row.get("group") or "" for row in SCREENS.values()}
+        expected = {physical_group(row,index) or "" for row in SCREENS.values() for index in physical_outputs(row)}
         layout = {**SCREEN_ORDER, "groups": order}
     elif scope == "screens" and isinstance(data.get("group"), str):
         group = data["group"]
-        expected = {key for key, row in SCREENS.items() if (row.get("group") or "") == group}
+        expected = {key if index == "0" else key + ":" + index for key,row in SCREENS.items() for index in physical_outputs(row) if (physical_group(row,index) or "") == group}
         layout = {**SCREEN_ORDER, "screens": {**SCREEN_ORDER["screens"], group: order}}
     else:
         raise ValueError("Disposition invalide.")
@@ -1255,7 +1344,8 @@ class Request(BaseHTTPRequestHandler):
                                                 (report.get("diagnostic") or {}).get("desktop_protocol"),
                                                 (report.get("diagnostic") or {}).get("desktop_services")),
                         desktop_ports=(report.get("diagnostic") or {}).get("desktop_services", {}),
-                        group=row.get("group"), output_groups=row.get("output_groups", {}), identify=row.get("identify") is True,
+                        group=row.get("group"), output_groups=row.get("output_groups", {}), physical_outputs=physical_outputs(row),
+                        physical_order={index: dict(group=group_order.get(physical_group(row,index) or ""), screen=screen_order.get(physical_group(row,index) or "", {}).get(key if index=="0" else key+":"+index)) for index in physical_outputs(row)}, identify=row.get("identify") is True,
                         resolution_limit=row.get("resolution_limit"),
                         group_order=group_order.get(group), screen_order=screen_order.get(group, {}).get(key),
                         resolution_sources=resolution_sources(row, now),
