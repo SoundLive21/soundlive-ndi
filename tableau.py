@@ -175,7 +175,10 @@ def preview_status(job):
 
 def preview_target(data):
     if "screen" in data:
-        return ("screen", safe_text(data["screen"])), None
+        output = data.get("output", "0")
+        if output not in tuple(map(str, range(8))):
+            raise ValueError("Sortie vidéo invalide.")
+        return ("screen", safe_text(data["screen"])) + ((output,) if output != "0" else ()), None
     source = safe_text(data["source"], 256)
     return ("source", source), source
 
@@ -193,10 +196,13 @@ def request_preview(data, now):
     existing = PREVIEWS.get(target)
     if not online:
         return 409, {"error": "Ce lecteur est hors ligne." if screen else "Ce flux n’est plus détecté par les lecteurs."}
-    if screen and online[0][1].get("display_capture") is not True:
+    output = target[2] if len(target) == 3 else "0"
+    if screen and output != "0" and not any(o["id"] == output for o in online[0][1].get("outputs", [])):
+        return 409, {"error": "Écran supplémentaire indisponible."}
+    if screen and output == "0" and online[0][1].get("display_capture") is not True:
         return 409, {"error": "La capture de l’affichage est indisponible sur ce lecteur."}
     automatic = data.get("automatic") is True
-    consent = screen and online[0][1].get("capture_needs_consent") is True
+    consent = screen and output == "0" and online[0][1].get("capture_needs_consent") is True
     if automatic and consent:
         return 409, {"error": "Autorise le partage sur le lecteur Ubuntu avant de lancer la capture automatique."}
     if existing:
@@ -206,7 +212,7 @@ def request_preview(data, now):
             return 200, preview_status(existing)
         if not automatic and not consent and existing["id"] != data.get("previous"):
             return 200, preview_status(existing)
-    minimum = DISPLAY_PREVIEW_CLIENT if screen else PREVIEW_CLIENT
+    minimum = release_number("1.4.118") if screen and output != "0" else DISPLAY_PREVIEW_CLIENT if screen else PREVIEW_CLIENT
     supported = [(key, report) for key, report in online
                  if release_number(report.get("client_release")) >= minimum]
     if not supported:
@@ -221,7 +227,7 @@ def request_preview(data, now):
         expired_first = min((name for name in PREVIEWS if PREVIEWS[name]["state"] != "pending"),
                             key=lambda name: PREVIEWS[name]["until"])
         del PREVIEWS[expired_first]
-    job = dict(id=secrets.token_hex(12), reader=device, source=source, screen=screen, state="pending",
+    job = dict(id=secrets.token_hex(12), reader=device, source=source, screen=screen, output=output, state="pending",
                automatic=automatic, consent=consent, until=now + (PREVIEW_CONSENT_WAIT if consent else PREVIEW_WAIT))
     PREVIEWS[target] = job
     return 200, preview_status(job)
@@ -1968,7 +1974,7 @@ class Request(BaseHTTPRequestHandler):
             recommendation = dict(version=CLIENT_VERSION, state=availability)
             preview_prune(now)
             preview = next((dict(id=item["id"], source=item["source"], screen=item["screen"],
-                                 automatic=item["automatic"]) for item in PREVIEWS.values()
+                                 automatic=item["automatic"], output=item.get("output", "0")) for item in PREVIEWS.values()
                             if item["reader"] == key and item["state"] == "pending"), None)
             return 200, dict(options=row["options"], extra_outputs=row.get("extra_outputs", {}), identify=row.get("identify") is True,
                              media=screen_media(row),
