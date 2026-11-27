@@ -120,6 +120,40 @@ def prefer_hdmi_audio():
         pass
 
 
+def audio_sinks():
+    if WINDOWS or not shutil.which("pactl"):
+        return []
+    try:
+        result = subprocess.run(["pactl", "-f", "json", "list", "sinks"],
+                                capture_output=True, text=True, check=True, timeout=2)
+        return [dict(id=s["name"], label=s.get("description") or s["name"],
+                     model=(s.get("properties") or {}).get("device.product.name", ""))
+                for s in json.loads(result.stdout) if isinstance(s.get("name"), str)]
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return []
+
+
+def audio_target(output, routes, sinks):
+    index = output.get("id", "0")
+    chosen = routes.get(index)
+    if chosen:
+        return chosen if any(s["id"] == chosen for s in sinks) else None
+    hdmi = [s for s in sinks if "hdmi" in s["id"].lower()]
+    model = output.get("model", "").strip().casefold()
+    matches = [s for s in hdmi if model and model in (s["model"].casefold(), s["label"].casefold())]
+    if len(matches) == 1:
+        return matches[0]["id"]
+    if len(hdmi) == 1:
+        return hdmi[0]["id"]
+    return None
+
+
+def audio_env(env, target):
+    if target:
+        return {**(env or os.environ), "PULSE_SINK": target, "SDL_AUDIODRIVER": "pulseaudio"}
+    return env
+
+
 def serial():
     if WINDOWS:
         import winreg
@@ -1588,7 +1622,8 @@ class SecondaryMedia:
         config = media_config(config)
         bounds = tuple(output[k] for k in ("x", "y", "width", "height"))
         volume = 0 if settings.get("muted", True) else settings.get("volume", 0)
-        signature = (config, bounds, volume, monitor)
+        signature = (config, bounds, volume, monitor, settings.get("audio_sink"))
+        self.audio_sink = settings.get("audio_sink")
         if signature != self.signature:
             self.close()
             self.signature = signature
@@ -1726,6 +1761,11 @@ class SecondaryMedia:
             self.window.add(widget_sink.get_property("widget"))
             print("Vidéo locale : " + ("OpenGL" if self.using_gl else "GTK logiciel"), file=self.log)
             self.pipeline.set_property("video-sink", sink)
+            if self.audio_sink:
+                audio_sink = Gst.ElementFactory.make("pulsesink")
+                if audio_sink is not None:
+                    audio_sink.set_property("device", self.audio_sink)
+                    self.pipeline.set_property("audio-sink", audio_sink)
             self.pipeline.set_property("uri", path.resolve().as_uri())
             self.pipeline.set_property("volume", volume / 100)
         self.window.fullscreen_on_monitor(self.window.get_screen(), monitor)
@@ -1993,6 +2033,11 @@ def desktop():
             self.sources = []
             self.player = None
             self.outputs = []
+            self.audio_routes = {}
+            self.audio_devices = audio_sinks()
+            self.audio_request = None
+            self.next_audio = 0
+            self.primary_audio = None
             self.extra_settings = {}
             self.extra_players = {}
             self.extra_retry = {}
@@ -2746,7 +2791,23 @@ def desktop():
                     self.work.submit(self.dashboard.client_command, "--orienter-ecran", f"{-monitor-1} {desired}", 6),
                     desired)
 
+        def sync_audio(self):
+            now = time.monotonic()
+            if self.audio_request and self.audio_request.done():
+                self.audio_devices = self.audio_request.result()
+                self.audio_request = None
+            if not self.audio_request and now >= self.next_audio:
+                self.audio_request = self.work.submit(audio_sinks)
+                self.next_audio = now + 10
+            primary = next((o for o in self.outputs if o["id"] == "0"), {"id": "0"})
+            target = audio_target(primary, self.audio_routes, self.audio_devices)
+            if target != self.primary_audio:
+                self.primary_audio = target
+                if self.player is not None:
+                    self.terminate()
+
         def sync_outputs(self):
+            self.sync_audio()
             if not UBUNTU:
                 return
             now = time.monotonic()
@@ -2780,7 +2841,8 @@ def desktop():
                     running = self.extra_players.get(index)
                     if source and (source in self.sources or (running and running[0].poll() is None and running[1][0] == source)):
                         wanted[index] = (source, selected.get("bandwidth", self.settings["bandwidth"]), output["x"], output["y"],
-                                         output["width"], output["height"], 0 if selected.get("muted", True) else selected.get("volume", 0))
+                                         output["width"], output["height"], 0 if selected.get("muted", True) else selected.get("volume", 0),
+                                         audio_target(output, self.audio_routes, self.audio_devices))
             for index, (process, config, path) in list(self.extra_players.items()):
                 if wanted.get(index) != config or process.poll() is not None:
                     self.stop_extra(index)
@@ -2803,9 +2865,9 @@ def desktop():
                     process = subprocess.Popen(
                         [self.video_engine, config[0], config[1], str(config[6]), str(path)],
                         stdout=self.log, stderr=subprocess.STDOUT,
-                        env={**os.environ, "SOUNDLIVE_DISPLAY_INDEX": index,
+                        env=audio_env({**os.environ, "SOUNDLIVE_DISPLAY_INDEX": index,
                              "SOUNDLIVE_RENDER_PREVIEW": str(STATE / ("rendu-sortie-" + index)),
-                             "SOUNDLIVE_IDENTIFICATION_TEXTURE": str(STATE / ("identification-sortie-" + index + ".rgba"))})
+                             "SOUNDLIVE_IDENTIFICATION_TEXTURE": str(STATE / ("identification-sortie-" + index + ".rgba"))}, config[7]))
                     self.extra_players[index] = (process, config, path)
                 except OSError as error:
                     self.error = str(error)[:240]
@@ -2835,7 +2897,7 @@ def desktop():
                 if index not in self.extra_media_players:
                     self.extra_media_players[index] = SecondaryMedia(self.media, self.log, (Gtk, GdkPixbuf))
                 local = self.extra_media_players[index]
-                local.update(config, settings, output, self.output_monitor(output))
+                local.update(config, {**settings, "audio_sink": audio_target(output, self.audio_routes, self.audio_devices)}, output, self.output_monitor(output))
                 if index == "0":
                     self.playing_local = self.video_ready = local.ready
                     self.active_source = local.config["items"][local.index]["name"] if local.ready else None
@@ -2875,7 +2937,7 @@ def desktop():
                     env = {**(env or os.environ), "SOUNDLIVE_RENDER_PREVIEW": str(RENDER_PREVIEW)}
                 if UBUNTU and not local and self.outputs:
                     env = {**(env or os.environ), "SOUNDLIVE_DISPLAY_INDEX": "0"}
-                self.player = subprocess.Popen(command, stdout=self.log, stderr=subprocess.STDOUT, env=env,
+                self.player = subprocess.Popen(command, stdout=self.log, stderr=subprocess.STDOUT, env=audio_env(env, self.primary_audio),
                                                cwd=STATE if self.identification_output == "text" else None)
                 self.active_source = source
                 self.playing_local = local
@@ -3010,6 +3072,7 @@ def desktop():
                         active_source=self.active_source if state == "Lecture" else None,
                         error=self.error, can_poweroff=True, media_status=self.media.report(),
                         local_video=self.playing_local, identification=self.identification_state,
+                        audio_devices=self.audio_devices,
                         outputs=report_outputs(self.outputs, self.video_ready, self.playing_local,
                                                self.extra_players, self.extra_media_players))
             display_pid = self.player.pid if state == "Lecture" and self.player else 0
@@ -3046,6 +3109,7 @@ def desktop():
                 self.terminate()
                 self.waiting()
             new = options(result["options"])
+            self.audio_routes = result.get("audio_routes") or {}
             self.extra_settings = result.get("extra_outputs") or {}
             self.extra_media_settings = result.get("extra_media") or {}
             self.media.receive(result.get("media"), result.get("media_catalog"))

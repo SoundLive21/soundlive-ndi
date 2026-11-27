@@ -1341,6 +1341,7 @@ class Request(BaseHTTPRequestHandler):
                         report=report, extra_outputs=row.get("extra_outputs", {}), online=now - report.get("seen", 0) < ONLINE_AGE,
                         pairing=row.get("pairing") if now < row.get("pairing_until", 0) else None,
                         installation_fingerprint=row.get("installation_fingerprint"),
+                        audio_routes=row.get("audio_routes", {}),
                         installation_network=row.get("installation_network", {}),
                         paired="token" in row, version=row.get("version", 0), kind=row.get("kind"),
                         support=support_methods(row.get("kind"),
@@ -2134,7 +2135,11 @@ class Request(BaseHTTPRequestHandler):
                                             connector=output["connector"][:128] if isinstance(output.get("connector"), str) else "",
                                             **{k: output[k] for k in ("resolution_width", "resolution_height")
                                                if type(output.get(k)) is int and 0 < output[k] <= 32768}))
-            row["report"] = dict(outputs=outputs, seen=now, ip=self.client_address[0], state=state, boot=boot,
+            audio_devices = data.get("audio_devices")
+            audio_devices = [dict(id=d["id"], label=str(d.get("label", d["id"]))[:200]) for d in audio_devices[:32]
+                             if isinstance(d, dict) and isinstance(d.get("id"), str) and 0 < len(d["id"]) <= 256
+                             and not any(ord(c) < 32 for c in d["id"])] if isinstance(audio_devices, list) else []
+            row["report"] = dict(audio_devices=audio_devices, outputs=outputs, seen=now, ip=self.client_address[0], state=state, boot=boot,
                                  os_capability=os_capability,
                                  os_health=os_update_report(data.get("os_health")),
                                  identification=identification,
@@ -2169,7 +2174,7 @@ class Request(BaseHTTPRequestHandler):
             preview = next((dict(id=item["id"], source=item["source"], screen=item["screen"],
                                  automatic=item["automatic"], output=item.get("output", "0")) for item in PREVIEWS.values()
                             if item["reader"] == key and item["state"] == "pending"), None)
-            return 200, dict(options=row["options"], extra_outputs=row.get("extra_outputs", {}), identify=row.get("identify") is True,
+            return 200, dict(options=row["options"], audio_routes=row.get("audio_routes", {}), extra_outputs=row.get("extra_outputs", {}), identify=row.get("identify") is True,
                              media=screen_media(row), extra_media=extra_media_configs(row),
                              media_catalog=catalog_items(row),
                              preview_request=preview,
@@ -2209,6 +2214,21 @@ class Request(BaseHTTPRequestHandler):
             return 200, {"name": name, "output_names": updated}
         if path == "/api/remove":
             remove_screens({key: row})
+            return 200, {"ok": True}
+        elif path == "/api/audio-route" and row.get("token"):
+            index, target = data.get("output"), data.get("target")
+            report = row.get("report", {})
+            if index not in ("0", *(o["id"] for o in report.get("outputs", []))):
+                raise ValueError("Sortie écran inconnue.")
+            if not isinstance(target, str) or (target and not any(d["id"] == target for d in report.get("audio_devices", []))):
+                raise ValueError("Sortie audio indisponible.")
+            previous = row.get("audio_routes", {})
+            row["audio_routes"] = {**previous, index: target}
+            try:
+                save()
+            except OSError:
+                row["audio_routes"] = previous
+                raise
             return 200, {"ok": True}
         elif path == "/api/extra-output" and row.get("token"):
             report = row.get("report", {})

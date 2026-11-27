@@ -3138,6 +3138,26 @@ function outputLegend(legend, number, output, name) {
   }
   legend.replaceChildren(title);
 }
+function audioRouteControl(row, index) {
+  const devices = row.report.audio_devices || [];
+  const label = document.createElement("label");
+  label.className = "audio-route";
+  label.hidden = !devices.length;
+  label.append("Sortie audio");
+  const input = document.createElement("select");
+  const current = row.audio_routes?.[index] || "";
+  input.append(new Option("Automatique (HDMI prioritaire)", ""));
+  for (const device of devices) input.append(new Option(device.label + " · " + device.id, device.id));
+  if (current && !devices.some(d=>d.id===current)) input.append(new Option("Indisponible · " + current,current));
+  input.value = current;
+  input.disabled = !row.online;
+  input.onchange = action(async () => {
+    await call("/api/audio-route", {id:row.id, output:index, target:input.value});
+    await refresh(true);
+  });
+  label.append(input);
+  return label;
+}
 function renderExtraOutputs(card, row) {
   const box = card.outputs;
   const outputs = row.report.outputs || [];
@@ -3154,7 +3174,7 @@ function renderExtraOutputs(card, row) {
   const physical = physicalRows([row]).filter(o=>o.output!=="0");
   const primaryGroup = row.group || "";
   box.hidden = !physical.some(o=>(o.group || "")===primaryGroup);
-  const signature = JSON.stringify([physical.map(o=>o.id),outputs, row.extra_outputs, row.extra_media, row.report.sources, row.media?.enabled,row.output_groups,row.output_names,row.online,row.name,row.identify]);
+  const signature = JSON.stringify([physical.map(o=>o.id),outputs, row.extra_outputs, row.extra_media, row.report.sources, row.media?.enabled,row.output_groups,row.output_names,row.online,row.name,row.identify,row.audio_routes,row.report.audio_devices]);
   if (box.dataset.signature === signature) return;
   box.dataset.signature = signature;
   box.replaceChildren();
@@ -3292,7 +3312,7 @@ function renderExtraOutputs(card, row) {
     actions.className = "action-row";
     actions.append(save, toggle);
     line.append(heading, label("Sources NDI détectées", source),
-      label("Qualité", bandwidth), label("Orientation de l’écran", orientation), label("Volume ", level), volume, audio, actions);
+      label("Qualité", bandwidth), label("Orientation de l’écran", orientation), label("Volume ", level), volume, audio, audioRouteControl(row,output.id), actions);
     const ndi = document.createElement("button");
     ndi.type = "button"; ndi.className = "primary full-action";
     ndi.textContent = "Revenir à la diffusion NDI";
@@ -3328,6 +3348,12 @@ function render(row) {
   const primaryDisplay = (row.report.outputs || []).length <= 1 ? row.report.display : null;
   const primaryDetails = primary ? {...primary, connector:primary.connector || primaryDisplay?.connector} : primaryDisplay;
   outputLegend(select(form, ".primary-output legend"), 1, primaryDetails,row.output_names?.["0"]);
+  const audioField = select(form, ".primary-output");
+  const oldAudio = select(audioField, ".audio-route");
+  const audioSignature = JSON.stringify([row.report.audio_devices,row.audio_routes?.["0"],row.online]);
+  if (audioField.dataset.audioSignature !== audioSignature && !oldAudio?.contains(document.activeElement)) {
+    oldAudio?.remove(); audioField.append(audioRouteControl(row,"0")); audioField.dataset.audioSignature = audioSignature;
+  }
   const handle = select(el, ".card-heading .drag-handle");
   handle.title = "Déplacer " + row.name + " · Glisser ou utiliser les flèches";
   handle.setAttribute("aria-label",handle.title);
