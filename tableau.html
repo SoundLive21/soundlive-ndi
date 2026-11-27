@@ -829,6 +829,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
       <button class="return-ndi primary full-action" type="button" hidden>Revenir à la diffusion NDI</button>
       </fieldset>
       </form>
+      <button class="manage-media full-action" type="button" hidden aria-haspopup="dialog">Images et vidéos</button>
 
       <div class="action-row"><button class="info" type="button" hidden>Informations</button><button class="remove" type="button">Retirer</button></div>
       <div class="action-row" hidden><button class="reboot" type="button" hidden>Redémarrer</button><button class="poweroff" type="button" hidden>Éteindre</button></div>
@@ -2898,6 +2899,7 @@ function cardFor(id) {
     (source, destination) => moveScreenOrder("screens", screenKeys(el.parentElement), source, destination,
       card.data.group || ""), "Déplacer l’écran");
   heading.insertBefore(handle, ui.badge);
+  select(el,".manage-media").onclick = () => openMediaManager([id],"0",physicalRows([card.data],true).filter(o=>(o.group||"")===(card.data.group||"")).map(o=>o.id));
   ui["return-ndi"].onclick = action(() => confirmOutputNdi(card.data,"0"));
   select(el,".rename-reader").onclick = () => openRenameReader(card.data);
   ui.identify.onclick = action(() => changeIdentification(!card.data.identify, id));
@@ -3145,6 +3147,7 @@ function renderExtraOutputs(card, row) {
       select(el,".config").replaceWith(body);
       select(el,".pending").remove();
       for (const selector of [".os-upgrade",".client-upgrade"]) select(el,selector)?.remove();
+      select(el,".manage-media").onclick=()=>openMediaManager([row.id],item.output,[row.id+":"+item.output]);
       select(el,".info").onclick=()=>card.ui.info.click();
       select(el,".remove").onclick=()=>card.ui.remove.click();
       select(el,".reboot").onclick=()=>card.ui.reboot.click();
@@ -3158,6 +3161,7 @@ function renderExtraOutputs(card, row) {
     }
     const inline = (item.group || "") === primaryGroup;
     entry.el.hidden = inline;
+    select(entry.el,".manage-media").hidden=inline||!row.paired;
     if (inline) entry.el.remove();
     entry.title.textContent=item.name;
     entry.badge.textContent=!row.online || !outputs.some(o=>o.id===output.id) ? "Hors ligne" : output.playing ? "Lecture" : row.extra_outputs?.[output.id]?.enabled ? "En attente" : "Arrêté";
@@ -3314,7 +3318,9 @@ function render(row) {
     (displayed.visible ? "Identification affichée." : "Identification en cours…");
   identification.hidden = !identification.textContent;
   const own = physicalRows([row]);
-  select(el,"h2").textContent = own.every(o=>(o.group||"")===(row.group||"")) ? row.name : own[0].name;
+  const splitGroups = own.some(o=>(o.group||"")!==(row.group||""));
+  select(el,".manage-media").hidden = !row.paired || !splitGroups;
+  select(el,"h2").textContent = splitGroups ? own[0].name : row.name;
   ui.badge.textContent = row.online ? row.report.state : row.paired ? "Hors ligne" : "À associer";
   ui.badge.classList.toggle("online",row.online);
   ui.badge.classList.toggle("stopped", row.online && row.report.state === "Arrêté");
