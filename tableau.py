@@ -48,7 +48,7 @@ from terminal_ssh import GROUP_LIMIT, USER as SSH_USER, HostKeyCheck, Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.114"
+SOFTWARE_VERSION = "1.4.115"
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
 DATA = ROOT / "ecrans.json"
