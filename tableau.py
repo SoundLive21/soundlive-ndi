@@ -48,7 +48,7 @@ from terminal_ssh import GROUP_LIMIT, USER as SSH_USER, HostKeyCheck, Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.122"
+SOFTWARE_VERSION = "1.4.123"
 # Publication : arrêt indépendant des sorties vidéo.
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
@@ -728,7 +728,7 @@ def order_screens(data):
         layout = {**SCREEN_ORDER, "groups": order}
     elif scope == "screens" and isinstance(data.get("group"), str):
         group = data["group"]
-        expected = {key if index == "0" else key + ":" + index for key,row in SCREENS.items() for index in physical_outputs(row) if (physical_group(row,index) or "") == group}
+        expected = {key if index == "0" else key + ":" + index for key,row in SCREENS.items() for index in physical_outputs(row) if (physical_group(row,index) or "") == group and (index == "0" or (physical_group(row,index) or "") != (row.get("group") or ""))}
         layout = {**SCREEN_ORDER, "screens": {**SCREEN_ORDER["screens"], group: order}}
     else:
         raise ValueError("Disposition invalide.")
