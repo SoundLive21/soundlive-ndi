@@ -13,6 +13,7 @@ def item(number, name):
 
 first, second = item(1, "premier.png"), item(2, "second.mp4")
 row = dict(
+    name="Lecteur de test",
     options=dict(source="OBS (Programme)", bandwidth="0", volume=50,
                  muted=False, orientation="landscape", enabled=True),
     version=0, kind="ubuntu", token="fictif",
