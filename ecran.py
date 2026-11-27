@@ -2376,7 +2376,8 @@ def desktop():
                     if index == "0" or selected.get("enabled") is not True:
                         continue
                     source = self.settings["source"] if selected.get("mode") == "same" else selected.get("source")
-                    if source in self.sources:
+                    running = self.extra_players.get(index)
+                    if source and (source in self.sources or (running and running[0].poll() is None and running[1][0] == source)):
                         wanted[index] = (source, selected.get("bandwidth", self.settings["bandwidth"]), output["x"], output["y"],
                                          output["width"], output["height"], 0 if selected.get("muted", True) else selected.get("volume", 0))
             for index, (process, config, path) in list(self.extra_players.items()):
@@ -2839,6 +2840,11 @@ def run_windows_screen(tk, log):
         status.configure(text=text if settings["enabled"] else "Diffusion arrêtée")
         root.deiconify()
         root.attributes("-fullscreen", True)
+        primary = next((o for o in displays if o["id"] == "0"), None)
+        if primary:
+            root.update_idletasks()
+            hwnd = user.GetAncestor(root.winfo_id(), 2) or root.winfo_id()
+            user.SetWindowPos(hwnd, None, primary["x"], primary["y"], primary["width"], primary["height"], 0x0014)
 
     def stop_player():
         nonlocal ready, player, playing_local
@@ -2944,7 +2950,8 @@ def run_windows_screen(tk, log):
                 if selected.get("enabled") is not True:
                     continue
                 source = settings["source"] if selected.get("mode") == "same" else selected.get("source")
-                if source and source in sources:
+                running = extra_players.get(index)
+                if source and (source in sources or (running and running[0].poll() is None and running[1][0] == source)):
                     wanted[index] = (source, selected.get("bandwidth", settings["bandwidth"]),
                                      0 if selected.get("muted", True) else selected.get("volume", 0))
         for index, (process, config, path) in list(extra_players.items()):
@@ -3027,7 +3034,7 @@ def run_windows_screen(tk, log):
                     if player.returncode:
                         failure = f"Le lecteur NDI a quitté avec le code {player.returncode}. Consulte gestion.log."
                     retry_at = now + 3
-                    sources = []
+                    # A primary player exit must not invalidate the secondary source list.
                 stop_player()
             if player and playing_local and media.elapsed():
                 media.finished(0)
