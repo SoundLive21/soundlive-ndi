@@ -18,6 +18,9 @@ jobs:
         run: |
           python3 -m py_compile ecran.py tableau.py commun.py publier-version.py
           bash -n installer-ubuntu.sh
+          python3 tests/test-multi-output-media.py
+          python3 -c 'from pathlib import Path; s=Path("tableau.html").read_text(); Path("/tmp/soundlive-tableau.js").write_text(s.split("<script>",1)[1].split("</script>",1)[0])'
+          node --check /tmp/soundlive-tableau.js
       - name: Construire et signer
         env:
           PUBLICATION_KEY: ${{ secrets.SOUNDLIVE_PUBLICATION_KEY }}
