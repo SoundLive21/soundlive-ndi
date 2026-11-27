@@ -310,6 +310,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
     </div>
     <p class="small" id="traffic-help">Trafic total de l’interface sélectionnée, NDI compris lorsque ce PC diffuse.</p>
     <div class="regie-details">
+      <a class="ssh-prepare-button" href="/setup" target="_blank" rel="noopener">Installation SoundLive NDI</a>
       <button type="button" id="regie-system-open">Informations système de la régie</button>
       <button type="button" id="network-open">Gestion réseau</button>
       <button type="button" id="identify-manager-open" aria-haspopup="dialog" disabled>Identifier les écrans…</button>
@@ -1089,14 +1090,14 @@ function renderPairing(card) {
   sshLink.target = "_blank";
   sshLink.rel = "noopener noreferrer";
   sshLink.className = "ssh-prepare-button";
-  sshLink.textContent = "Préparer la clé SSH (/addsshkey)";
+  sshLink.textContent = "Installation et raccordement (/setup)";
   const deployment = document.createElement("button");
   deployment.type = "button";
   deployment.textContent = "Déployer via SSH";
   deployment.onclick = () => openDeployReader(row, card.pairingAddress || input.value);
   function updateSshLink() {
     const address = (interfaces?.value || input.value).trim();
-    sshLink.href = isIPv4(address) ? "https://" + address + ":8766/addsshkey" : "/addsshkey";
+    sshLink.href = isIPv4(address) ? "https://" + address + ":8766/setup" : "/setup";
   }
   input.addEventListener("input", updateSshLink);
   interfaces?.addEventListener("change", updateSshLink);

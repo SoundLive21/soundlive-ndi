@@ -19,9 +19,12 @@ show_usage() {
 }
 
 update=false
+install_only=false
 client_only=false
 render_only=false
-if [[ ${1:-} == --mettre-a-jour-rendu && $# -eq 1 ]]; then
+if [[ ${1:-} == --installer-seul && $# -eq 1 ]]; then
+    install_only=true
+elif [[ ${1:-} == --mettre-a-jour-rendu && $# -eq 1 ]]; then
     update=true
     render_only=true
 elif [[ ${1:-} == --mettre-a-jour || ${1:-} == --mettre-a-jour-client ]]; then
@@ -274,7 +277,9 @@ if [[ -n ${SOUNDLIVE_INSTALL_FINGERPRINT:-} ]]; then
     bash "$here/installer-ssh-linux.sh" recuperer "$SOUNDLIVE_INSTALL_REGIE" "$SOUNDLIVE_INSTALL_FINGERPRINT" "$app"
 fi
 
-if ! $update; then
+if $install_only; then
+    echo "Installation sans association."
+elif ! $update; then
     SOUNDLIVE_PLAYER=ubuntu /usr/bin/python3 "$here/ecran.py" associer "$1" "$2"
 else
     check_association "${@:2}"
@@ -296,6 +301,9 @@ install_os_maintenance "$here"
 
 install_autostart
 bash "$here/configurer-session-lecteur-linux.sh" "$SOUNDLIVE_DEVICE_KIND"
+if $install_only; then
+    install_pairing_launcher "$here" "$app" "$SOUNDLIVE_DEVICE_KIND"
+fi
 
 echo "Installation terminée. Pour tester depuis un terminal de la session Ubuntu :"
 echo "  $app/demarrer-ubuntu"

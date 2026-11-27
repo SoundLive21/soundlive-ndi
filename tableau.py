@@ -1182,7 +1182,7 @@ class Request(BaseHTTPRequestHandler):
             return True
         address = self.client_address[0]
         connections = self.server.remote_connections
-        page = path in ("/", "/connexion", "/terminal", "/addsshkey")
+        page = path in ("/", "/connexion", "/terminal", "/addsshkey", "/setup")
         if connections.is_blocked(address):
             self.refuse_blocked(page)
             return False
@@ -1272,6 +1272,8 @@ class Request(BaseHTTPRequestHandler):
             self.reply(200, PAGE.replace(b"__REMOTE_ONLY__", b"" if remote else b"hidden"))
         elif path == "/terminal":
             self.reply(200, TERMINAL_PAGE)
+        elif path == "/setup":
+            self.reply(200, (ROOT / "setup.html").read_bytes(), content_type="text/html; charset=utf-8")
         elif path == "/addsshkey":
             try:
                 with INSTALLATION_KEYS_LOCK:

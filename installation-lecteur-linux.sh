@@ -99,3 +99,21 @@ clean_reader_profiles() {
         fi
     done <<< "$profiles"
 }
+
+install_pairing_launcher() {
+    local kit=$1 app=$2 kind=$3 applications
+    install -m 644 "$kit/raccorder-lecteur.py" "$kit/installation_lecteur.py" "$kit/installer-ssh-linux.sh" "$app/"
+    printf '%s\n' "$kind" > "$app/type-recepteur"
+    applications="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+    mkdir -p "$applications"
+    local escaped
+    escaped=$(printf '%s' "$app" | sed 's/[\\`"$]/\\&/g; s/%/%%/g')
+    cat > "$applications/soundlive-ndi-raccordement.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=SoundLive-NDI - Raccorder le lecteur
+Exec=/usr/bin/python3 "$escaped/raccorder-lecteur.py"
+Terminal=true
+Categories=AudioVideo;
+DESKTOP
+}

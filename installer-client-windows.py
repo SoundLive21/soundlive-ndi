@@ -133,6 +133,7 @@ def main():
     cli.add_argument("serveur", nargs="?")
     cli.add_argument("code", nargs="?")
     cli.add_argument("--mettre-a-jour", action="store_true")
+    cli.add_argument("--installer-seul", action="store_true")
     cli.add_argument("--reseau-auto", action="store_true")
     cli.add_argument("--empreinte-regie")
     cli.add_argument("--acces-deja-prepare", action="store_true", help=argparse.SUPPRESS)
@@ -145,7 +146,9 @@ def main():
             cli.error("Utilise --reseau-auto seul.")
         install_network_priority()
         return
-    if not args.mettre_a_jour and not (args.serveur and args.code):
+    if args.installer_seul and (args.serveur or args.code or args.mettre_a_jour or args.empreinte_regie):
+        cli.error("Utilise --installer-seul sans paramètres d’association.")
+    if not args.installer_seul and not args.mettre_a_jour and not (args.serveur and args.code):
         cli.error("Indique l’adresse et le code affichés par le tableau.")
     if args.mettre_a_jour and args.code:
         cli.error("Une mise à jour conserve l’association.")
@@ -164,7 +167,7 @@ def main():
         cli.error("Aucune association. Utilise la commande donnée par la régie.")
     if not args.empreinte_regie and (ROOT / PUBLIC_KEY).is_file() and not ssh_keygen_path():
         cli.error("Active le client OpenSSH de Windows avant de configurer les mises à jour signées.")
-    if not args.mettre_a_jour and pairing.is_file():
+    if not args.installer_seul and not args.mettre_a_jour and pairing.is_file():
         cli.error("Ce lecteur est déjà associé. Utilise --mettre-a-jour.")
     installed = app / "lecteur-ndi-windows.exe"
     player = args.lecteur if args.lecteur.is_file() else installed
@@ -192,7 +195,8 @@ def main():
         install_regie_access(args.serveur, args.empreinte_regie, app)
     command = ["verifier"] if args.mettre_a_jour else ["associer"]
     command.extend(value for value in (args.serveur, args.code) if value)
-    subprocess.run([sys.executable, "-B", str(ROOT / "ecran.py"), *command], check=True)
+    if not args.installer_seul:
+        subprocess.run([sys.executable, "-B", str(ROOT / "ecran.py"), *command], check=True)
     for filename in (*FILES, "lancer-client.py"):
         shutil.copy2(ROOT / filename, app / filename)
     if not args.empreinte_regie and (ROOT / PUBLIC_KEY).is_file():
@@ -215,6 +219,15 @@ def main():
                         "SOUNDLIVE_ARGS":f'-B "{app / "lancer-client.py"}"', "SOUNDLIVE_WORK":str(app)},
                    check=True, timeout=10)
     (startup / "SoundLive-Ecran.lnk").unlink(missing_ok=True)
+    if args.installer_seul:
+        for filename in ("raccorder-lecteur.py", "installation_lecteur.py", "installer-ssh-windows.ps1"):
+            shutil.copy2(ROOT / filename, app / filename)
+        programs = startup.parent
+        subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                       env={**os.environ, "SOUNDLIVE_SHORTCUT":str(programs / "SoundLive-NDI - Raccorder le lecteur.lnk"),
+                            "SOUNDLIVE_PYTHON":sys.executable,
+                            "SOUNDLIVE_ARGS":f'-B "{app / "raccorder-lecteur.py"}"', "SOUNDLIVE_WORK":str(app)},
+                       check=True, timeout=10)
     # Désactiver la veille et le verrouillage de la session lecteur.
     # La configuration de l'autologin utilise l'outil Microsoft officiel :
     # aucun mot de passe n'est lu ni conservé par SoundLive-NDI.

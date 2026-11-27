@@ -9,7 +9,10 @@ if (( EUID == 0 )); then
     exit 1
 fi
 update=false
-if [[ ${1:-} == --mettre-a-jour && $# -le 2 ]]; then
+install_only=false
+if [[ ${1:-} == --installer-seul && $# -eq 1 ]]; then
+    install_only=true
+elif [[ ${1:-} == --mettre-a-jour && $# -le 2 ]]; then
     update=true
 elif [[ $# -ne 2 || ${1:-} == --* ]]; then
     echo "Usage : bash installer-pi.sh http://IP_DU_PC:8765 CODE"
@@ -70,7 +73,9 @@ fi
 if [[ -n ${SOUNDLIVE_INSTALL_FINGERPRINT:-} ]]; then
     bash "$here/installer-ssh-linux.sh" recuperer "$SOUNDLIVE_INSTALL_REGIE" "$SOUNDLIVE_INSTALL_FINGERPRINT" "$app"
 fi
-if ! $update; then
+if $install_only; then
+    echo "Installation sans association."
+elif ! $update; then
     /usr/bin/python3 "$here/ecran.py" associer "$1" "$2"
 elif [[ $# -eq 2 ]]; then
     /usr/bin/python3 "$here/ecran.py" verifier "$2"
@@ -102,4 +107,5 @@ Exec=/usr/bin/python3 "$app/lancer-client.py"
 Terminal=false
 DESKTOP
 bash "$here/configurer-session-lecteur-linux.sh" pi
+if $install_only; then install_pairing_launcher "$here" "$app" pi; fi
 echo "Configuration terminée. Redémarre avec sudo reboot pour charger le client."
