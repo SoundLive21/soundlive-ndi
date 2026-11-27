@@ -48,7 +48,7 @@ from terminal_ssh import GROUP_LIMIT, USER as SSH_USER, HostKeyCheck, Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.116"
+SOFTWARE_VERSION = "1.4.117"
 # Publication : arrêt indépendant des sorties vidéo.
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
@@ -1931,7 +1931,10 @@ class Request(BaseHTTPRequestHandler):
                             and all(type(output.get(k)) is int and 0 < output[k] <= 16384 for k in ("width", "height"))
                             and not any(o["id"] == output["id"] for o in outputs)):
                         outputs.append(dict(id=output["id"], width=output["width"], height=output["height"],
-                                            playing=output.get("playing") is True))
+                                            playing=output.get("playing") is True,
+                                            model=output["model"][:160] if isinstance(output.get("model"), str) else "",
+                                            **{k: output[k] for k in ("resolution_width", "resolution_height")
+                                               if type(output.get(k)) is int and 0 < output[k] <= 32768}))
             row["report"] = dict(outputs=outputs, seen=now, ip=self.client_address[0], state=state, boot=boot,
                                  os_capability=os_capability,
                                  os_health=os_update_report(data.get("os_health")),
