@@ -1458,6 +1458,176 @@ class OsMaintenance:
             self.change("failed", "Mise à jour système interrompue ou APT en échec. Consulte le journal du lecteur.")
 
 
+class SecondaryMedia:
+    """Playlist indépendante ; les fichiers proviennent du cache LocalMedia commun."""
+    def __init__(self, cache, log, gtk=None):
+        self.cache, self.log, self.gtk = cache, log, gtk
+        self.config = None
+        self.signature = None
+        self.index = 0
+        self.window = self.pipeline = self.process = None
+        self.gst = None
+        self.deadline = None
+        self.started = 0
+        self.retry = 0
+        self.ready = False
+        self.error = ""
+
+    def close(self):
+        self.ready = False
+        self.deadline = None
+        if self.pipeline is not None:
+            self.pipeline.set_state(self.gst.State.NULL)
+            self.pipeline = None
+        if self.window is not None:
+            self.window.destroy()
+            self.window = None
+        if self.process is not None:
+            if self.process.poll() is None:
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                    self.process.wait(timeout=2)
+            self.process = None
+
+    def advance(self):
+        self.close()
+        self.index = (self.index + 1) % len(self.config["items"])
+        self.retry = time.monotonic() + .15
+
+    def fail(self, error):
+        self.close()
+        message = str(error)[:240]
+        if message != self.error:
+            print("Média secondaire : " + message, file=self.log)
+        self.error = message
+        self.retry = time.monotonic() + 5
+
+    def update(self, config, settings, output, monitor=None):
+        config = media_config(config)
+        bounds = tuple(output[k] for k in ("x", "y", "width", "height"))
+        volume = 0 if settings.get("muted", True) else settings.get("volume", 0)
+        signature = (config, bounds, volume, monitor)
+        if signature != self.signature:
+            self.close()
+            self.signature = signature
+            self.config = config
+            self.index = 0
+            self.retry = 0
+            self.error = ""
+        if not config["enabled"] or not all(self.cache.downloaded(item) for item in config["items"]):
+            return
+        now = time.monotonic()
+        try:
+            if self.process is not None:
+                status = self.process.poll()
+                if status is not None:
+                    if status:
+                        raise RuntimeError("FFplay a quitté avec le code " + str(status))
+                    self.advance()
+                    return
+                if not self.ready:
+                    try:
+                        info = display_snapshot_windows(self.process.pid, False)
+                    except RuntimeError:
+                        if now - self.started >= 8:
+                            raise RuntimeError("Fenêtre du média secondaire introuvable.")
+                    else:
+                        if info["bounds"] != bounds:
+                            raise RuntimeError("Le média n’a pas été placé sur l’écran demandé.")
+                        self.ready = True
+                        self.error = ""
+            elif self.window is not None:
+                if self.pipeline is not None:
+                    message = self.pipeline.get_bus().pop_filtered(self.gst.MessageType.ERROR | self.gst.MessageType.EOS)
+                    if message and message.type == self.gst.MessageType.ERROR:
+                        error, _ = message.parse_error()
+                        raise RuntimeError(error.message)
+                    if message and message.type == self.gst.MessageType.EOS:
+                        self.advance()
+                        return
+                if not self.ready and self.window.get_mapped():
+                    display = self.window.get_display()
+                    actual = display.get_monitor_at_window(self.window.get_window())
+                    rect = actual.get_geometry() if actual else None
+                    if rect and (rect.x, rect.y, rect.width, rect.height) == bounds:
+                        if self.pipeline is None or self.pipeline.get_state(0)[1] == self.gst.State.PLAYING:
+                            self.ready = True
+                            self.error = ""
+                    elif now - self.started >= 5:
+                        raise RuntimeError("Le compositeur n’a pas placé le média sur l’écran demandé.")
+                if not self.ready and now - self.started >= 15:
+                    raise RuntimeError("Le média secondaire n’a pas démarré.")
+            if self.ready and self.deadline is None:
+                item = config["items"][self.index]
+                is_image = MEDIA_EXTENSIONS[self.cache.path(item).suffix] == "image2"
+                duration = config.get("image_seconds", 10) if is_image and len(config["items"]) > 1 else config.get("video_seconds", 0) if not is_image else 0
+                if duration:
+                    self.deadline = now + duration
+            if self.ready and self.deadline is not None and now >= self.deadline:
+                self.advance()
+                return
+            if self.window is None and self.process is None and now >= self.retry:
+                self.start(bounds, volume, monitor)
+        except (OSError, RuntimeError, ValueError, ImportError, subprocess.SubprocessError) as error:
+            self.fail(error)
+
+    def start(self, bounds, volume, monitor):
+        item = self.config["items"][self.index]
+        path = self.cache.path(item)
+        image = MEDIA_EXTENSIONS[path.suffix] == "image2"
+        x, y, width, height = bounds
+        self.started = time.monotonic()
+        if WINDOWS:
+            if not self.cache.ffplay:
+                raise RuntimeError(self.cache.missing_ffplay())
+            command = [self.cache.ffplay, "-hide_banner", "-nostats", "-fs",
+                       "-left", str(x), "-top", str(y), "-x", str(width), "-y", str(height),
+                       "-showmode", "video", "-volume", str(volume), "-protocol_whitelist", "file",
+                       "-f", MEDIA_EXTENSIONS[path.suffix]]
+            if image:
+                command += ["-pattern_type", "none"]
+            elif len(self.config["items"]) == 1:
+                command += ["-loop", "0"]
+            else:
+                command += ["-autoexit"]
+            self.process = subprocess.Popen(command + ["-i", str(path)], stdout=self.log,
+                stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW,
+                env={**os.environ, "SDL_VIDEO_WINDOW_POS": f"{x},{y}"})
+            return
+        if monitor is None or self.gtk is None:
+            raise RuntimeError("Sortie graphique secondaire introuvable.")
+        Gtk, GdkPixbuf = self.gtk
+        self.window = Gtk.Window(decorated=False, accept_focus=False, focus_on_map=False)
+        if image:
+            picture = GdkPixbuf.Pixbuf.new_from_file(str(path))
+            self.window.add(Gtk.Image.new_from_pixbuf(fit_local_image(picture, width, height)))
+        else:
+            try:
+                import gi
+                gi.require_version("Gst", "1.0")
+                from gi.repository import Gst
+            except (ImportError, ValueError) as error:
+                raise RuntimeError("GStreamer requis : installe gir1.2-gstreamer-1.0 et gstreamer1.0-gtk3.") from error
+            Gst.init(None)
+            self.gst = Gst
+            sink = Gst.ElementFactory.make("gtksink")
+            self.pipeline = Gst.ElementFactory.make("playbin")
+            if sink is None or self.pipeline is None:
+                self.pipeline = None
+                raise RuntimeError("GStreamer : installe gstreamer1.0-gtk3 et les plugins de lecture vidéo.")
+            self.window.add(sink.get_property("widget"))
+            self.pipeline.set_property("video-sink", sink)
+            self.pipeline.set_property("uri", path.resolve().as_uri())
+            self.pipeline.set_property("volume", volume / 100)
+        self.window.fullscreen_on_monitor(self.window.get_screen(), monitor)
+        self.window.show_all()
+        if self.pipeline is not None and self.pipeline.set_state(self.gst.State.PLAYING) == self.gst.StateChangeReturn.FAILURE:
+            raise RuntimeError("Impossible de démarrer la vidéo locale.")
+
+
 class DashboardClient:
     def __init__(self, identity, orientation):
         self.identity = identity
@@ -1707,6 +1877,8 @@ def desktop():
             self.extra_players = {}
             self.extra_retry = {}
             self.extra_waiting = {}
+            self.extra_media_settings = {}
+            self.extra_media_players = {}
             self.extra_orientation = {}
             self.extra_orientation_jobs = {}
             self.output_request = None
@@ -2174,7 +2346,7 @@ def desktop():
             return True
 
         def probe(self):
-            if self.media.enabled:
+            if self.media.enabled and len(self.outputs) < 2:
                 GLib.timeout_add_seconds(5, self.probe)
                 return GLib.SOURCE_REMOVE
             cmd = ["/usr/bin/timeout", "-k", "2s", "12s", PLAYER,
@@ -2323,11 +2495,12 @@ def desktop():
                 window, labels, qr = self.extra_waiting[index]
                 selected = self.extra_settings.get(index, {})
                 entry = self.extra_players.get(index)
-                if entry and entry[0].poll() is None and entry[2].exists():
+                local = self.extra_media_players.get(index)
+                if (local and local.ready) or (entry and entry[0].poll() is None and entry[2].exists()):
                     window.hide()
                     continue
                 texts = (self.screen_name.get_text(), "Écran " + str(int(index) + 1), self.group_label.get_text() if self.group_label.get_visible() else "",
-                         "En attente du flux vidéo" if selected.get("enabled") else "Diffusion arrêtée",
+                         ("En attente d’un média local" if index in self.extra_media_settings else "En attente du flux vidéo") if selected.get("enabled") else "Diffusion arrêtée",
                          self.regie_label.get_text(), f"Version du lecteur {SOFTWARE_VERSION}", COPYRIGHT, self.update_label.get_text())
                 for widget, value in zip(labels, texts):
                     widget.set_text(value)
@@ -2395,11 +2568,11 @@ def desktop():
                 self.output_request = self.work.submit(self.discover_outputs)
                 self.next_outputs = now + 10
             wanted = {}
-            if (not self.maintenance.active and not self.media.enabled and len(self.outputs) > 1):
+            if not self.maintenance.active and len(self.outputs) > 1:
                 for output in self.outputs:
                     index = output["id"]
                     selected = self.extra_settings.get(index, {})
-                    if index == "0" or selected.get("enabled") is not True:
+                    if index == "0" or selected.get("enabled") is not True or index in self.extra_media_settings:
                         continue
                     source = self.settings["source"] if selected.get("mode") == "same" else selected.get("source")
                     running = self.extra_players.get(index)
@@ -2434,6 +2607,23 @@ def desktop():
                 except OSError as error:
                     self.error = str(error)[:240]
                     self.extra_retry[index] = now + 5
+
+        def sync_local_outputs(self):
+            wanted = {}
+            if not self.maintenance.active:
+                for output in self.outputs:
+                    index = output["id"]
+                    config = self.extra_media_settings.get(index)
+                    settings = self.extra_settings.get(index, {})
+                    if index != "0" and config and settings.get("enabled") is True:
+                        wanted[index] = (config, settings, output)
+            for index in list(self.extra_media_players):
+                if index not in wanted:
+                    self.extra_media_players.pop(index).close()
+            for index, (config, settings, output) in wanted.items():
+                if index not in self.extra_media_players:
+                    self.extra_media_players[index] = SecondaryMedia(self.media, self.log, (Gtk, GdkPixbuf))
+                self.extra_media_players[index].update(config, settings, output, self.output_monitor(output))
 
         def start(self):
             if self.maintenance.active:
@@ -2552,6 +2742,7 @@ def desktop():
                     and GLib.get_monotonic_time() >= self.retry_at):
                 self.start()
             self.sync_outputs()
+            self.sync_local_outputs()
             if self.dashboard and not self.maintenance.active:
                 self.sync_extra_orientation()
             self.sync_waiting_outputs()
@@ -2626,6 +2817,7 @@ def desktop():
                 self.waiting()
             new = options(result["options"])
             self.extra_settings = result.get("extra_outputs") or {}
+            self.extra_media_settings = result.get("extra_media") or {}
             self.media.receive(result.get("media"), result.get("media_catalog"))
             message = waiting_update_message(result.get("reader_update"))
             self.update_label.set_text(message)
@@ -2687,6 +2879,8 @@ def desktop():
                     window.destroy()
                 for index in list(screen.extra_players):
                     screen.stop_extra(index)
+                for local in screen.extra_media_players.values():
+                    local.close()
                 if screen.player:
                     try:
                         screen.player.wait(timeout=3)
@@ -2772,6 +2966,8 @@ def run_windows_screen(tk, log):
     extra_settings = {}
     extra_players = {}
     extra_waiting = {}
+    extra_media_settings = {}
+    extra_media_players = {}
     next_displays = 0
 
     badge = tk.Toplevel(root, background="#17141a")
@@ -2946,12 +3142,13 @@ def run_windows_screen(tk, log):
                 extra_waiting[index] = (window, labels, image)
             window, labels, image = extra_waiting[index]
             entry = extra_players.get(index)
-            if entry and entry[0].poll() is None and entry[2].exists():
+            local = extra_media_players.get(index)
+            if (local and local.ready) or (entry and entry[0].poll() is None and entry[2].exists()):
                 window.withdraw()
                 continue
             selected = extra_settings.get(index, {})
             values = (APP_NAME, name.cget("text"), "▣  Écran " + str(int(index) + 1),
-                      "En attente du flux vidéo" if selected.get("enabled") else "Diffusion arrêtée",
+                      ("En attente d’un média local" if index in extra_media_settings else "En attente du flux vidéo") if selected.get("enabled") else "Diffusion arrêtée",
                       group_label.cget("text") if group_label.winfo_manager() else "",
                       regie_label.cget("text"), f"Version du lecteur {SOFTWARE_VERSION}", COPYRIGHT, notice.cget("text"))
             for widget, value in zip(labels, values):
@@ -2975,13 +3172,13 @@ def run_windows_screen(tk, log):
 
     def sync_extra():
         wanted = {}
-        if not media.enabled and len(displays) > 1:
+        if len(displays) > 1:
             for output in displays:
                 index = output["id"]
                 if index == "0":
                     continue
                 selected = extra_settings.get(index, {})
-                if selected.get("enabled") is not True:
+                if selected.get("enabled") is not True or index in extra_media_settings:
                     continue
                 source = settings["source"] if selected.get("mode") == "same" else selected.get("source")
                 running = extra_players.get(index)
@@ -3002,10 +3199,26 @@ def run_windows_screen(tk, log):
                      "SOUNDLIVE_RENDER_PREVIEW": str(STATE / ("rendu-sortie-" + index))})
             extra_players[index] = (process, config, path)
 
+    def sync_local_outputs():
+        wanted = {}
+        for output in displays:
+            index = output["id"]
+            config = extra_media_settings.get(index)
+            selected = extra_settings.get(index, {})
+            if index != "0" and config and selected.get("enabled") is True:
+                wanted[index] = (config, selected, output)
+        for index in list(extra_media_players):
+            if index not in wanted:
+                extra_media_players.pop(index).close()
+        for index, (config, selected, output) in wanted.items():
+            if index not in extra_media_players:
+                extra_media_players[index] = SecondaryMedia(media, log)
+            extra_media_players[index].update(config, selected, output)
+
     def update():
         nonlocal request, discovery, next_poll, next_probe, player, settings, sources
         nonlocal failure, restart, ready, power_id, retry_at
-        nonlocal playing_local, local_name, identification, displays, extra_settings, next_displays
+        nonlocal playing_local, local_name, identification, displays, extra_settings, next_displays, extra_media_settings
         now = time.monotonic()
         try:
             if now >= next_displays:
@@ -3023,6 +3236,7 @@ def run_windows_screen(tk, log):
                     answer = finished.result()
                     new = options(answer["options"])
                     extra_settings = answer.get("extra_outputs") or {}
+                    extra_media_settings = answer.get("extra_media") or {}
                     media.receive(answer.get("media"), answer.get("media_catalog"))
                     if new != settings:
                         write_json(LAST_SETTINGS, new)
@@ -3097,11 +3311,12 @@ def run_windows_screen(tk, log):
                                               stdout=log, stderr=subprocess.STDOUT, creationflags=flags,
                                               env={**os.environ, "SOUNDLIVE_DISPLAY_INDEX": "0"} if displays else None)
             sync_extra()
+            sync_local_outputs()
             sync_waiting_outputs()
             if not ready:
                 show_waiting()
             refresh_identification(now)
-            if not media.enabled and not discovery and now >= next_probe:
+            if (not media.enabled or len(displays) > 1) and not discovery and now >= next_probe:
                 discovery = work.submit(discover)
                 next_probe = now + 5
             if not request and now >= next_poll:
@@ -3134,6 +3349,8 @@ def run_windows_screen(tk, log):
             stop_player()
             for index in list(extra_players):
                 stop_extra(index)
+            for local in extra_media_players.values():
+                local.close()
             for window, _, _ in extra_waiting.values():
                 window.destroy()
         finally:
