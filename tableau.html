@@ -177,6 +177,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .update-status[data-state="failed"],.update-status[data-state="expired"]{color:#ff8fa0}
 .update-status[data-state="available"]{color:#ffc078}
 .os-health{margin:10px 0 8px}
+.reader-error{margin:0 0 10px;color:#ff8fa0;overflow-wrap:anywhere}
 .os-health[data-state="available"]{color:#ffc078}
 .os-health[data-state="current"]{color:var(--green)}
 .current-stream{display:grid;gap:4px;margin:0 0 14px;overflow-wrap:anywhere}
@@ -777,10 +778,12 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
     </section>
     <p class="small current-stream" hidden><span></span><strong></strong></p>
     <div class="screen-preview" hidden></div>
-    <p class="small update-status" hidden></p>
-    <p class="small update-status os-update-status" hidden></p>
     <p class="small os-health" hidden></p>
+    <p class="small update-status reader-update-status" role="status" hidden></p>
+    <p class="small update-status os-update-status" role="status" hidden></p>
+    <p class="small error reader-error" role="status" hidden></p>
     <button class="os-upgrade" type="button" hidden>Mettre à jour le système</button>
+    <button class="client-upgrade full-action" type="button" hidden>Mettre à jour le lecteur</button>
     <details class="screen-controls">
       <summary>Commandes et réglages</summary>
       <section class="pending"></section>
@@ -806,8 +809,6 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
       </form>
       <button class="return-ndi primary full-action" type="button" hidden>Revenir à la diffusion NDI</button>
       <button class="manage-media full-action" type="button" hidden aria-haspopup="dialog">Images et vidéos</button>
-      <p class="small error"></p>
-      <button class="client-upgrade full-action" type="button" hidden>Mettre à jour le lecteur</button>
       <div class="action-row"><button class="info" type="button" hidden>Informations</button><button class="remove" type="button">Retirer</button></div>
       <div class="action-row"><button class="reboot" type="button">Redémarrer</button><button class="poweroff" type="button">Éteindre</button></div>
     </details>
@@ -3080,6 +3081,7 @@ function render(row) {
   select(stream, "strong").textContent = (playing && (row.report.active_media || row.report.active_source)) ||
     (row.media?.enabled ? "" : row.options?.source || "");
   ui.error.textContent = row.report.error || "";
+  ui.error.hidden = !ui.error.textContent;
   const osStatus = select(el, ".os-update-status");
   const maintenance = row.os_update;
   osStatus.textContent = maintenance ?
@@ -3100,7 +3102,7 @@ function render(row) {
   }
   osUpgrade.hidden = !osAvailable || (!windowsReader && !hasMaintenance);
   osUpgrade.textContent = windowsReader ? "Accéder au lecteur pour Windows Update" : "Mettre à jour le système";
-  const updateStatus = select(el, ".update-status");
+  const updateStatus = select(el, ".reader-update-status");
   const update = row.client_update?.state === "updated" ? null : row.client_update;
   const availability = row.update_availability;
   const canInstall = availability === "available" && !["queued","installing"].includes(update?.state);
