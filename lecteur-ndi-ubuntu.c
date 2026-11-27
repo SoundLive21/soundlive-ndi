@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { RATE = 48000, CHANNELS = 2, AUDIO_BLOCK = 480 };
+enum { RATE = 48000, CHANNELS = 2, AUDIO_BLOCK = 480, AUDIO_QUEUE_BLOCKS = 10 };
 static volatile sig_atomic_t stopping;
 
 static void stop(int sig)
@@ -50,7 +50,7 @@ static void fill_audio(SDL_AudioDeviceID device, NDIlib_framesync_instance_t syn
         return;
 
     const Uint32 bytes = AUDIO_BLOCK * CHANNELS * sizeof(float);
-    for (Uint32 queued = SDL_GetQueuedAudioSize(device); queued < 3 * bytes; queued += bytes) {
+    for (Uint32 queued = SDL_GetQueuedAudioSize(device); queued < AUDIO_QUEUE_BLOCKS * bytes; queued += bytes) {
         NDIlib_audio_frame_v2_t frame = {0};
         float samples[AUDIO_BLOCK * CHANNELS] = {0};
         NDIlib_framesync_capture_audio(sync, &frame, RATE, CHANNELS, AUDIO_BLOCK);
@@ -67,6 +67,51 @@ static void fill_audio(SDL_AudioDeviceID device, NDIlib_framesync_instance_t syn
         if (SDL_QueueAudio(device, samples, bytes) < 0)
             break;
     }
+}
+
+typedef struct {
+    SDL_AudioDeviceID device;
+    NDIlib_framesync_instance_t sync;
+    float gain;
+    SDL_atomic_t active;
+    SDL_atomic_t quit;
+} AudioWorker;
+
+static int SDLCALL audio_worker(void *opaque)
+{
+    AudioWorker *worker = opaque;
+    bool started = false;
+    unsigned underruns = 0;
+    Uint64 next_report = SDL_GetTicks64() + 5000;
+    const Uint32 bytes = AUDIO_BLOCK * CHANNELS * sizeof(float);
+
+    while (!SDL_AtomicGet(&worker->quit)) {
+        if (!SDL_AtomicGet(&worker->active)) {
+            SDL_Delay(5);
+            continue;
+        }
+        if (started && SDL_GetQueuedAudioSize(worker->device) == 0) {
+            ++underruns;
+            SDL_PauseAudioDevice(worker->device, 1);
+            started = false;
+        }
+        fill_audio(worker->device, worker->sync, worker->gain);
+        if (!started && SDL_GetQueuedAudioSize(worker->device) >= AUDIO_QUEUE_BLOCKS * bytes) {
+            SDL_PauseAudioDevice(worker->device, 0);
+            started = true;
+        }
+        const Uint64 now = SDL_GetTicks64();
+        if (now >= next_report) {
+            if (underruns) {
+                fprintf(stderr, "Audio NDI : %u sous-alimentations du tampon sur les 5 dernières secondes.\n", underruns);
+                fflush(stderr);
+            }
+            underruns = 0;
+            next_report = now + 5000;
+        }
+        SDL_Delay(3);
+    }
+    return 0;
 }
 
 static SDL_Rect fitted_frame(int width, int height, const NDIlib_video_frame_v2_t *frame)
@@ -280,7 +325,8 @@ static int play(const char *source, bool low, float volume, const char *ready_fi
     SDL_Texture *texture = NULL;
     SDL_AudioDeviceID audio = 0;
     bool visible = false;
-    bool paused = true;
+    AudioWorker audio_state = {0};
+    SDL_Thread *audio_thread = NULL;
     int64_t received = 0;
     Uint64 last_frame = SDL_GetTicks64();
     Uint64 next_draw = 0;
@@ -325,11 +371,24 @@ static int play(const char *source, bool low, float volume, const char *ready_fi
 
     if (SDL_InitSubSystem(SDL_INIT_AUDIO) == 0) {
         const SDL_AudioSpec wanted = {.freq = RATE, .format = AUDIO_F32SYS,
-                                      .channels = CHANNELS, .samples = 512};
+                                      .channels = CHANNELS, .samples = 1024};
         audio = SDL_OpenAudioDevice(NULL, 0, &wanted, NULL, 0);
     }
-    if (!audio)
+    if (audio) {
+        audio_state.device = audio;
+        audio_state.sync = sync;
+        audio_state.gain = volume;
+        audio_thread = SDL_CreateThread(audio_worker, "ndi-audio", &audio_state);
+        if (!audio_thread) {
+            fprintf(stderr, "Thread audio indisponible : %s\n", SDL_GetError());
+            SDL_CloseAudioDevice(audio);
+            audio = 0;
+        } else {
+            fprintf(stderr, "Audio NDI : thread dédié, tampon cible 100 ms.\n");
+        }
+    } else {
         fprintf(stderr, "Sortie audio indisponible : %s\n", SDL_GetError());
+    }
 
     while (!stopping) {
         SDL_Event event;
@@ -354,13 +413,8 @@ static int play(const char *source, bool low, float volume, const char *ready_fi
             goto finished;
         }
 
-        if (visible) {
-            fill_audio(audio, sync, volume);
-            if (audio && paused) {
-                SDL_PauseAudioDevice(audio, 0);
-                paused = false;
-            }
-        }
+        if (visible && audio_thread)
+            SDL_AtomicSet(&audio_state.active, 1);
 
         if (now >= next_draw) {
             next_draw += 1000 / refresh_rate;
@@ -417,6 +471,10 @@ sdl_error:
     fprintf(stderr, "Affichage : %s\n", SDL_GetError());
 
 cleanup:
+    if (audio_thread) {
+        SDL_AtomicSet(&audio_state.quit, 1);
+        SDL_WaitThread(audio_thread, NULL);
+    }
     if (audio)
         SDL_CloseAudioDevice(audio);
     SDL_DestroyTexture(texture);
