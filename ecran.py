@@ -97,6 +97,29 @@ REGIE_REPAIR = ("Réassociation à la régie nécessaire", "#ffacb8")
 MUTTER_DISPLAY = "org.gnome.Mutter.DisplayConfig"
 MUTTER_DISPLAY_PATH = "/org/gnome/Mutter/DisplayConfig"
 
+def prefer_hdmi_audio():
+    """Select HDMI in the desktop session, without changing hardware volume."""
+    if WINDOWS or not shutil.which("pactl"):
+        return
+    try:
+        def pactl(*args):
+            return subprocess.run(["pactl", *args], capture_output=True, text=True,
+                                  check=True, timeout=3).stdout.strip()
+        sinks = [line.split() for line in pactl("list", "short", "sinks").splitlines()]
+        hdmi = [row[1] for row in sinks if len(row) >= 2 and "hdmi" in row[1].lower()]
+        if not hdmi:
+            return
+        current = pactl("get-default-sink")
+        target = current if current in hdmi else hdmi[0]
+        if current != target:
+            pactl("set-default-sink", target)
+        os.environ["PULSE_SINK"] = target
+        print("SoundLive audio : sortie HDMI " + target, flush=True)
+    except (OSError, subprocess.SubprocessError):
+        # Audio discovery must never prevent video playback.
+        pass
+
+
 def serial():
     if WINDOWS:
         import winreg
@@ -3660,6 +3683,7 @@ if __name__ == "__main__":
         elif len(sys.argv) in (2, 3) and sys.argv[1] == "verifier":
             check_connection(sys.argv[2] if len(sys.argv) == 3 else None)
         elif len(sys.argv) == 1:
+            prefer_hdmi_audio()
             sys.exit(windows_desktop() if WINDOWS else desktop())
         else:
             raise ValueError("Usage : ecran.py associer http://ADRESSE_DU_PC:8765 CODE"
