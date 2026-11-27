@@ -814,7 +814,6 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
       </fieldset>
       </form>
 
-      <button class="manage-media full-action" type="button" hidden aria-haspopup="dialog">Images et vidéos</button>
       <div class="action-row"><button class="info" type="button" hidden>Informations</button><button class="remove" type="button">Retirer</button></div>
       <div class="action-row"><button class="reboot" type="button">Redémarrer</button><button class="poweroff" type="button">Éteindre</button></div>
     </details>
@@ -2823,8 +2822,6 @@ function cardFor(id) {
     (source, destination) => moveScreenOrder("screens", screenKeys(el.parentElement), source, destination,
       card.data.group || ""), "Déplacer l’écran");
   heading.insertBefore(handle, ui.badge);
-  const mediaButton = select(el, ".manage-media");
-  mediaButton.onclick = () => openMediaManager([id]);
   ui["return-ndi"].onclick = action(() => confirmOutputNdi(card.data,"0"));
   ui.identify.onclick = action(() => changeIdentification(!card.data.identify, id));
   card.preview = createPreview(select(el, ".screen-preview"), "Capture de l’écran", id, true);
@@ -3057,7 +3054,7 @@ function renderExtraOutputs(card, row) {
       const body=document.createElement("div");
       select(el,".config").replaceWith(body);
       select(el,".pending").remove();
-      for (const selector of [".return-ndi",".manage-media",".info",".remove",".reboot",".poweroff",".os-upgrade",".client-upgrade"]) select(el,selector)?.remove();
+      for (const selector of [".return-ndi",".info",".remove",".reboot",".poweroff",".os-upgrade",".client-upgrade"]) select(el,selector)?.remove();
       select(el,".identify").onclick=action(()=>changeIdentification(!card.data.identify,row.id));
       entry={el,title,badge,preview,controls,body,readerId:row.id};
       try { controls.open=localStorage.getItem("soundlive-controls-"+item.id)==="open"; } catch {}
@@ -3177,13 +3174,12 @@ function renderExtraOutputs(card, row) {
     ndi.disabled = !mediaFolder;
     ndi.onclick = action(() => confirmOutputNdi(card.data,output.id));
     line.append(ndi);
-    const media = document.createElement("button"); media.type="button";media.className="full-action";media.textContent="Images et vidéos";media.onclick=()=>openMediaManager([row.id],output.id,[row.id+":"+output.id]);
     const identify=document.createElement("button");identify.type="button";identify.textContent=row.identify?"Masquer l’identification du lecteur":"Identifier le lecteur";identify.onclick=action(()=>changeIdentification(!card.data.identify,row.id));
     const info=document.createElement("button");info.type="button";info.textContent="Informations du lecteur";info.onclick=()=>card.ui.info.click();
     const reboot=document.createElement("button");reboot.type="button";reboot.textContent="Redémarrer le lecteur";reboot.disabled=!row.online||row.os_busy||row.report.can_reboot===false;reboot.onclick=()=>card.ui.reboot.click();
     const poweroff=document.createElement("button");poweroff.type="button";poweroff.textContent="Éteindre le lecteur";poweroff.disabled=!row.online||row.os_busy||!row.report.can_poweroff;poweroff.onclick=()=>card.ui.poweroff.click();
     const system=document.createElement("div");system.className="action-row";system.append(reboot,poweroff);
-    if(inline){line.append(media);box.append(line);}else{entry.body.replaceChildren(line,media,info,system);}
+    if(inline){box.append(line);}else{entry.body.replaceChildren(line,info,system);}
     select(entry.el,".identify").setAttribute("aria-pressed",String(row.identify));
     select(entry.el,".identify").hidden=!row.paired;
     select(entry.el,".device-kind").textContent=deviceLabels[row.kind]||"";
@@ -3218,7 +3214,6 @@ function render(row) {
     !displayed ? "Mets à jour le lecteur pour afficher l’identification." : displayed.error ||
     (displayed.visible ? "Identification affichée." : "Identification en cours…");
   identification.hidden = !identification.textContent;
-  select(el, ".manage-media").hidden = !row.paired;
   const own = physicalRows([row]);
   select(el,"h2").textContent = own.every(o=>(o.group||"")===(row.group||"")) ? row.name : own[0].name;
   ui.badge.textContent = row.online ? row.report.state : row.paired ? "Hors ligne" : "À associer";
