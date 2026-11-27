@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory=$true)][ValidatePattern('^(?![0-9]+$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,13}[A-Za-z0-9])?$')][string]$Hote,
     [Parameter(Mandatory=$true)][string]$Ip,
     [string]$Wifi,
-    [Parameter(Mandatory=$true)][uri]$Regie,
+    [uri]$Regie,
+    [switch]$InstallerSeul,
     [string]$Code,
     [string]$Ethernet,
     [string]$InterfaceWifi,
@@ -78,8 +79,8 @@ foreach ($server in $dnsServers) { $null = ConvertTo-IPv4Number $server }
 foreach ($file in @($CleWifiFichier, $CleSsh, $ProfilWifiXml).Where({ $_ })) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Fichier introuvable : $file" }
 }
-if (-not $Regie.IsAbsoluteUri -or $Regie.Scheme -notin @('http', 'https') -or
-    $Regie.AbsolutePath -ne '/' -or $Regie.UserInfo -or $Regie.Query -or $Regie.Fragment -or $Regie.Host -eq $address) {
+if ((-not $InstallerSeul -or $Regie) -and (-not $Regie.IsAbsoluteUri -or $Regie.Scheme -notin @('http', 'https') -or
+    $Regie.AbsolutePath -ne '/' -or $Regie.UserInfo -or $Regie.Query -or $Regie.Fragment -or $Regie.Host -eq $address)) {
     throw 'Indique une URL de regie distincte, par exemple http://10.10.2.99:8765.'
 }
 
@@ -120,7 +121,7 @@ if (-not $paired -and (Test-Path -LiteralPath (Join-Path $legacy 'config\associa
     $app = Join-Path $legacy 'client'
 }
 $prepareDesktop = (-not $paired) -or $Vnc -or $VncMsi -or $EmpreinteRegie
-if (-not $paired -and -not $Code) { throw 'Renseigne le code fourni par la regie avec -Code.' }
+if (-not $InstallerSeul -and -not $paired -and -not $Code) { throw 'Renseigne le code fourni par la regie avec -Code.' }
 $taskName = 'SoundLive-NDI Network'
 $oldTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 $oldTaskRunning = $oldTask -and $oldTask.State -eq 'Running'
@@ -459,7 +460,8 @@ try {
     $arguments = @('--lecteur', $player)
     if ($EmpreinteRegie) { $arguments += @('--empreinte-regie', $EmpreinteRegie) }
     if ($prepareDesktop) { $arguments += '--acces-deja-prepare' }
-    if ($paired) { $arguments += @('--mettre-a-jour', $Regie.AbsoluteUri) }
+    if ($InstallerSeul) { $arguments += '--installer-seul' }
+    elseif ($paired) { $arguments += @('--mettre-a-jour', $Regie.AbsoluteUri) }
     else { $arguments += @($Regie.AbsoluteUri, $Code) }
     & $python (Join-Path $PSScriptRoot 'installer-client-windows.py') @arguments
     if ($LASTEXITCODE -ne 0) { throw 'Installation ou association du lecteur Windows impossible.' }

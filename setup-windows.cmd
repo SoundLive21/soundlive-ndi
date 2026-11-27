@@ -15,7 +15,7 @@ if errorlevel 2 goto player
 call "%~dp0installer-regie-windows.cmd"
 exit /b %errorlevel%
 :player
-call "%~dp0installer-client.cmd" --installer-seul
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0setup-reseau-windows.ps1"
 if errorlevel 1 (
   echo Installation interrompue. Verifie les prerequis et le message ci-dessus.
   pause

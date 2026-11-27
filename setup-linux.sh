@@ -8,7 +8,34 @@ printf '\nSoundLive NDI - Installation (%s)\n1. Régie\n2. Lecteur (raccordement
 read -rp 'Choix : ' choice
 case "$choice" in
   1) [[ $kind != pi ]] || { echo "Régie sur Raspberry Pi non validée : utilise Ubuntu Desktop ou Windows."; exit 1; }; exec bash "$base/installer-regie-linux.sh";;
-  2) bash "$base/installer-client.sh" --plateforme "$kind" --installer-seul
+  2) printf 'Réseau du lecteur\n1. Conserver le réseau actuel\n2. DHCP avec priorité Ethernet (Wi-Fi déjà configuré dans le système)\n3. IPv4 fixe avec Ethernet et Wi-Fi facultatif\n'
+     read -rp 'Choix : ' network
+     case "$network" in
+       1|2) bash "$base/installer-client.sh" --plateforme "$kind" --installer-seul
+            if [[ $network == 2 ]]; then bash "$base/installer-client.sh" --reseau-auto; fi;;
+       3) nmcli device status
+          read -rp "Nom du lecteur [$(hostname)] : " host
+          read -rp 'IPv4/préfixe (ex. 192.168.56.10/24) : ' ip
+          read -rp 'Interface Ethernet (vide = automatique) : ' eth
+          read -rp 'Passerelle (facultative) : ' gateway
+          read -rp 'DNS (facultatif) : ' dns
+          read -rp 'SSID Wi-Fi (vide = Ethernet seul) : ' ssid
+          args=(--installer-seul --hote "${host:-$(hostname)}" --ip "$ip")
+          [[ -z $eth ]] || args+=(--ethernet "$eth")
+          [[ -z $gateway ]] || args+=(--passerelle "$gateway")
+          [[ -z $dns ]] || args+=(--dns "$dns")
+          if [[ -n $ssid ]]; then
+              read -rp 'Interface Wi-Fi (vide = automatique) : ' wlan
+              read -rp 'Réseau ouvert ? [o/N] : ' opened
+              args+=(--wifi "$ssid")
+              [[ -z $wlan ]] || args+=(--interface-wifi "$wlan")
+              if [[ $opened == o ]]; then args+=(--wifi-ouvert); else args+=(--saisir-cle-wifi); fi
+          fi
+          read -rp 'Appliquer cette configuration sur ce poste dédié ? [o/N] : ' confirm
+          [[ $confirm == o ]] || exit 0
+          bash "$base/preparer-lecteur-linux.sh" "$kind" "${args[@]}";;
+       *) exit 2;;
+     esac
      echo "Installation terminée. Ouvre SoundLive-NDI - Raccorder le lecteur depuis le menu des applications."
      ;;
   3|4)

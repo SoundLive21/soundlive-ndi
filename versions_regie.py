@@ -40,7 +40,7 @@ FILES = frozenset((
     "ecran.py", "diagnostic.py", "mise_a_jour.py", "lancer-client.py",
     "installer-client.sh", "installer-client.cmd", "installer-client-windows.py",
     "addsshkey.html", "page_ssh.py", "deploiement_lecteur.py",
-    "setup.html", "setup-linux.sh", "setup-windows.cmd", "raccorder-lecteur.py",
+    "setup.html", "setup-linux.sh", "setup-windows.cmd", "raccorder-lecteur.py", "setup-reseau-windows.ps1",
     "configurer-session-lecteur-linux.sh", "configurer-session-lecteur-windows.ps1",
     "preparer-lecteur-linux.sh", "preparer-lecteur-windows.ps1", "installation_lecteur.py",
     "installer-ssh-linux.sh",
@@ -115,6 +115,8 @@ def required_files(version):
         files.add("desinstaller_soundlive.py")
     if version >= (1, 4, 130):
         files.update(("setup.html", "setup-linux.sh", "setup-windows.cmd", "raccorder-lecteur.py"))
+    if version >= (1, 4, 131):
+        files.add("setup-reseau-windows.ps1")
     return files
 
 

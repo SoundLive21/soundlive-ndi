@@ -97,10 +97,11 @@ fi
 kind=$1
 shift
 hote= ip= ssid= regie= code= eth= wlan= gateway= dns= dns2= ssh_public= wifi_file=
-verify=false dhcp=true wifi_open=false wifi_prompt=false attendre=false desktop_remote=false
+verify=false dhcp=true wifi_open=false wifi_prompt=false attendre=false desktop_remote=false install_only=false
 while (( $# )); do
     case "$1" in
         --aide|--help) usage; exit 0 ;;
+        --installer-seul) install_only=true; shift; continue ;;
         --verifier) verify=true; shift; continue ;;
         --sans-dhcp-install) dhcp=false; shift; continue ;;
         --attendre-reseau-ecrans) attendre=true; shift; continue ;;
@@ -131,7 +132,7 @@ if (( EUID == 0 )); then
     echo "Lance l'installation depuis le compte du bureau, sans sudo." >&2
     exit 1
 fi
-if [[ $ssid == *$'\n'* || -z $regie || -z $hote || -z $ip ]]; then
+if [[ $ssid == *$'\n'* || ( -z $regie && $install_only != true ) || -z $hote || -z $ip ]]; then
     usage >&2
     exit 2
 fi
@@ -164,7 +165,7 @@ try:
         if item:
             ipaddress.IPv4Address(item)
     uri = urlsplit(server)
-    if (uri.scheme not in ("http", "https") or not uri.hostname or uri.username is not None or
+    if server and (uri.scheme not in ("http", "https") or not uri.hostname or uri.username is not None or
             uri.path not in ("", "/") or uri.query or uri.fragment or uri.port == 0):
         raise ValueError("Indique l'URL de la régie, par exemple http://10.10.2.99:8765.")
     if str(address.ip) == uri.hostname:
@@ -228,7 +229,7 @@ if $verify; then
     exit 0
 fi
 association="${XDG_CONFIG_HOME:-$HOME/.config}/soundlive-ndi/association.json"
-if [[ -z $code && ! -r $association ]]; then
+if [[ -z $code && ! -r $association && $install_only != true ]]; then
     echo "Indique le code d'association donné par la régie avec --code." >&2
     exit 2
 fi
@@ -349,7 +350,9 @@ export SOUNDLIVE_INSTALL_REGIE="$regie"
 export SOUNDLIVE_NETWORK_PREPARATION="$work/preparation"
 export SOUNDLIVE_ATTENDRE_RESEAU="$attendre"
 printf '%s\n' "$hote" "$ip" "$eth" "$wlan" "$wifi_uuid" "$gateway" "$dns" "$ssid" "$wifi_keyfile" > "$SOUNDLIVE_NETWORK_PREPARATION"
-if [[ -n $code ]]; then
+if $install_only; then
+    bash "$base/installer-client.sh" --plateforme "$kind" --installer-seul
+elif [[ -n $code ]]; then
     bash "$base/installer-client.sh" --plateforme "$kind" "$regie" "$code"
 else
     bash "$base/installer-client.sh" --plateforme "$kind" --mettre-a-jour "$regie"
