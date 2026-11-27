@@ -2161,7 +2161,7 @@ class Request(BaseHTTPRequestHandler):
                              media_catalog=catalog_items(row),
                              preview_request=preview,
                              output_groups=row.get("output_groups", {}),
-                             waiting=dict(name=row["name"], group=row.get("group"),
+                             waiting=dict(name=row["name"], group=row.get("group"), output_names=row.get("output_names", {}),
                                           qr=getattr(self.server, "waiting_qr", None)),
                              reader_update=recommendation, os_job=os_job,
                              reboot=power["id"] if operation == "reboot" else None,

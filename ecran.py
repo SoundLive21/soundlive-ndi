@@ -868,6 +868,13 @@ def waiting_group(details):
     return ""
 
 
+def waiting_output_name(details, index):
+    names = (details or {}).get("output_names", {})
+    name = names.get(str(index), "") if isinstance(names, dict) else ""
+    name = name.strip()[:80] if isinstance(name, str) and name.isprintable() else ""
+    return "Écran " + str(int(index) + 1) + (" (" + name + ")" if name else "")
+
+
 def identification_labels(reply):
     details = reply.get("waiting")
     if reply.get("identify") is not True or not isinstance(details, dict):
@@ -1488,6 +1495,9 @@ class SecondaryMedia:
         self.index = 0
         self.window = self.pipeline = self.process = None
         self.gst = None
+        self.gl_failed = False
+        self.using_gl = False
+        self.transitioning = False
         self.deadline = None
         self.started = 0
         self.retry = 0
@@ -1496,6 +1506,7 @@ class SecondaryMedia:
 
     def close(self):
         self.ready = False
+        self.transitioning = False
         self.deadline = None
         if self.pipeline is not None:
             self.pipeline.set_state(self.gst.State.NULL)
@@ -1527,6 +1538,16 @@ class SecondaryMedia:
             self.window.get_child().set_from_pixbuf(fitted)
             self.index = next_index
             self.deadline = time.monotonic() + self.config.get("image_seconds", 10)
+            return
+        if not WINDOWS and self.ready and self.pipeline is not None and MEDIA_EXTENSIONS[next_path.suffix] != "image2":
+            self.pipeline.set_state(self.gst.State.READY)
+            self.pipeline.set_property("uri", next_path.resolve().as_uri())
+            self.index = next_index
+            self.deadline = None
+            self.started = time.monotonic()
+            self.transitioning = True
+            if self.pipeline.set_state(self.gst.State.PLAYING) == self.gst.StateChangeReturn.FAILURE:
+                raise RuntimeError("Impossible de démarrer la vidéo suivante.")
             return
         self.close()
         self.index = next_index
@@ -1579,9 +1600,22 @@ class SecondaryMedia:
                     message = self.pipeline.get_bus().pop_filtered(self.gst.MessageType.ERROR | self.gst.MessageType.EOS)
                     if message and message.type == self.gst.MessageType.ERROR:
                         error, _ = message.parse_error()
+                        if self.using_gl:
+                            print("Rendu OpenGL indisponible : " + error.message, file=self.log)
+                            self.gl_failed = True
+                            self.close()
+                            self.retry = now
+                            return
                         raise RuntimeError(error.message)
                     if message and message.type == self.gst.MessageType.EOS:
                         self.advance()
+                        return
+                if self.transitioning:
+                    if self.pipeline.get_state(0)[1] == self.gst.State.PLAYING:
+                        self.transitioning = False
+                    elif now - self.started >= 15:
+                        raise RuntimeError("La vidéo suivante n’a pas démarré.")
+                    else:
                         return
                 if not self.ready and self.window.get_mapped():
                     display = self.window.get_display()
@@ -1652,18 +1686,33 @@ class SecondaryMedia:
                 raise RuntimeError("GStreamer requis : installe gir1.2-gstreamer-1.0 et gstreamer1.0-gtk3.") from error
             Gst.init(None)
             self.gst = Gst
-            sink = Gst.ElementFactory.make("gtksink")
+            self.using_gl = False
+            sink = widget_sink = None
+            if not self.gl_failed:
+                widget_sink = Gst.ElementFactory.make("gtkglsink")
+                sink = Gst.ElementFactory.make("glsinkbin")
+                if widget_sink is not None and sink is not None:
+                    sink.set_property("sink", widget_sink)
+                    self.using_gl = True
+            if not self.using_gl:
+                sink = widget_sink = Gst.ElementFactory.make("gtksink")
             self.pipeline = Gst.ElementFactory.make("playbin")
             if sink is None or self.pipeline is None:
                 self.pipeline = None
                 raise RuntimeError("GStreamer : installe gstreamer1.0-gtk3 et les plugins de lecture vidéo.")
-            self.window.add(sink.get_property("widget"))
+            self.window.add(widget_sink.get_property("widget"))
+            print("Vidéo locale : " + ("OpenGL" if self.using_gl else "GTK logiciel"), file=self.log)
             self.pipeline.set_property("video-sink", sink)
             self.pipeline.set_property("uri", path.resolve().as_uri())
             self.pipeline.set_property("volume", volume / 100)
         self.window.fullscreen_on_monitor(self.window.get_screen(), monitor)
         self.window.show_all()
         if self.pipeline is not None and self.pipeline.set_state(self.gst.State.PLAYING) == self.gst.StateChangeReturn.FAILURE:
+            if self.using_gl:
+                self.gl_failed = True
+                self.close()
+                self.retry = time.monotonic()
+                return
             raise RuntimeError("Impossible de démarrer la vidéo locale.")
 
 
@@ -2039,7 +2088,7 @@ def desktop():
             self.output_label = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, no_show_all=True)
             self.output_label.set_halign(Gtk.Align.CENTER)
             icon = Gtk.Image.new_from_icon_name("video-display", Gtk.IconSize.DIALOG)
-            number = Gtk.Label(label="Écran 1")
+            number = self.output_number = Gtk.Label(label="Écran 1")
             number.get_style_context().add_class("reader-group")
             for widget in (icon, number):
                 self.output_label.pack_start(widget, False, False, 0)
@@ -2307,7 +2356,7 @@ def desktop():
                         if waiting and waiting[0].get_visible() and not (local and local.ready):
                             # The waiting page already contains the reader name and numbered display.
                             waiting[1][0].set_text(numbered[0])
-                            waiting[1][1].set_text("Écran " + str(int(index) + 1))
+                            waiting[1][1].set_text(waiting_output_name(self.waiting_data, index))
                         else:
                             errors.append("Écran " + str(int(index)+1) + " : surcouche indisponible.")
             return not errors, " · ".join(errors)
@@ -2575,7 +2624,8 @@ def desktop():
 
         def sync_waiting_outputs(self):
             multiple = len(self.outputs) > 1
-            self.output_label.set_visible(multiple)
+            self.output_number.set_text(waiting_output_name(self.waiting_data, "0"))
+            self.output_label.set_visible(multiple or bool((self.waiting_data or {}).get("output_names", {}).get("0")))
             active = {o["id"]: o for o in self.outputs if o["id"] != "0"} if multiple else {}
             for index in list(self.extra_waiting):
                 if index not in active:
@@ -2628,7 +2678,7 @@ def desktop():
                 if (local and local.ready) or (entry and entry[0].poll() is None and entry[2].exists()):
                     window.hide()
                     continue
-                texts = (self.screen_name.get_text(), "Écran " + str(int(index) + 1), (waiting_group({"group": self.output_groups[index]}) if index in self.output_groups else self.group_label.get_text() if self.group_label.get_visible() else ""),
+                texts = (self.screen_name.get_text(), waiting_output_name(self.waiting_data, index), (waiting_group({"group": self.output_groups[index]}) if index in self.output_groups else self.group_label.get_text() if self.group_label.get_visible() else ""),
                          ("En attente d’un média local" if index in self.extra_media_settings else "En attente du flux vidéo") if selected.get("enabled") else "Diffusion arrêtée",
                          self.regie_label.get_text(), f"Version du lecteur {SOFTWARE_VERSION}", COPYRIGHT, self.update_label.get_text())
                 for widget, value in zip(labels, texts):
@@ -3310,7 +3360,8 @@ def run_windows_screen(tk, log):
         return found
 
     def sync_waiting_outputs():
-        if len(displays) > 1:
+        output_label.configure(text="▣  " + waiting_output_name(waiting_data, "0"))
+        if len(displays) > 1 or bool((waiting_data or {}).get("output_names", {}).get("0")):
             output_label.pack(before=status, pady=7)
         else:
             output_label.pack_forget()
@@ -3340,7 +3391,7 @@ def run_windows_screen(tk, log):
                 window.withdraw()
                 continue
             selected = extra_settings.get(index, {})
-            values = (APP_NAME, name.cget("text"), "▣  Écran " + str(int(index) + 1),
+            values = (APP_NAME, name.cget("text"), "▣  " + waiting_output_name(waiting_data, index),
                       ("En attente d’un média local" if index in extra_media_settings else "En attente du flux vidéo") if selected.get("enabled") else "Diffusion arrêtée",
                       (waiting_group({"group": output_groups[index]}) if index in output_groups else group_label.cget("text") if group_label.winfo_manager() else ""),
                       regie_label.cget("text"), f"Version du lecteur {SOFTWARE_VERSION}", COPYRIGHT, notice.cget("text"))
