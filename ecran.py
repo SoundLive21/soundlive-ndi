@@ -1995,6 +1995,8 @@ def desktop():
                 self.prepare_internal_preview()
             replace_overlay_file(IDENTIFICATION_TEXT, b"")
             IDENTIFICATION_TEXTURE.unlink(missing_ok=True)
+            for path in STATE.glob("identification-sortie-*.rgba"):
+                path.unlink(missing_ok=True)
             self.image_page = Gtk.Layout()
             self.image_page.get_style_context().add_class("local-image")
             self.local_image = Gtk.Image()
@@ -2156,7 +2158,7 @@ def desktop():
 
         def refresh_identification(self):
             labels = None if self.maintenance.active else self.identification
-            if labels and len(self.outputs) > 1:
+            if labels:
                 labels = (labels[0], "Écran 1 · " + labels[1])
             waiting = self.window.get_visible()
             route = self.identification_output
@@ -3014,6 +3016,11 @@ def desktop():
                     except subprocess.TimeoutExpired:
                         screen.player.kill()
                         screen.player.wait()
+                for popup in screen.extra_identification_popups.values():
+                    if popup:
+                        popup[0].destroy()
+                for path in STATE.glob("identification-sortie-*.rgba"):
+                    path.unlink(missing_ok=True)
                 screen.work.shutdown(wait=True, cancel_futures=True)
                 if screen.dashboard:
                     screen.dashboard.close()
@@ -3163,7 +3170,7 @@ def run_windows_screen(tk, log):
                         label.pack(anchor="w", padx=13, pady=padding)
                     extra_badges[index] = window, labels
                 window, labels = extra_badges[index]
-            numbered = (identification[0], "Écran " + str(int(index)+1) + " · " + identification[1]) if len(outputs) > 1 else identification
+            numbered = (identification[0], "Écran " + str(int(index)+1) + " · " + identification[1]) if identification else None
             try:
                 for label, text in zip(labels, numbered):
                     label.configure(text=text)
