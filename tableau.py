@@ -69,6 +69,47 @@ PAGE = ((ROOT / "tableau.html").read_bytes()
         .replace(b"__RESOLUTION_CONTROLS_ENABLED__", str(RESOLUTION_CONTROLS_ENABLED).lower().encode("ascii"))
         .replace(b"__PREVIEW_INTERVAL__", str(PREVIEW_AUTO_INTERVAL).encode("ascii")))
 LOGIN_PAGE = (ROOT / "acces-refuse.html").read_text(encoding="utf-8")
+PERSONAL_ROOT = ROOT / ".soundlive-personal-medias"
+
+def personal_directory(owner):
+    if not isinstance(owner, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,32}", owner):
+        raise ValueError("Utilisateur invalide.")
+    return PERSONAL_ROOT / sha256(owner.encode("utf-8")).hexdigest()
+
+def personal_catalog(owner):
+    directory = personal_directory(owner)
+    path = directory / "catalog.json"
+    if path.is_file():
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("owner") != owner:
+            raise ValueError("Espace média invalide.")
+        return directory, data
+    return directory, {"owner":owner,"folders":{"general":{"name":"Général","items":[]}}}
+
+def save_personal(directory, data):
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tmp = directory / "catalog.tmp"
+    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(directory / "catalog.json")
+
+def personal_copy_prefix(owner):
+    return "personal-" + sha256(owner.encode("utf-8")).hexdigest()[:32] + "-"
+
+PERSONAL_MEDIA_PAGE = """<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Médias personnels · SoundLive NDI</title><style>__SHARED_STYLE__</style><header><span class="mark"></span><strong>SoundLive-NDI</strong><span id="count"></span><span class="connected-user">Connecté : <strong>__CONNECTED_USER__</strong></span><a href="/">Retour à la régie</a></header><main><div class="heading"><h1>Médias personnels</h1></div><article><label>Utilisateur<select id="owner"></select></label><label>Dossier<select id="folder"></select></label><div class="actions"><button id="create">Créer un dossier</button><button id="rename">Renommer le dossier</button><button id="remove">Supprimer le dossier</button></div><label>Images et vidéos<input type="file" id="files" multiple accept=".jpg,.jpeg,.png,.mp4,.m4v,.mov,.webm,.mkv"></label><button class="primary" id="upload">Déposer les fichiers</button><p id="message" role="status"></p><div id="items"></div><label>Écran de destination<select id="screen"></select></label><button class="primary" id="play">Diffuser ce dossier</button><p class="small">La diffusion transfère une copie du dossier vers le lecteur.</p></article></main><script>
+const q=id=>document.getElementById(id);let state,busy=false;
+async function api(path,data,raw=false){const r=await fetch(path,data===undefined?{}:{method:"POST",headers:{"Content-Type":raw?"application/octet-stream":"application/json"},body:raw?data:JSON.stringify(data)});if(r.status===401){location.href="/connexion";throw Error("Session expirée")}const v=await r.json();if(!r.ok)throw Error(v.error||r.status);return v}
+const query=(extra={})=>new URLSearchParams({owner:q("owner").value,folder:q("folder").value,...extra});
+const act=(action,extra={})=>api("/api/personal-media",{owner:q("owner").value,folder:q("folder").value,action,...extra});
+const run=f=>async()=>{if(busy)return;busy=true;const controls=[...document.querySelectorAll("button,select,input")];controls.forEach(x=>x.disabled=true);try{q("message").textContent="Traitement en cours…";await f();await load();q("message").textContent="Terminé."}catch(e){q("message").textContent=e.message}finally{busy=false;controls.forEach(x=>x.disabled=false)}};
+function options(node,items,previous){node.replaceChildren(...items.map(([v,n])=>new Option(n,v)));if(items.some(x=>x[0]===previous))node.value=previous}
+async function load(){const owner=q("owner").value,folder=q("folder").value,screen=q("screen").value;state=await api("/api/personal-media?"+new URLSearchParams({owner}));options(q("owner"),state.owners.map(x=>[x,x]),state.owner);options(q("folder"),Object.entries(state.folders).map(([id,f])=>[id,f.name]),folder);options(q("screen"),Object.entries(state.screens),screen);draw()}
+function draw(){const box=q("items");box.replaceChildren();for(const item of state.folders[q("folder").value]?.items||[]){const row=document.createElement("div");row.className="row";const name=document.createElement("a");name.textContent=item.name;name.href="/api/personal-media/file?"+query({file:item.id});name.target="_blank";name.rel="noopener";const rename=document.createElement("button"),remove=document.createElement("button");rename.textContent="Renommer";remove.textContent="Supprimer";rename.onclick=run(async()=>{const n=prompt("Nouveau nom",item.name);if(n)await act("rename-file",{file:item.id,name:n})});remove.onclick=run(async()=>{if(confirm("Supprimer "+item.name+" ?"))await act("remove-file",{file:item.id})});row.append(name,rename,remove);box.append(row)}}
+q("owner").onchange=()=>load().catch(e=>q("message").textContent=e.message);q("folder").onchange=draw;
+q("create").onclick=run(async()=>{const name=prompt("Nom du dossier");if(name)await act("create",{name})});q("rename").onclick=run(async()=>{const name=prompt("Nouveau nom",state.folders[q("folder").value]?.name);if(name)await act("rename",{name})});q("remove").onclick=run(async()=>{if(confirm("Supprimer le dossier et ses fichiers ?"))await act("remove-folder")});
+q("upload").onclick=run(async()=>{for(const file of q("files").files){q("message").textContent="Envoi : "+file.name;await api("/api/personal-media/upload?"+query({name:file.name}),file,true)}q("files").value=""});
+q("play").onclick=run(async()=>{if(!q("screen").value)throw Error("Aucun écran autorisé.");await act("play",{screen:q("screen").value})});load().catch(e=>q("message").textContent=e.message);
+</script></html>"""
+
 USERS_PAGE = """<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Utilisateurs · SoundLive NDI</title><style>body{background:#171319;color:#fff;font:16px system-ui;margin:24px}button,input,select{font:inherit;padding:8px;margin:4px;background:#302631;color:white;border:1px solid #806070;border-radius:6px}a{color:#ffc0cd}fieldset{margin:12px 0;border:1px solid #604a59}label{display:inline-block;margin:4px}table{border-collapse:collapse}td,th{padding:6px;text-align:left}#matrix{overflow:auto}button{cursor:pointer}</style><a href="/">← Régie</a><h1>Utilisateurs et groupes</h1><p>Les droits directs et ceux des groupes se cumulent. Le compte regie reste administrateur.</p><select id="kind"><option value="users">Utilisateurs</option><option value="groups">Groupes</option></select><select id="existing"></select><form id="editor"><label>Identifiant <input id="name" required pattern="[A-Za-z0-9_.-]{1,32}"></label><section id="userfields"><label>Mot de passe <input id="password" type="password" autocomplete="new-password"></label><label><input id="enabled" type="checkbox" checked> Actif</label><div id="members"></div></section><h2>Droits par écran</h2><div id="matrix"></div><button>Enregistrer</button><button type="button" id="remove">Supprimer</button></form><p id="message" role="status"></p><script>
 const q=id=>document.getElementById(id), rights={view:"Voir",preview:"Aperçu",play:"Lecture/arrêt",source:"Source/qualité",audio:"Audio",media:"Diffuser médias",identify:"Identifier",maintenance:"Maintenance",configuration:"Orientation"};let db;
 async function api(path,data){const r=await fetch(path,data===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});const v=await r.json();if(!r.ok)throw Error(v.error||r.status);return v}
@@ -80,7 +121,7 @@ q("remove").onclick=async()=>{if(!confirm("Supprimer cet élément ?"))return;tr
 </script></html>"""
 OPERATOR_PAGE = """<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>SoundLive NDI · Opérateur</title><style>__SHARED_STYLE__
 .operator-controls{display:grid;gap:8px}.operator-controls label{margin:8px 0}.operator-preview img{display:block;width:100%;max-height:280px;object-fit:contain;border-radius:8px;background:#100d12}.operator-preview img[hidden]{display:none}.operator-output{margin-top:16px}.operator-output legend{font-weight:600}.operator-output .actions{margin-top:8px}.operator-header-statuses{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}.operator-preview{margin:8px 0}.operator-preview button{width:100%}.operator-card h2{min-width:0}.operator-card .badge{white-space:nowrap}.operator-controls button{white-space:normal}
-</style><header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release">v__OP_VERSION__</span><span class="connected-user">Connecté : <strong>__CONNECTED_USER__</strong></span><span id="count"></span><button id="logout">Me déconnecter</button></header><main><div class="heading"><h1>Gestion des écrans NDI</h1><div class="heading-actions"><button id="organize">Organiser les écrans</button><button id="group-action">Actions de groupe</button></div></div><details class="preview-section" id="source-previews" open hidden><summary>Aperçu des sources NDI disponibles</summary><label class="check"><input type="checkbox" id="auto-previews" checked> Actualiser automatiquement les aperçus visibles</label><p id="source-empty" class="muted" hidden>Aucune source NDI détectée par les lecteurs connectés.</p><div class="preview-grid" id="source-grid"></div></details><p id="message" role="status"></p><div id="screens"></div></main><footer class="project-credits">© 2026 Société SoundLive · Auteur : DUVERNOY Matthieu &amp; ChatGPT · <a href="mailto:contact@soundlive.fr">contact@soundlive.fr</a></footer><dialog id="organizer" style="width:min(640px,92vw)"><div class="dialog-body"><h2>Organiser les écrans</h2><p>Personnalise l’ordre des groupes et des encarts dans ton navigateur.</p><div id="organizer-list"></div><div class="actions"><button id="reset-layout">Réinitialiser</button><button id="close-organizer" class="primary">Fermer</button></div></div></dialog><dialog id="group-dialog" style="width:min(650px,92vw)"><div class="dialog-body"><h2>Actions de groupe</h2><label>Action<select id="group-operation"><option value="start">Lecture</option><option value="stop">Arrêter</option><option value="mute">Couper le son</option><option value="unmute">Activer le son</option><option value="volume">Volume</option><option value="source">Source NDI</option><option value="quality">Qualité</option><option value="orientation">Orientation</option></select></label><label id="group-value-label" hidden>Valeur<select id="group-value"></select></label><label id="group-volume-label" hidden>Volume en %<input id="group-volume" type="number" min="0" max="100" value="50"></label><div class="actions"><button id="group-all">Tout sélectionner</button><button id="group-none">Tout désélectionner</button></div><div id="group-choices"></div><p id="group-error" role="status"></p><div class="actions"><button id="close-group">Fermer</button><button id="apply-group" class="primary">Appliquer</button></div></div></dialog>__SHARED_TEMPLATES__<script>
+</style><header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release">v__OP_VERSION__</span><span id="count"></span><button onclick="location.href=\'/medias-personnels\'">Mes médias</button><span class="connected-user">Connecté : <strong>__CONNECTED_USER__</strong></span><button id="logout">Me déconnecter</button></header><main><div class="heading"><h1>Gestion des écrans NDI</h1><div class="heading-actions"><button id="organize">Organiser les écrans</button><button id="group-action">Actions de groupe</button></div></div><details class="preview-section" id="source-previews" open hidden><summary>Aperçu des sources NDI disponibles</summary><label class="check"><input type="checkbox" id="auto-previews" checked> Actualiser automatiquement les aperçus visibles</label><p id="source-empty" class="muted" hidden>Aucune source NDI détectée par les lecteurs connectés.</p><div class="preview-grid" id="source-grid"></div></details><p id="message" role="status"></p><div id="screens"></div></main><footer class="project-credits">© 2026 Société SoundLive · Auteur : DUVERNOY Matthieu &amp; ChatGPT · <a href="mailto:contact@soundlive.fr">contact@soundlive.fr</a></footer><dialog id="organizer" style="width:min(640px,92vw)"><div class="dialog-body"><h2>Organiser les écrans</h2><p>Personnalise l’ordre des groupes et des encarts dans ton navigateur.</p><div id="organizer-list"></div><div class="actions"><button id="reset-layout">Réinitialiser</button><button id="close-organizer" class="primary">Fermer</button></div></div></dialog><dialog id="group-dialog" style="width:min(650px,92vw)"><div class="dialog-body"><h2>Actions de groupe</h2><label>Action<select id="group-operation"><option value="start">Lecture</option><option value="stop">Arrêter</option><option value="mute">Couper le son</option><option value="unmute">Activer le son</option><option value="volume">Volume</option><option value="source">Source NDI</option><option value="quality">Qualité</option><option value="orientation">Orientation</option></select></label><label id="group-value-label" hidden>Valeur<select id="group-value"></select></label><label id="group-volume-label" hidden>Volume en %<input id="group-volume" type="number" min="0" max="100" value="50"></label><div class="actions"><button id="group-all">Tout sélectionner</button><button id="group-none">Tout désélectionner</button></div><div id="group-choices"></div><p id="group-error" role="status"></p><div class="actions"><button id="close-group">Fermer</button><button id="apply-group" class="primary">Appliquer</button></div></div></dialog>__SHARED_TEMPLATES__<script>
 const q=id=>document.getElementById(id);let cards=new Map(),latestRows=[];
 async function api(path,data){const r=await fetch(path,data===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});if(r.status===401){location.href="/connexion";throw Error("Session expirée")}const v=await r.json();if(!r.ok)throw Error(v.error||r.status);return v}
 const run=f=>async()=>{try{await f();q("message").textContent=""}catch(e){q("message").textContent=e.message}};
@@ -1389,6 +1430,13 @@ class Request(BaseHTTPRequestHandler):
             return
         if not self.dashboard(path):
             return
+        if path == "/medias-personnels":
+            style = _dashboard_markup.split("<style>",1)[1].split("</style>",1)[0]
+            self.reply(200,PERSONAL_MEDIA_PAGE.replace("__SHARED_STYLE__",style).replace("__CONNECTED_USER__",escape(getattr(self,"principal",USERNAME))).encode("utf-8"))
+            return
+        if path in ("/api/personal-media","/api/personal-media/file"):
+            self.personal_get(path,url.query)
+            return
         if remote and getattr(self,"grants",None) is not None:
             if path == "/":
                 self.reply(200, OPERATOR_PAGE.replace("__CONNECTED_USER__", escape(self.principal)).encode("utf-8"))
@@ -1534,6 +1582,17 @@ class Request(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             length = 0
+        if path == "/api/personal-media/upload":
+            if self.dashboard(path,write=True):
+                try:
+                    self.personal_upload(url.query,length)
+                except PermissionError as error:
+                    self.reply(403,{"error":str(error)})
+                except (ValueError,KeyError) as error:
+                    self.reply(400,{"error":str(error)})
+                except OSError:
+                    self.reply(500,{"error":"Enregistrement impossible."})
+            return
         if path == "/api/media-upload":
             if self.dashboard(path, write=True):
                 if getattr(self,"grants",None) is not None:
@@ -1569,6 +1628,14 @@ class Request(BaseHTTPRequestHandler):
             value = json.loads(payload)
             if not isinstance(value, dict):
                 raise ValueError("Requête invalide.")
+            if path == "/api/personal-media":
+                try:
+                    with LOCK:
+                        status,result=self.personal_change(value)
+                except PermissionError as error:
+                    status,result=403,{"error":str(error)}
+                self.reply(status,result)
+                return
             if path == "/api/remote-connections/disconnect":
                 if getattr(self,"grants",None) is not None:
                     self.reply(403,{"error":"Accès refusé."})
@@ -1787,7 +1854,7 @@ class Request(BaseHTTPRequestHandler):
                                  preview_sources=available_sources,
                                  audio_devices=report.get("audio_devices",[]) if "audio" in perms else [],
                                  audio_route=row.get("audio_routes",{}).get(index,"") if "audio" in perms else "",
-                                 folders={k:v["name"] for k,v in media_folders(row).items()} if "media" in perms else {},
+                                 folders={k:v["name"] for k,v in media_folders(row).items() if not k.startswith("personal-") or k.startswith(personal_copy_prefix(self.principal))} if "media" in perms else {},
                                  maintenance=whole("maintenance"),identify=whole("identify"),identified=row.get("identify") is True,
                                  connector=out.get("connector",""), width=out.get("width"),height=out.get("height"),
                                  display_capture=report.get("display_capture") is True if index=="0" else bool(out), capture_consent=report.get("capture_needs_consent") is True))
@@ -1844,7 +1911,12 @@ class Request(BaseHTTPRequestHandler):
             # The reader library is shared; operators may only select existing folders.
             if type(data.get("enabled")) is not bool:
                 return 400,{"error":"État média invalide."}
-            return self.change_media(key,row,{"action":"play","folder":data.get("folder"),"enabled":data["enabled"],"output":index})
+            folder=data.get("folder")
+            if not data["enabled"]:
+                folder=MEDIA_DEFAULT_FOLDER
+            elif not isinstance(folder,str) or (folder.startswith("personal-") and not folder.startswith(personal_copy_prefix(self.principal))):
+                return denied
+            return self.change_media(key,row,{"action":"play","folder":folder,"enabled":data["enabled"],"outputs":[index]})
         return denied
 
     def change_network(self, value):
@@ -1928,6 +2000,188 @@ class Request(BaseHTTPRequestHandler):
             self.reply(400, {"error": str(error)})
             return
         self.reply(200, result)
+
+    def personal_owners(self):
+        if getattr(self,"grants",None) is not None:
+            return [self.principal]
+        owners = {USERNAME}
+        for path in PERSONAL_ROOT.glob("*/catalog.json"):
+            try:
+                owner = json.loads(path.read_text(encoding="utf-8"))["owner"]
+                if personal_directory(owner) == path.parent:
+                    owners.add(owner)
+            except (OSError, ValueError, KeyError):
+                continue
+        if hasattr(self.server,"public_accounts"):
+            owners.update(self.server.public_accounts()["users"])
+        return sorted(owners, key=str.casefold)
+
+    def personal_owner(self, owner):
+        owners = self.personal_owners()
+        owner = owner or (self.principal if getattr(self,"grants",None) is not None else USERNAME)
+        if owner not in owners:
+            raise PermissionError("Accès à ce dossier refusé.")
+        return owner
+
+    def personal_screens(self):
+        return {key+":"+i:row["name"]+" · Écran "+str(int(i)+1)
+                for key,row in SCREENS.items() if row.get("token")
+                for i in physical_outputs(row) if getattr(self,"grants",None) is None
+                or (self.allowed(key,i,"view") and self.allowed(key,i,"media"))}
+
+    def personal_get(self, path, raw_query):
+        try:
+            query = parse_qs(raw_query, max_num_fields=4)
+            with LOCK:
+                owner = self.personal_owner(query.get("owner",[""])[0])
+                directory, data = personal_catalog(owner)
+                if path == "/api/personal-media":
+                    save_personal(directory,data)
+                    self.reply(200,dict(owners=self.personal_owners(),owner=owner,folders=data["folders"],screens=self.personal_screens()))
+                    return
+                folder = data["folders"][query["folder"][0]]
+                item = next(i for i in folder["items"] if i["id"] == query["file"][0])
+                stream = (directory / item["id"]).open("rb")
+            with stream:
+                self.send_response(200)
+                self.send_header("Content-Type", MEDIA_TYPES[Path(item["name"]).suffix.lower()])
+                self.send_header("Content-Length",str(item["size"]))
+                self.send_header("Cache-Control","no-store")
+                self.send_header("X-Content-Type-Options","nosniff")
+                self.send_header("Content-Security-Policy","default-src 'none'; sandbox")
+                self.end_headers()
+                shutil.copyfileobj(stream,self.wfile,MEDIA_CHUNK)
+        except PermissionError as error:
+            self.reply(403,{"error":str(error)})
+        except (KeyError,ValueError,StopIteration,FileNotFoundError):
+            self.reply(404,{"error":"Média ou dossier indisponible."})
+
+    def personal_upload(self, raw_query, length):
+        if self.headers.get_content_type() != "application/octet-stream" or not 0 < length <= MEDIA_FILE_LIMIT:
+            raise ValueError("Fichier non vide de 256 Mio maximum.")
+        query = parse_qs(raw_query,max_num_fields=3)
+        owner = self.personal_owner(query["owner"][0])
+        folder_id = query["folder"][0]
+        name = media_name(query["name"][0])
+        with LOCK:
+            directory,data = personal_catalog(owner)
+            if folder_id not in data["folders"]:
+                raise ValueError("Dossier indisponible.")
+            save_personal(directory,data)
+        with NamedTemporaryFile(dir=directory,delete=False) as handle:
+            staged=Path(handle.name)
+            checksum=sha256()
+            try:
+                remaining=length
+                while remaining:
+                    chunk=self.rfile.read(min(remaining,MEDIA_CHUNK))
+                    if not chunk:
+                        raise ValueError("Transfert interrompu.")
+                    with MEDIA_WRITE_LOCK:
+                        if len(chunk)>media_available(media_disk(directory)):
+                            raise ValueError("Espace disque insuffisant.")
+                        handle.write(chunk)
+                    checksum.update(chunk)
+                    remaining-=len(chunk)
+                handle.close()
+                with LOCK:
+                    directory,data=personal_catalog(owner)
+                    folder=data["folders"][folder_id]
+                    if len(folder["items"])>=MEDIA_COUNT_LIMIT or sum(i["size"] for i in folder["items"])+length>MEDIA_TOTAL_LIMIT:
+                        raise ValueError("Limite du dossier : 20 fichiers et 1 Gio.")
+                    identifier=secrets.token_hex(16)
+                    destination=directory / identifier
+                    staged.replace(destination)
+                    item=dict(id=identifier,name=name,size=length,sha256=checksum.hexdigest())
+                    folder["items"].append(item)
+                    try:
+                        save_personal(directory,data)
+                    except OSError:
+                        destination.unlink(missing_ok=True)
+                        raise
+            finally:
+                handle.close()
+                staged.unlink(missing_ok=True)
+        self.reply(201,item)
+
+    def personal_change(self, data):
+        owner=self.personal_owner(data.get("owner"))
+        directory,catalog=personal_catalog(owner)
+        folders=catalog["folders"]
+        action=data.get("action")
+        folder_id=data.get("folder")
+        removed=[]
+        if action=="create":
+            if len(folders)>=MEDIA_FOLDER_LIMIT:
+                raise ValueError("Limite de dossiers atteinte.")
+            folders[secrets.token_hex(8)]=dict(name=safe_text(data["name"],64),items=[])
+        else:
+            folder=folders[folder_id]
+            if action=="rename":
+                folder["name"]=safe_text(data["name"],64)
+            elif action=="remove-folder":
+                if folder_id=="general":
+                    raise ValueError("Le dossier général ne peut pas être supprimé.")
+                removed=folder["items"]
+                del folders[folder_id]
+            elif action in ("remove-file","rename-file"):
+                item=next((i for i in folder["items"] if i["id"]==data.get("file")),None)
+                if item is None:
+                    raise ValueError("Fichier indisponible.")
+                if action=="remove-file":
+                    folder["items"].remove(item)
+                    removed=[item]
+                else:
+                    name=media_name(data["name"])
+                    if Path(name).suffix.lower()!=Path(item["name"]).suffix.lower():
+                        raise ValueError("Conserve l’extension du fichier.")
+                    item["name"]=name
+            elif action=="play":
+                target=data.get("screen")
+                if target not in self.personal_screens():
+                    raise PermissionError("Écran non autorisé.")
+                key,index=target.split(":",1)
+                row=SCREENS[key]
+                if not folder["items"]:
+                    raise ValueError("Dossier vide.")
+                current=media_folders(row).copy()
+                if len(current)>=MEDIA_FOLDER_LIMIT or len(catalog_items(row))+len(folder["items"])>MEDIA_LIBRARY_LIMIT:
+                    raise ValueError("Bibliothèque du lecteur pleine.")
+                capacity=media_capacity(row)
+                total=sum(i["size"] for i in folder["items"])
+                if capacity is None or total>capacity["available"]:
+                    raise ValueError("Espace disponible du lecteur insuffisant ou inconnu.")
+                if total>media_available(media_disk(directory)):
+                    raise ValueError("Espace disque de la régie insuffisant.")
+                copy_id=personal_copy_prefix(owner)+secrets.token_hex(8)
+                target_dir=MEDIA_ROOT / key
+                target_dir.mkdir(mode=0o700,parents=True,exist_ok=True)
+                copied=[]
+                previous=dict(row)
+                try:
+                    for item in folder["items"]:
+                        new={**item,"id":secrets.token_hex(16)}
+                        copied.append(new)
+                        shutil.copyfile(directory / item["id"],target_dir / new["id"])
+                    current[copy_id]=dict(name=("Personnel · "+owner+" · "+folder["name"])[:64],items=copied)
+                    save_media(row,current,row.get("media_folder",MEDIA_DEFAULT_FOLDER),screen_media(row)["enabled"])
+                    status,result=self.change_media(key,row,dict(action="play",folder=copy_id,enabled=True,outputs=[index]))
+                    if status!=200:
+                        raise ValueError(result.get("error","Diffusion impossible."))
+                except (OSError,ValueError,KeyError):
+                    row.clear()
+                    row.update(previous)
+                    save()
+                    for item in copied:
+                        (target_dir / item["id"]).unlink(missing_ok=True)
+                    raise
+                return 200,result
+            else:
+                raise ValueError("Action inconnue.")
+        save_personal(directory,catalog)
+        for item in removed:
+            (directory / item["id"]).unlink(missing_ok=True)
+        return 200,{"ok":True}
 
     def upload_media(self, raw_query, length):
         if self.headers.get_content_type() != "application/octet-stream" or not 0 < length <= MEDIA_FILE_LIMIT:
