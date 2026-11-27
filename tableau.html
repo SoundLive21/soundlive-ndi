@@ -2273,10 +2273,12 @@ function updateMediaSelection(count) {
   mediaDownloadSelected.disabled = mediaRemoveSelected.disabled || mediaExporting;
 }
 function mediaOutputIds(row) {
-  return ["0", ...(row.report.outputs || []).filter(o => o.id !== "0").map(o => o.id)];
+  const ids = row.physical_outputs || ["0", ...(row.report.outputs || []).filter(o => o.id !== "0").map(o => o.id)];
+  return mediaPhysicalSelection ? ids.filter(id=>mediaPhysicalSelection.has(row.id+":"+id)) : ids;
 }
 function mediaSelectedOutputs(row) {
   const ids = mediaOutputIds(row);
+  if (mediaPhysicalSelection) return ids;
   if (mediaOutputLabel.hidden) return ["0"];
   return mediaOutput.value === "all" ? ids : [ids.includes(mediaOutput.value) ? mediaOutput.value : "0"];
 }
@@ -2349,7 +2351,7 @@ function renderMediaManager(preferFolder) {
   if (!rows.length) { mediaDialog.close(); return; }
   select(mediaDialog, "#media-targets").textContent = rows.map(row => row.name).join(" · ");
   const ids = rows.length === 1 ? mediaOutputIds(rows[0]) : ["0"];
-  mediaOutputLabel.hidden = ids.length < 2;
+  mediaOutputLabel.hidden = !!mediaPhysicalSelection || ids.length < 2;
   const options = ids.map(id => [id, "Écran " + (Number(id) + 1)]);
   if (ids.length > 1) options.push(["all", ids.length === 2 ? "Les deux écrans" : "Tous les écrans"]);
   mediaSelect(mediaOutput, options);
@@ -2423,9 +2425,11 @@ function renderMediaManager(preferFolder) {
   mediaDestination.disabled = mediaBusy || !destinations.length;
   select(mediaDialog,"#media-file-remove").disabled = mediaBusy;
 }
-function openMediaManager(ids, output = "0") {
+let mediaPhysicalSelection = null;
+function openMediaManager(ids, output = "0", physical = null) {
   if (mediaBusy) return;
   mediaIds = ids;
+  mediaPhysicalSelection = physical ? new Set(physical) : null;
   mediaOutput.value = "0";
   mediaFileKey = "";
   mediaSelected.clear();
@@ -2443,6 +2447,7 @@ function openMediaManager(ids, output = "0") {
   mediaReadRegieDisk();
 }
 mediaDialog.addEventListener("close", () => {
+  mediaPhysicalSelection = null;
   if (mediaNameDialog.open) mediaNameDialog.close();
   mediaPlayer.replaceChildren();
   mediaPlayer.dataset.source = "";
@@ -3032,14 +3037,36 @@ function outputLegend(legend, number, output) {
 function renderExtraOutputs(card, row) {
   const box = card.outputs;
   const outputs = row.report.outputs || [];
-  box.hidden = !row.online || outputs.length < 2;
-  if (box.hidden) return;
-  if (box.contains(document.activeElement)) return;
-  const signature = JSON.stringify([outputs, row.extra_outputs, row.extra_media, row.report.sources, row.media?.enabled]);
+  box.hidden = true;
+  if ([...secondaryCards.values()].some(c=>c.readerId===row.id && c.el.contains(document.activeElement))) return;
+  const physical = physicalRows([row]).filter(o=>o.output!=="0");
+  const signature = JSON.stringify([outputs, row.extra_outputs, row.extra_media, row.report.sources, row.media?.enabled,row.output_groups,row.online,row.name,row.identify]);
   if (box.dataset.signature === signature) return;
   box.dataset.signature = signature;
   box.replaceChildren();
-  for (const output of outputs.filter(o => o.id !== "0")) {
+  for (const [id,entry] of secondaryCards) if (entry.readerId===row.id && !physical.some(o=>o.id===id)) {entry.el.remove();secondaryCards.delete(id);}
+  for (const item of physical) {
+    const output = outputs.find(o=>o.id===item.output) || {id:item.output};
+    let entry = secondaryCards.get(item.id);
+    if (!entry) {
+      const el = document.createElement("article");
+      el.className = card.el.className; el.dataset.screen=item.id;
+      const heading=document.createElement("div"); heading.className="card-heading";
+      const title=document.createElement("h2"); heading.append(title);
+      const badge=document.createElement("span"); badge.className="badge"; heading.append(badge);
+      heading.append(sortHandle(el,()=>el.parentElement,item.id,()=>screenKeys(el.parentElement),(source,destination)=>moveScreenOrder("screens",screenKeys(el.parentElement),source,destination,physicalData(item.id)?.group || ""),"Déplacer l’écran"));
+      const preview=document.createElement("div"); preview.className="screen-preview";
+      const controls=document.createElement("details"); controls.className="screen-controls";
+      const summary=document.createElement("summary"); summary.textContent="Commandes et réglages"; controls.append(summary);
+      const body=document.createElement("div"); controls.append(body);
+      el.append(heading,preview,controls); entry={el,title,badge,preview,controls,body,readerId:row.id};
+      secondaryCards.set(item.id,entry);
+    }
+    entry.title.textContent=item.name;
+    entry.badge.textContent=!row.online || !outputs.some(o=>o.id===output.id) ? "Hors ligne" : output.playing ? "Lecture" : row.extra_outputs?.[output.id]?.enabled ? "En attente" : "Arrêté";
+    entry.badge.classList.toggle("online",row.online && outputs.some(o=>o.id===output.id));
+    entry.badge.classList.toggle("waiting",entry.badge.textContent==="En attente");
+    entry.badge.classList.toggle("stopped",entry.badge.textContent==="Arrêté");
     const current = row.extra_outputs?.[output.id] || {};
     const mediaFolder = row.extra_media?.[output.id];
     const line = document.createElement("fieldset");
@@ -3145,7 +3172,10 @@ function renderExtraOutputs(card, row) {
     ndi.disabled = !mediaFolder;
     ndi.onclick = action(() => confirmOutputNdi(card.data,output.id));
     line.append(ndi);
-    box.append(line);
+    const media = document.createElement("button"); media.type="button";media.className="full-action";media.textContent="Images et vidéos";media.onclick=()=>openMediaManager([row.id],output.id);
+    const identify=document.createElement("button");identify.type="button";identify.textContent=row.identify?"Masquer l’identification du lecteur":"Identifier le lecteur";identify.onclick=action(()=>changeIdentification(!card.data.identify,row.id));
+    const info=document.createElement("button");info.type="button";info.textContent="Informations du lecteur";info.onclick=()=>card.ui.info.click();
+    entry.body.replaceChildren(line,media,identify,info);
   }
 }
 
@@ -3172,7 +3202,7 @@ function render(row) {
     (displayed.visible ? "Identification affichée." : "Identification en cours…");
   identification.hidden = !identification.textContent;
   select(el, ".manage-media").hidden = !row.paired;
-  select(el,"h2").textContent = row.name;
+  select(el,"h2").textContent = physicalRows([row])[0].name;
   ui.badge.textContent = row.online ? row.report.state : row.paired ? "Hors ligne" : "À associer";
   ui.badge.classList.toggle("online",row.online);
   ui.badge.classList.toggle("stopped", row.online && row.report.state === "Arrêté");
@@ -3215,10 +3245,13 @@ function render(row) {
   for (const output of secondaryOutputs) {
     let view = card.extraPreviews.get(output.id);
     if (!view) {
-      view = createPreview(overview.element.parentElement, "Aperçu · Écran " + (Number(output.id) + 1), row.id, true);
+      const secondary = secondaryCards.get(row.id+":"+output.id);
+      view = createPreview(secondary?.preview || overview.element.parentElement, "Aperçu · Écran " + (Number(output.id) + 1), row.id, true);
       view.output = output.id;
       card.extraPreviews.set(output.id, view);
     }
+    const secondary = secondaryCards.get(row.id+":"+output.id);
+    if (secondary && view.element.parentElement!==secondary.preview) secondary.preview.append(view.element);
     view.available = row.online && row.paired;
     view.unavailable = "Lecteur hors ligne.";
     if (!view.available) view.snapshot = null;
@@ -3308,7 +3341,7 @@ function moveScreenOrder(scope, order, source, destination, group) {
   order.splice(from, 1);
   order.splice(to, 0, source);
   const movingGroup = scope === "groups";
-  const name = movingGroup ? source || "Sans groupe" : cards.get(source)?.data?.name || source;
+  const name = movingGroup ? source || "Sans groupe" : physicalData(source)?.name || source;
   showAction({
     title:movingGroup ? "Réorganiser les groupes" : "Réorganiser les écrans",
     detail:"« " + name + " » passera à la position " + (to+1) + ".",
@@ -3325,6 +3358,24 @@ function moveScreenOrder(scope, order, source, destination, group) {
     }
   });
 }
+const secondaryCards = new Map();
+function physicalRows(rows, explicitPrimary = false) {
+  return rows.flatMap(row => (row.physical_outputs || ["0", ...(row.report.outputs || []).filter(o=>o.id!=="0").map(o=>o.id)]).map(output => {
+    const multiple = (row.physical_outputs || ["0", ...(row.report.outputs || []).filter(o=>o.id!=="0").map(o=>o.id)]).length > 1;
+    return {...row, readerId:row.id, output,
+      id:output === "0" && !explicitPrimary ? row.id : row.id + ":" + output,
+      name:row.name + (multiple ? " · Écran " + (Number(output)+1) : ""),
+      group:output==="0" ? row.group : Object.hasOwn(row.output_groups || {},output) ? row.output_groups[output] : row.group,
+      group_order:row.physical_order?.[output]?.group ?? row.group_order,
+      screen_order:row.physical_order?.[output]?.screen ?? (output==="0" ? row.screen_order : null)};
+  }));
+}
+function physicalData(id) {
+  const [reader,output="0"] = id.split(":");
+  const row = cards.get(reader)?.data;
+  return row && physicalRows([row],true).find(o=>o.output===output);
+}
+function physicalReaders(ids) {return [...new Set(ids.map(id=>id.split(":")[0]))];}
 function orderedScreenGroups(rows) {
   const sections = new Map();
   for (const row of rows) {
@@ -3341,7 +3392,7 @@ function orderedScreenGroups(rows) {
     screenNames.compare(a.name,b.name) || screenNames.compare(a.id,b.id))]));
 }
 function positionScreens(rows) {
-  const sections = orderedScreenGroups(rows);
+  const sections = orderedScreenGroups(physicalRows(rows));
   let nextSection = holder.firstElementChild;
   for (const [name, members] of sections) {
     if (!screenSections.has(name)) {
@@ -3366,7 +3417,8 @@ function positionScreens(rows) {
     count.textContent = members.length + (members.length === 1 ? " écran" : " écrans");
     let nextCard = grid.firstElementChild;
     for (const row of members) {
-      const card = cards.get(row.id).el;
+      const card = row.output === "0" ? cards.get(row.readerId).el : secondaryCards.get(row.id)?.el;
+      if (!card) continue;
       if (card !== nextCard) grid.insertBefore(card, nextCard);
       nextCard = card.nextElementSibling;
     }
@@ -3410,6 +3462,7 @@ async function refreshScreens() {
     document.querySelector("#count").textContent = rows.filter(x => x.online).length + " en ligne";
     const ids = new Set(rows.map(row => row.id));
     for (const [id,card] of cards) if (!ids.has(id)) {card.el.remove();cards.delete(id);}
+    for (const [id,entry] of secondaryCards) if (!ids.has(entry.readerId)) {entry.el.remove();secondaryCards.delete(id);}
     for (const row of rows) render(row);
     identifyRows = rows.filter(row => row.paired);
     identifyControls();
@@ -3695,12 +3748,12 @@ function organizerFields() {
 }
 organizerButton.onclick = () => {
   const rows = [...cards.values()].map(card => card.data);
-  const names = [...new Set(rows.map(row => row.group).filter(Boolean))].sort((a, b) => a.localeCompare(b, "fr"));
+  const names = [...new Set(physicalRows(rows,true).map(row => row.group).filter(Boolean))].sort((a, b) => a.localeCompare(b, "fr"));
   organizerTarget.replaceChildren(new Option("Créer un groupe", "new"), new Option("Sans groupe", ""));
   for (const name of names) organizerTarget.add(new Option(name, "group:" + name));
   organizerName.value = "";
   organizerError.hidden = true;
-  renderScreenChoices(organizerList, rows, false);
+  renderScreenChoices(organizerList, physicalRows(rows,true), false);
   organizerFields();
   organizer.showModal();
 };
@@ -3719,7 +3772,7 @@ organizerForm.onsubmit = action(() => {
     organizerError.hidden = false;
     return;
   }
-  const screens = ids.map(id=>cards.get(id)?.data?.name || id).join(", ");
+  const screens = ids.map(id=>physicalData(id)?.name || id).join(", ");
   showAction({
     title:name ? "Affecter les écrans au groupe" : "Retirer les écrans de leur groupe",
     detail:screens + (name ? "\nGroupe « " + name + " »" : ""),
@@ -3961,7 +4014,7 @@ let groupSourcesSignature;
 function renderGroupSources() {
   const counts = new Map();
   const selected = new Set(groupSelection());
-  const online = Array.from(cards.values(), card => card.data).filter(row => row.paired && row.online);
+  const online = physicalRows(Array.from(cards.values(), card => card.data).filter(row => row.paired && row.online),true);
   const selectedOnline = online.filter(row => selected.has(row.id)).length;
   for (const row of online) {
     for (const source of new Set(row.report.sources || [])) {
@@ -3969,7 +4022,7 @@ function renderGroupSources() {
       counts.set(source, count + Number(selected.has(row.id)));
     }
   }
-  const selectedRows = groupSelection().map(id => cards.get(id)?.data);
+  const selectedRows = groupSelection().map(physicalData);
   const common = Object.values(commonResolutions(selectedRows)).flat();
   const tagged = new Set(resolutionControlsEnabled ? online.flatMap(row => Object.keys(row.source_resolutions || {})) : []);
   const items = Array.from(counts, ([source, count]) => [source, count, tagged.has(source) && !common.includes(source)])
@@ -4033,7 +4086,7 @@ function groupFields() {
   const count = groupSelection().length;
   const byResolution = operation === "resolution";
   select(group, "#group-resolution").hidden = !byResolution;
-  const common = byResolution ? commonResolutions(groupSelection().map(id => cards.get(id)?.data)) : {};
+  const common = byResolution ? commonResolutions(groupSelection().map(physicalData)) : {};
   resolutionOptions(groupResolution, common, groupResolution.value);
   const candidates = common[groupResolution.value] || [];
   const signature = JSON.stringify(candidates);
@@ -4060,7 +4113,7 @@ groupOpen.onclick = () => {
   groupResolutionSource.dataset.choices = "";
   renderGroupVolume();
   const rows = Array.from(cards.values(), card => card.data).filter(row => row.paired);
-  renderScreenChoices(groupScreens, rows, true);
+  renderScreenChoices(groupScreens, physicalRows(rows,true), true);
   groupFields();
   group.showModal();
 };
@@ -4074,7 +4127,7 @@ groupForm.onsubmit = action(() => {
   const operation = form.get("operation");
   if (operation === "media") {
     group.close();
-    openMediaManager(ids);
+    openMediaManager(physicalReaders(ids),"0",ids);
     return;
   }
   const deviceAction = groupDeviceActions[operation];
@@ -4082,10 +4135,10 @@ groupForm.onsubmit = action(() => {
   const resolution = byResolution ? groupResolution.value : undefined;
   const resolutionSource = byResolution ? groupResolutionSource.value : undefined;
   if (byResolution && (!resolution || !resolutionSource)) return;
-  const summary = ids.length + " écran(s) · " + ids.map(id => cards.get(id)?.data.name || id).join(", ");
+  const summary = ids.length + " écran(s) · " + ids.map(id => physicalData(id)?.name || id).join(", ");
   if (deviceAction) {
     showAction({
-      title:deviceAction.title, detail:summary + "\n" + deviceAction.detail, label:deviceAction.label,
+      title:deviceAction.title, detail:summary + "\n" + deviceAction.detail + "\nCette opération concerne le lecteur entier, y compris ses autres écrans.", label:deviceAction.label,
       async perform() {
         const {results} = await call(deviceAction.path || "/api/group", {ids, operation});
         group.close();
