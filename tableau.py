@@ -1986,7 +1986,8 @@ class Request(BaseHTTPRequestHandler):
                             and all(type(output.get(k)) is int and 0 < output[k] <= 16384 for k in ("width", "height"))
                             and not any(o["id"] == output["id"] for o in outputs)):
                         outputs.append(dict(id=output["id"], width=output["width"], height=output["height"],
-                                            playing=output.get("playing") is True,
+                                            playing=output.get("playing") is True, local=output.get("local") is True,
+                                            media_error=str(output.get("media_error") or "")[:240],
                                             model=output["model"][:160] if isinstance(output.get("model"), str) else "",
                                             **{k: output[k] for k in ("resolution_width", "resolution_height")
                                                if type(output.get(k)) is int and 0 < output[k] <= 32768}))
