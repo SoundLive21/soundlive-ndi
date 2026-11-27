@@ -248,6 +248,39 @@ def capture_ndi_preview(source_name):
         ndi.NDIlib_destroy()
 
 
+def linux_monitor_identity(display, monitor, index):
+    screen = display.get_default_screen()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        connector = screen.get_monitor_plug_name(index) if index >= 0 else None
+    model = " ".join(dict.fromkeys(filter(None, (monitor.get_manufacturer(), monitor.get_model()))))
+    outputs = list(Path("/sys/class/drm").glob("card*-*/edid"))
+    # Match the connector, never assign another monitor's EDID by list order.
+    exact = [item for item in outputs if item.parent.name.partition("-")[2] == connector]
+    if not exact and display.get_n_monitors() == 1:
+        for item in outputs:
+            try:
+                if (item.parent / "status").read_text().strip() == "connected":
+                    exact.append(item)
+            except OSError:
+                continue
+    if len(exact) == 1:
+        try:
+            edid = exact[0].read_bytes()
+        except OSError:
+            edid = b""
+        if len(edid) >= 128 and edid[:8] == bytes.fromhex("00ffffffffffff00"):
+            connector = exact[0].parent.name.partition("-")[2]
+            for start in (54, 72, 90, 108):
+                descriptor = edid[start:start + 18]
+                if descriptor[:5] == b"\x00\x00\x00\xfc\x00":
+                    name = descriptor[5:].decode("ascii", "replace").strip(" \r\n\x00")
+                    if name:
+                        model = name
+                        break
+    return dict(model=model, connector=connector or "")
+
+
 def display_snapshot_linux(player_pid, capture):
     import gi
     gi.require_version("Gdk", "3.0")
@@ -285,13 +318,10 @@ def display_snapshot_linux(player_pid, capture):
     rect = monitor.get_geometry()
     scale = monitor.get_scale_factor()
     index = next((i for i in range(display.get_n_monitors()) if display.get_monitor(i) == monitor), -1)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        connector = screen.get_monitor_plug_name(index) if index >= 0 else None
+    identity = linux_monitor_identity(display, monitor, index)
     grim = shutil.which("grim") if not x11 else None
     info = dict(width=rect.width * scale, height=rect.height * scale,
-                model=" ".join(dict.fromkeys(filter(None, (monitor.get_manufacturer(), monitor.get_model())))),
-                connector=connector or "", estimated=not x11, capture=bool(x11 or grim))
+                **identity, estimated=not x11, capture=bool(x11 or grim))
     if not capture and gnome_portal:
         info["capture"] = False
         info["portal"] = True
@@ -314,30 +344,6 @@ def display_snapshot_linux(player_pid, capture):
         except (GLib.Error, IndexError, TypeError, ValueError):
             pass
     if not capture:
-        connector = info["connector"]
-        outputs = list(Path("/sys/class/drm").glob("card*-*/edid"))
-        exact = [item for item in outputs if item.parent.name.partition("-")[2] == connector]
-        if not exact and display.get_n_monitors() == 1:
-            for item in outputs:
-                try:
-                    if (item.parent / "status").read_text().strip() == "connected":
-                        exact.append(item)
-                except OSError:
-                    continue
-        if len(exact) == 1:
-            try:
-                edid = exact[0].read_bytes()
-            except OSError:
-                edid = b""
-            if len(edid) >= 128 and edid[:8] == bytes.fromhex("00ffffffffffff00"):
-                info["connector"] = exact[0].parent.name.partition("-")[2]
-                for start in (54, 72, 90, 108):
-                    descriptor = edid[start:start + 18]
-                    if descriptor[:5] == b"\x00\x00\x00\xfc\x00":
-                        model = descriptor[5:].decode("ascii", "replace").strip(" \r\n\x00")
-                        if model:
-                            info["model"] = model
-                            break
         return info
     if x11:
         image = Gdk.pixbuf_get_from_window(screen.get_root_window(), rect.x, rect.y, rect.width, rect.height)
@@ -2585,7 +2591,7 @@ def desktop():
                         if monitor_index is None:
                             continue
                         monitor = display.get_monitor(monitor_index)
-                        output["model"] = " ".join(dict.fromkeys(filter(None, (monitor.get_manufacturer(), monitor.get_model()))))
+                        output.update(linux_monitor_identity(display, monitor, monitor_index))
                         output["resolution_width"] = output["width"] * monitor.get_scale_factor()
                         output["resolution_height"] = output["height"] * monitor.get_scale_factor()
                 except (OSError, ValueError, subprocess.SubprocessError):
@@ -3155,6 +3161,7 @@ def run_windows_screen(tk, log):
                     info = display_snapshot_windows(0, False, point=(x + width // 2, y + height // 2))
                     if info["bounds"] == (x, y, width, height):
                         output["model"] = info["model"]
+                        output["connector"] = info["connector"]
                 except (OSError, RuntimeError, ValueError):
                     pass
                 found.append(output)
