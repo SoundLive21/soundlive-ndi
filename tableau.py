@@ -2160,6 +2160,7 @@ class Request(BaseHTTPRequestHandler):
                              media=screen_media(row), extra_media=extra_media_configs(row),
                              media_catalog=catalog_items(row),
                              preview_request=preview,
+                             output_groups=row.get("output_groups", {}),
                              waiting=dict(name=row["name"], group=row.get("group"),
                                           qr=getattr(self.server, "waiting_qr", None)),
                              reader_update=recommendation, os_job=os_job,
