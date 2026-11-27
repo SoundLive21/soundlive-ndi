@@ -564,6 +564,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
     <p class="small" id="media-targets"></p>
     <div class="media-disks" id="media-disks" aria-label="Espace disque"></div>
     <label>Dossier<select id="media-folders"></select></label>
+    <label id="media-output-label" hidden>Diffuser sur<select id="media-output"><option value="0">Écran 1</option></select></label>
     <div id="media-folder-edit">
       <div class="actions">
         <button type="button" id="media-create-open">Créer un nouveau dossier</button>
@@ -2019,6 +2020,8 @@ function commonResolutions(rows) {
 }
 const mediaDialog = document.querySelector("#media-manager");
 const mediaFolders = select(mediaDialog, "#media-folders");
+const mediaOutput = select(mediaDialog, "#media-output");
+const mediaOutputLabel = select(mediaDialog, "#media-output-label");
 const mediaTiming = select(mediaDialog, "#media-timing");
 let mediaTimingKey = "";
 const mediaList = select(mediaDialog, "#media-list");
@@ -2260,11 +2263,31 @@ function updateMediaSelection(count) {
   mediaRemoveSelected.disabled = mediaBusy || !mediaSelected.size;
   mediaDownloadSelected.disabled = mediaRemoveSelected.disabled || mediaExporting;
 }
+function mediaOutputIds(row) {
+  return ["0", ...(row.report.outputs || []).filter(o => o.id !== "0").map(o => o.id)];
+}
+function mediaSelectedOutputs(row) {
+  const ids = mediaOutputIds(row);
+  if (mediaOutputLabel.hidden) return ["0"];
+  return mediaOutput.value === "all" ? ids : [ids.includes(mediaOutput.value) ? mediaOutput.value : "0"];
+}
+function mediaOutputName(ids) {
+  return ids.map(id => "Écran " + (Number(id) + 1)).join(" + ");
+}
+function mediaOutputFolder(row, id) {
+  return id === "0" ? (row.media.enabled ? row.media_folder : null) : row.extra_media?.[id];
+}
 function renderMediaManager(preferFolder) {
   if (!mediaDialog.open) return;
   const rows = mediaRows();
   if (!rows.length) { mediaDialog.close(); return; }
   select(mediaDialog, "#media-targets").textContent = rows.map(row => row.name).join(" · ");
+  const ids = rows.length === 1 ? mediaOutputIds(rows[0]) : ["0"];
+  mediaOutputLabel.hidden = ids.length < 2;
+  const options = ids.map(id => [id, "Écran " + (Number(id) + 1)]);
+  if (ids.length > 1) options.push(["all", ids.length === 2 ? "Les deux écrans" : "Tous les écrans"]);
+  mediaSelect(mediaOutput, options);
+  mediaOutput.disabled = mediaBusy;
   select(mediaDialog, "#media-disks").replaceChildren(mediaDiskCard("Régie", mediaRegieDisk, false),
     ...rows.map(row => mediaDiskCard(row.name,row.media_disk,!row.online)));
   const groups = mediaGroups(rows);
@@ -2286,19 +2309,25 @@ function renderMediaManager(preferFolder) {
   }
   for (const field of mediaTiming.elements) field.disabled = mediaBusy;
   const entries = mediaEntries(folder);
-  const active = folder.targets.filter(({row,id}) => row.media.enabled && row.media_folder === id);
-  const running = active.filter(({row}) => row.online && row.report.active_media &&
-    row.report.media_status?.revision === row.media_revision);
-  const status = running.length ? "Lecture locale en cours sur " + running.length + "/" + rows.length + " écran(s)." :
-    active.length ? "Dossier sélectionné pour la lecture sur " + active.length + "/" + rows.length + " écran(s)." :
+  const physical = folder.targets.flatMap(({row,id}) => mediaSelectedOutputs(row).map(output => ({row,id,output})));
+  const active = physical.filter(({row,id,output}) => mediaOutputFolder(row, output) === id);
+  const running = active.filter(({row,output}) => row.online && (output === "0" ?
+    row.report.active_media && row.report.media_status?.revision === row.media_revision :
+    row.report.outputs?.some(o => o.id === output && o.local && o.playing)));
+  const status = running.length ? "Lecture locale en cours sur " + running.length + "/" + physical.length + " écran(s)." :
+    active.length ? "Dossier sélectionné pour la lecture sur " + active.length + "/" + physical.length + " écran(s)." :
     folder.targets.every(({folder}) => folder.items.length) ? "Dossier prêt à être sélectionné." : "Ajoute des fichiers pour lancer ce dossier.";
   const errors = folder.targets.filter(({row}) => row.report.media_status?.error)
     .map(({row}) => row.name + " · " + row.report.media_status.error);
+  for (const {row,output} of physical) {
+    const error = row.report.outputs?.find(o => o.id === output)?.media_error;
+    if (error) errors.push(row.name + " · Écran " + (Number(output)+1) + " · " + error);
+  }
   const downloading = folder.targets.filter(({row,folder}) => folder.items.some(item => !row.report.media_status?.cached?.includes(item.id)));
   mediaStatus.textContent = [status, downloading.length ? "Copie en attente ou en cours sur " + downloading.length + " écran(s)." : "", ...errors].filter(Boolean).join(" ");
   mediaFolders.disabled = mediaBusy;
   select(mediaDialog,"#media-launch").disabled = mediaBusy || folder.targets.some(({folder}) => !folder.items.length);
-  select(mediaDialog,"#media-ndi").disabled = mediaBusy || !rows.some(row => row.media.enabled);
+  select(mediaDialog,"#media-ndi").disabled = mediaBusy || !rows.some(row => mediaSelectedOutputs(row).some(id => mediaOutputFolder(row,id)));
   select(mediaDialog,"#media-empty-all").disabled = mediaBusy || !rows.some(mediaFileCount);
   select(mediaDialog,"#media-empty-folder").disabled = mediaBusy || !folder.targets.some(target => target.folder.items.length);
   select(mediaDialog,"#media-folder-remove").disabled = mediaBusy || mediaFolders.value === "general";
@@ -2330,6 +2359,7 @@ function renderMediaManager(preferFolder) {
 function openMediaManager(ids) {
   if (mediaBusy) return;
   mediaIds = ids;
+  mediaOutput.value = "0";
   mediaFileKey = "";
   mediaSelected.clear();
   mediaInput.value = "";
@@ -2349,6 +2379,7 @@ mediaDialog.addEventListener("close", () => {
   mediaPlayer.dataset.source = "";
 });
 mediaFolders.onchange = () => { mediaFileKey = ""; mediaSelected.clear(); renderMediaManager(); };
+mediaOutput.onchange = () => renderMediaManager();
 mediaTiming.onsubmit = event => {
   event.preventDefault();
   const folder = selectedMediaFolder();
@@ -2389,16 +2420,16 @@ async function mediaBatch(targets, perform, done, preferFolder) {
 const selectedMediaFolder = () => mediaGroups(mediaRows()).get(mediaFolders.value);
 const selectedMediaEntry = () => mediaEntries(selectedMediaFolder()).get(mediaFileKey);
 const mediaChange = (target, data) => call("/api/media-settings",{id:target.row.id,folder:target.id,...data});
-const returnToNdi = row => call("/api/media-settings",{id:row.id,action:"play",enabled:false});
+const returnToNdi = (row, outputs) => call("/api/media-settings",{id:row.id,action:"play",enabled:false,outputs});
 
-function confirmReturnToNdi(targets) {
-  const active = targets.filter(({row})=>row.media?.enabled);
+function confirmReturnToNdi(targets, perOutput = false) {
+  const active = targets.map(target => ({...target, outputs:(perOutput ? mediaSelectedOutputs(target.row) : mediaOutputIds(target.row).concat(Object.keys(target.row.extra_media || {}))).filter(id => mediaOutputFolder(target.row,id))})).filter(target => target.outputs.length);
   if (mediaBusy || !active.length) return;
   showAction({
     title:"Revenir à la diffusion NDI",
-    detail:active.map(({row})=>row.name).join(", ") + "\nLa source NDI configurée remplacera le média local.",
+    detail:active.map(({row,outputs})=>row.name + " · " + mediaOutputName([...new Set(outputs)])).join(", ") + "\nLa source NDI configurée remplacera le média local.",
     label:"Revenir au NDI",
-    perform:() => mediaBatch(active,({row})=>returnToNdi(row),"Retour au NDI demandé")
+    perform:() => mediaBatch(active,({row,outputs})=>returnToNdi(row,[...new Set(outputs)]),"Retour au NDI demandé")
   });
 }
 
@@ -2544,14 +2575,15 @@ mediaNameForm.onsubmit = action(async () => {
 select(mediaDialog,"#media-launch").onclick = action(() => {
   const folder = selectedMediaFolder();
   if (mediaBusy || !folder || folder.targets.some(target=>!target.folder.items.length)) return;
+  const targets = folder.targets.map(target => ({...target, outputs:mediaSelectedOutputs(target.row)}));
   showAction({
     title:"Lancer ce dossier",
-    detail:"« " + folder.name + " » sera diffusé sur " + folder.targets.map(({row})=>row.name).join(", ") + ".",
+    detail:"« " + folder.name + " » sera diffusé sur " + targets.map(({row,outputs})=>row.name + " · " + mediaOutputName(outputs)).join(", ") + ".",
     label:"Lancer la lecture",
-    perform:() => mediaBatch(folder.targets,target=>mediaChange(target,{action:"play",enabled:true}),"Lecture demandée")
+    perform:() => mediaBatch(targets,target=>mediaChange(target,{action:"play",enabled:true,outputs:target.outputs}),"Lecture demandée")
   });
 });
-select(mediaDialog,"#media-ndi").onclick = action(() => confirmReturnToNdi(selectedMediaFolder()?.targets || []));
+select(mediaDialog,"#media-ndi").onclick = action(() => confirmReturnToNdi(selectedMediaFolder()?.targets || [], true));
 select(mediaDialog,"#media-empty-all").onclick = action(() => {
   const targets = mediaRows().map(row => ({row, count:mediaFileCount(row)})).filter(({count}) => count > 0);
   if (mediaBusy || !targets.length) return;
@@ -2926,12 +2958,13 @@ function renderExtraOutputs(card, row) {
   box.hidden = !row.online || outputs.length < 2;
   if (box.hidden) return;
   if (box.contains(document.activeElement)) return;
-  const signature = JSON.stringify([outputs, row.extra_outputs, row.report.sources, row.media?.enabled]);
+  const signature = JSON.stringify([outputs, row.extra_outputs, row.extra_media, row.report.sources, row.media?.enabled]);
   if (box.dataset.signature === signature) return;
   box.dataset.signature = signature;
   box.replaceChildren();
   for (const output of outputs.filter(o => o.id !== "0")) {
     const current = row.extra_outputs?.[output.id] || {};
+    const mediaFolder = row.extra_media?.[output.id];
     const line = document.createElement("fieldset");
     const heading = document.createElement("legend");
     line.className = "video-output";
@@ -2942,7 +2975,12 @@ function renderExtraOutputs(card, row) {
       new Option("Même flux que l’écran 1", "same"),
       ...sources.map(s => new Option(s, "ndi:" + s)));
     source.value = current.enabled !== true ? "off" :
-      current.mode === "same" ? "same" : "ndi:" + current.source;
+      current.mode === "same" ? "same" : current.source ? "ndi:" + current.source : "off";
+    if (mediaFolder) {
+      source.append(new Option("Médias locaux · " + (row.media_folders?.[mediaFolder]?.name || "Dossier sélectionné"), "local"));
+      source.value = "local";
+      source.disabled = true;
+    }
     const bandwidth = document.createElement("select");
     bandwidth.append(new Option("High - 720p/1080p/4K (flux prod)", "0"),
       new Option("Low 360p (flux preview)", "1"));
@@ -2966,7 +3004,8 @@ function renderExtraOutputs(card, row) {
     audio.className = "check";
     audio.append(muted, " Couper le son");
     const sync = () => {
-      bandwidth.disabled = volume.disabled = muted.disabled = source.value === "off";
+      bandwidth.disabled = !!mediaFolder || source.value === "off";
+      volume.disabled = muted.disabled = !mediaFolder && source.value === "off";
     };
     source.onchange = sync;
     sync();
@@ -2983,8 +3022,8 @@ function renderExtraOutputs(card, row) {
     };
     save.onclick = action(() => {
       const settings = {
-        enabled:source.value !== "off", mode:source.value === "off" ? (current.mode || "independent") : source.value === "same" ? "same" : "independent",
-        source:source.value === "off" ? (current.source || "") : source.value.startsWith("ndi:") ? source.value.slice(4) : "",
+        enabled:mediaFolder ? current.enabled === true : source.value !== "off", mode:mediaFolder || source.value === "off" ? (current.mode || "independent") : source.value === "same" ? "same" : "independent",
+        source:mediaFolder || source.value === "off" ? (current.source || "") : source.value.startsWith("ndi:") ? source.value.slice(4) : "",
         bandwidth:bandwidth.value, volume:Number(volume.value), muted:muted.checked, orientation:orientation.value
       };
       showAction({
@@ -2999,7 +3038,7 @@ function renderExtraOutputs(card, row) {
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.textContent = current.enabled === true ? "Stop" : "Reprendre";
-    toggle.disabled = current.enabled !== true && current.mode !== "same" && !current.source;
+    toggle.disabled = !mediaFolder && current.enabled !== true && current.mode !== "same" && !current.source;
     toggle.title = toggle.disabled ? "Sélectionne d’abord une source et applique les réglages." : "";
     toggle.onclick = action(() => {
       const latest = card.data.extra_outputs?.[output.id] || {};
@@ -3012,7 +3051,7 @@ function renderExtraOutputs(card, row) {
       showAction({
         title:(stopping ? "Arrêter la diffusion sur " : "Reprendre la diffusion sur ") + screenTitle,
         detail:stopping ? "Cet écran affichera sa page d’attente. Les autres écrans ne seront pas modifiés." :
-          "Cet écran reprendra la source NDI enregistrée, sans modifier les autres écrans.",
+          (mediaFolder ? "Cet écran reprendra son dossier de médias locaux, sans modifier les autres écrans." : "Cet écran reprendra la source NDI enregistrée, sans modifier les autres écrans."),
         label:stopping ? "Arrêter" : "Reprendre",
         successTitle:stopping ? "Arrêt demandé" : "Reprise demandée",
         perform:() => applyOutput(settings)
@@ -3037,7 +3076,7 @@ function render(row) {
   const handle = select(el, ".card-heading .drag-handle");
   handle.title = "Déplacer " + row.name + " · Glisser ou utiliser les flèches";
   handle.setAttribute("aria-label",handle.title);
-  ui["return-ndi"].hidden = !row.paired || !row.media?.enabled;
+  ui["return-ndi"].hidden = !row.paired || !(row.media?.enabled || Object.keys(row.extra_media || {}).length);
   ui.identify.hidden = !row.paired;
   ui.identify.setAttribute("aria-pressed", String(row.identify));
   ui.identify.setAttribute("aria-label", "Identification de " + row.name);
