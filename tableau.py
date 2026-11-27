@@ -135,21 +135,26 @@ SHARED_ACTION_DIALOG = """<style>#sl-action[data-state="success"] .dialog-headin
  window.slPrompt=(message,value="")=>show(message,"Renseigne le nom souhaité.","confirm",value);
  window.slResult=(message,error=false)=>{const notify=typeof showToast==="function"?showToast:window.showToast;notify(error?"Action impossible":"Action effectuée",error?"error":"success",message)};
 }</script>"""
-PERSONAL_MEDIA_DIALOG = """<dialog id="personal-media-dialog" aria-labelledby="pm-title" style="width:min(900px,94vw)"><div class="dialog-body"><div class="row"><h2 id="pm-title">Médias personnels</h2><button type="button" id="pm-close">Fermer</button></div><label>Utilisateur<select id="pm-owner"></select></label><label>Dossier<select id="pm-folder"></select></label><div class="actions"><button id="pm-create">Créer un dossier</button><button id="pm-rename">Renommer le dossier</button><button id="pm-remove">Supprimer le dossier</button></div><label>Images et vidéos<input type="file" id="pm-files" multiple accept=".jpg,.jpeg,.png,.mp4,.m4v,.mov,.webm,.mkv"></label><button class="primary" id="pm-upload">Déposer les fichiers</button><p id="pm-message" role="status"></p><div id="pm-items"></div><label>Écran de destination<select id="pm-screen"></select></label><button class="primary" id="pm-play">Diffuser ce dossier</button><p class="small">La diffusion transfère une copie du dossier vers le lecteur.</p></div></dialog><script>{const dialog=document.getElementById("personal-media-dialog");
-const q=id=>document.getElementById("pm-"+id);let state,busy=false;
-async function api(path,data,raw=false){const r=await fetch(path,data===undefined?{}:{method:"POST",headers:{"Content-Type":raw?"application/octet-stream":"application/json"},body:raw?data:JSON.stringify(data)});if(r.status===401){location.href="/connexion";throw Error("Session expirée")}const v=await r.json();if(!r.ok)throw Error(v.error||r.status);return v}
+PERSONAL_MEDIA_DIALOG = """<dialog id="personal-media-dialog" aria-labelledby="pm-title" style="width:min(920px,94vw)"><div class="dialog-body"><div class="media-heading"><h2 id="pm-title">Images et vidéos · Médias personnels</h2></div><label>Utilisateur<select id="pm-owner"></select></label><div class="media-disks" id="pm-disks"></div><section><h3>Diffusion actuelle par écran</h3><div class="media-output-cards" id="pm-outputs"></div></section><h3>Bibliothèque de médias</h3><label>Dossier<select id="pm-folder"></select></label><div class="actions"><button id="pm-create">Créer un nouveau dossier</button><button id="pm-rename">Renommer le dossier</button><button id="pm-empty">Vider le dossier en cours</button><button id="pm-remove" class="remove">Supprimer le dossier</button></div><label>Écran de destination<select id="pm-screen"></select></label><div class="actions"><button class="primary" id="pm-play">Lancer ce dossier</button><button id="pm-ndi">Revenir à la diffusion NDI</button></div><div class="actions"><label>Durée des images (s)<input id="pm-images" type="number" min="1" max="3600" value="10"></label><label>Durée max. des vidéos (s)<input id="pm-videos" type="number" min="0" max="3600" value="0"></label><button id="pm-timing">Enregistrer les durées</button></div><p class="small">0 = lire la vidéo jusqu’à la fin.</p><div class="media-grid"><div><label>Images et vidéos<input type="file" id="pm-files" multiple accept=".jpg,.jpeg,.png,.mp4,.m4v,.mov,.webm,.mkv"></label><button id="pm-upload">Envoyer les fichiers</button><div class="media-progress" id="pm-progress" hidden><span id="pm-progress-text" class="small"></span><progress max="100" value="0"></progress></div><div class="media-bulk"><label class="check"><input type="checkbox" id="pm-all"> Tout sélectionner</label><button class="button-red" id="pm-bulk-remove">Supprimer</button></div><ol class="media-list" id="pm-items"></ol></div><section class="media-preview"><p id="pm-hint" class="small">Choisis un fichier pour l’afficher.</p><div id="pm-player"></div><div id="pm-file-actions" hidden><div class="action-row"><a class="media-download" id="pm-download" download>Télécharger</a><button id="pm-file-rename">Renommer</button><button id="pm-file-remove" class="button-red">Supprimer</button></div><label>Déplacer vers<select id="pm-move"></select></label><button id="pm-move-go">Déplacer</button></div></section></div><p id="pm-message" role="status" class="small"></p><div class="actions"><button class="primary" id="pm-close">Fermer</button></div></div></dialog><script>{
+const dialog=document.getElementById("personal-media-dialog"),q=id=>document.getElementById("pm-"+id);let state,busy=false,selected="",checked=new Set();
+async function api(path,data){const r=await fetch(path,data===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});if(r.status===401){location.href="/connexion";throw Error("Session expirée")}const v=await r.json();if(!r.ok)throw Error(v.error||r.status);return v}
 const query=(extra={})=>new URLSearchParams({owner:q("owner").value,folder:q("folder").value,...extra});
-const act=async(action,extra={})=>{const result=await api("/api/personal-media",{owner:q("owner").value,folder:q("folder").value,action,...extra});slResult(({create:"Dossier créé.",rename:"Dossier renommé.","remove-folder":"Dossier supprimé.","rename-file":"Fichier renommé.","remove-file":"Fichier supprimé.",play:"Diffusion demandée."})[action]||"Modifications enregistrées.");return result};
-const run=f=>async()=>{if(busy)return;busy=true;const controls=[...dialog.querySelectorAll("button,select,input")];controls.forEach(x=>x.disabled=true);try{q("message").textContent="Traitement en cours…";await f();await load();q("message").textContent=""}catch(e){q("message").textContent=e.message;slResult(e.message,true)}finally{busy=false;controls.forEach(x=>x.disabled=false)}};
+const act=(action,extra={})=>api("/api/personal-media",{owner:q("owner").value,folder:q("folder").value,action,...extra});
+const run=f=>async()=>{if(busy)return;busy=true;const controls=[...dialog.querySelectorAll("button,select,input")];controls.forEach(x=>x.disabled=true);try{const result=await f();if(result!==false){await load();slResult("Modifications enregistrées.")}}catch(e){q("message").textContent=e.message;slResult(e.message,true)}finally{busy=false;controls.forEach(x=>x.disabled=false);q("progress").hidden=true;sync()}};
 function options(node,items,previous){node.replaceChildren(...items.map(([v,n])=>new Option(n,v)));if(items.some(x=>x[0]===previous))node.value=previous}
-async function load(){const owner=q("owner").value,folder=q("folder").value,screen=q("screen").value;state=await api("/api/personal-media?"+new URLSearchParams({owner}));options(q("owner"),state.owners.map(x=>[x,x]),state.owner);options(q("folder"),Object.entries(state.folders).map(([id,f])=>[id,f.name]),folder);options(q("screen"),Object.entries(state.screens),screen);draw()}
-function draw(){const box=q("items");box.replaceChildren();for(const item of state.folders[q("folder").value]?.items||[]){const row=document.createElement("div");row.className="row";const name=document.createElement("a");name.textContent=item.name;name.href="/api/personal-media/file?"+query({file:item.id});name.target="_blank";name.rel="noopener";const rename=document.createElement("button"),remove=document.createElement("button");rename.textContent="Renommer";remove.textContent="Supprimer";rename.onclick=run(async()=>{const n=await slPrompt("Nouveau nom",item.name);if(n)await act("rename-file",{file:item.id,name:n})});remove.onclick=run(async()=>{if(await slConfirm("Supprimer "+item.name+" ?"))await act("remove-file",{file:item.id})});row.append(name,rename,remove);box.append(row)}}
-q("owner").onchange=()=>load().catch(e=>q("message").textContent=e.message);q("folder").onchange=draw;
-q("create").onclick=run(async()=>{const name=await slPrompt("Nom du dossier");if(name)await act("create",{name})});q("rename").onclick=run(async()=>{const name=await slPrompt("Nouveau nom",state.folders[q("folder").value]?.name);if(name)await act("rename",{name})});q("remove").onclick=run(async()=>{if(await slConfirm("Supprimer le dossier et ses fichiers ?"))await act("remove-folder")});
-q("upload").onclick=run(async()=>{for(const file of q("files").files){q("message").textContent="Envoi : "+file.name;await api("/api/personal-media/upload?"+query({name:file.name}),file,true)}q("files").value="";slResult("Fichiers importés.")});
-q("play").onclick=run(async()=>{if(!q("screen").value)throw Error("Aucun écran autorisé.");if(await slConfirm("Diffuser ce dossier sur l’écran sélectionné ?"))await act("play",{screen:q("screen").value})});
-const open=()=>{if(dialog.open)return;dialog.showModal();load().catch(e=>q("message").textContent=e.message)};
-document.querySelectorAll("[data-personal-media]").forEach(b=>b.addEventListener("click",open));q("close").onclick=()=>{if(!busy)dialog.close()};dialog.addEventListener("cancel",e=>{if(busy)e.preventDefault()});
+const items=()=>state?.folders[q("folder").value]?.items||[];
+const current=()=>items().find(i=>i.id===selected);
+const size=n=>(n/1048576).toLocaleString("fr-FR",{maximumFractionDigits:1})+" Mio";
+async function load(){const owner=q("owner").value,folder=q("folder").value,screen=q("screen").value;state=await api("/api/personal-media?"+new URLSearchParams({owner}));options(q("owner"),state.owners.map(x=>[x,x]),state.owner);options(q("folder"),Object.entries(state.folders).map(([id,f])=>[id,f.name]),folder);options(q("screen"),Object.entries(state.screens),screen);q("disks").textContent=state.disk?"Espace disponible sur la régie : "+size(state.disk):"";q("outputs").replaceChildren();for(const [id,o] of Object.entries(state.outputs||{})){const card=document.createElement("div");card.className="disk-card";const title=document.createElement("strong");title.textContent=state.screens[id];const p=document.createElement("p");p.textContent=o.mode;const b=document.createElement("button");b.textContent="Revenir au NDI";b.disabled=!o.local;b.onclick=run(async()=>{if(!await slConfirm("Revenir au NDI sur "+title.textContent+" ?"))return false;await act("ndi",{screen:id})});card.append(title,p,b);q("outputs").append(card)}draw()}
+function sync(){const ids=items().map(i=>i.id);q("all").checked=!!ids.length&&ids.every(id=>checked.has(id));q("all").indeterminate=!q("all").checked&&ids.some(id=>checked.has(id));q("bulk-remove").disabled=!checked.size;q("play").disabled=!ids.length||!q("screen").value;q("ndi").disabled=!q("screen").value;q("remove").disabled=q("folder").value==="general"}
+function preview(){const item=current();q("player").replaceChildren();q("file-actions").hidden=!item;q("hint").hidden=!!item;if(!item)return;const url="/api/personal-media/file?"+query({file:item.id}),video=/[.](mp4|m4v|mov|webm|mkv)$/i.test(item.name);const el=document.createElement(video?"video":"img");if(video){el.controls=true;el.preload="metadata"}else el.alt=item.name;el.src=url;const name=document.createElement("h3");name.textContent=item.name;const meta=document.createElement("p");meta.className="small media-preview-meta";meta.textContent=size(item.size);q("player").append(name,meta,el);q("download").href=url;q("download").download=item.name;options(q("move"),Object.entries(state.folders).filter(([id])=>id!==q("folder").value).map(([id,f])=>[id,f.name]));q("move-go").disabled=!q("move").value}
+function draw(){const folder=state.folders[q("folder").value];q("images").value=folder?.timing?.image_seconds??10;q("videos").value=folder?.timing?.video_seconds??0;checked=new Set([...checked].filter(id=>items().some(i=>i.id===id)));if(!current())selected="";const box=q("items");box.replaceChildren();for(const item of items()){const row=document.createElement("li"),check=document.createElement("input"),icon=document.createElement("span"),handle=document.createElement("button"),name=document.createElement("button");check.type="checkbox";check.checked=checked.has(item.id);check.onchange=()=>{if(check.checked)checked.add(item.id);else checked.delete(item.id);sync()};icon.textContent=/[.](jpg|jpeg|png)$/i.test(item.name)?"▧":"▷";handle.textContent="⠿";handle.className="drag-handle";handle.draggable=true;handle.ondragstart=e=>e.dataTransfer.setData("text/plain",item.id);row.ondragover=e=>e.preventDefault();row.ondrop=e=>{e.preventDefault();const file=e.dataTransfer.getData("text/plain");if(file&&file!==item.id)run(()=>act("reorder",{file,anchor:item.id}))()};name.textContent=item.name;name.style.whiteSpace="normal";name.style.textAlign="left";name.setAttribute("aria-pressed",String(selected===item.id));name.onclick=()=>{selected=item.id;draw()};row.append(check,icon,handle,name);box.append(row)}preview();sync()}
+q("owner").onchange=()=>{selected="";checked.clear();load().catch(e=>slResult(e.message,true))};q("folder").onchange=()=>{selected="";checked.clear();draw()};q("screen").onchange=sync;q("all").onchange=()=>{checked=new Set(q("all").checked?items().map(i=>i.id):[]);draw()};
+q("create").onclick=run(async()=>{const name=await slPrompt("Nom du dossier");if(!name)return false;await act("create",{name})});q("rename").onclick=run(async()=>{const name=await slPrompt("Nouveau nom",state.folders[q("folder").value]?.name);if(!name)return false;await act("rename",{name})});q("remove").onclick=run(async()=>{if(!await slConfirm("Supprimer le dossier et ses fichiers ?"))return false;await act("remove-folder")});q("empty").onclick=run(async()=>{if(!await slConfirm("Vider ce dossier ?"))return false;await act("empty-folder")});q("timing").onclick=run(()=>act("timing",{image_seconds:Number(q("images").value),video_seconds:Number(q("videos").value)}));
+q("file-rename").onclick=run(async()=>{const item=current();if(!item)return false;const name=await slPrompt("Nouveau nom",item.name);if(!name)return false;await act("rename-file",{file:item.id,name})});q("file-remove").onclick=run(async()=>{if(!current()||!await slConfirm("Supprimer "+current().name+" ?"))return false;await act("remove-file",{file:selected})});q("bulk-remove").onclick=run(async()=>{if(!checked.size||!await slConfirm("Supprimer "+checked.size+" fichier(s) ?"))return false;await act("remove-files",{files:[...checked]});checked.clear()});q("move-go").onclick=run(()=>act("move",{file:selected,destination:q("move").value}));
+q("upload").onclick=run(async()=>{const files=[...q("files").files];if(!files.length)return false;q("progress").hidden=false;const bar=q("progress").querySelector("progress");let done=0,total=files.reduce((n,f)=>n+f.size,0);for(const file of files){await new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open("POST","/api/personal-media/upload?"+query({name:file.name}));xhr.setRequestHeader("Content-Type","application/octet-stream");xhr.upload.onprogress=e=>{bar.value=100*(done+e.loaded)/total;q("progress-text").textContent=file.name+" · "+Math.round(bar.value)+" %"};xhr.onload=()=>{if(xhr.status>=200&&xhr.status<300)resolve();else{let msg="Envoi impossible";try{msg=JSON.parse(xhr.responseText).error||msg}catch{}reject(Error(msg))}};xhr.onerror=()=>reject(Error("Transfert interrompu"));xhr.send(file)});done+=file.size}q("files").value=""});
+q("play").onclick=run(async()=>{if(!await slConfirm("Diffuser ce dossier sur l’écran sélectionné ?"))return false;await act("play",{screen:q("screen").value})});q("ndi").onclick=run(async()=>{if(!await slConfirm("Revenir à la diffusion NDI ?"))return false;await act("ndi",{screen:q("screen").value})});
+const open=()=>{if(dialog.open)return;dialog.showModal();load().catch(e=>slResult(e.message,true))};document.querySelectorAll("[data-personal-media]").forEach(b=>b.addEventListener("click",open));q("close").onclick=()=>{if(!busy)dialog.close()};dialog.addEventListener("cancel",e=>{if(busy)e.preventDefault()});dialog.addEventListener("close",()=>q("player").replaceChildren());
 }</script>"""
 
 
@@ -266,7 +271,7 @@ for(const [k,r] of readerCards){const outputs=activeReaders.get(k);if(!outputs){
 for(const [name,g] of groups)if(!g.grid.children.length){g.section.remove();groups.delete(name)}
 if(!dragging&&!document.activeElement?.closest(".operator-card"))reorder();
 }
-q("logout").onclick=run(async()=>{await api("/api/session/deconnexion",{});location.href="/connexion"});refresh().catch(e=>q("message").textContent=e.message);setInterval(()=>refresh().catch(e=>q("message").textContent=e.message),3000);
+q("logout").onclick=run(async()=>{if(!await slConfirm("Tu reviendras à la page de connexion de la régie.","Me déconnecter"))return;await api("/api/session/deconnexion",{});location.href="/connexion?etat=fermee"});refresh().catch(e=>q("message").textContent=e.message);setInterval(()=>refresh().catch(e=>q("message").textContent=e.message),3000);
 </script></html>"""
 _dashboard_markup = (ROOT / "tableau.html").read_text(encoding="utf-8")
 def shared_dashboard_template(name):
@@ -2124,7 +2129,17 @@ class Request(BaseHTTPRequestHandler):
                 directory, data = personal_catalog(owner)
                 if path == "/api/personal-media":
                     save_personal(directory,data)
-                    self.reply(200,dict(owners=self.personal_owners(),owner=owner,folders=data["folders"],screens=self.personal_screens()))
+                    screens=self.personal_screens()
+                    outputs={}
+                    for target in screens:
+                        key,index=target.split(":",1)
+                        row=SCREENS[key]
+                        local=screen_media(row)["enabled"] if index=="0" else index in extra_media_folders(row)
+                        folder_id=row.get("media_folder",MEDIA_DEFAULT_FOLDER) if index=="0" else extra_media_folders(row).get(index)
+                        folder=media_folders(row).get(folder_id,{})
+                        visible=getattr(self,"grants",None) is None or not str(folder_id).startswith("personal-") or str(folder_id).startswith(personal_copy_prefix(self.principal))
+                        outputs[target]=dict(local=local,mode=("Médias · "+folder.get("name","") if visible else "Médias en cours") if local else "Diffusion NDI")
+                    self.reply(200,dict(owners=self.personal_owners(),owner=owner,folders=data["folders"],screens=screens,outputs=outputs,disk=media_available(media_disk(directory))))
                     return
                 folder = data["folders"][query["folder"][0]]
                 item = next(i for i in folder["items"] if i["id"] == query["file"][0])
@@ -2198,6 +2213,12 @@ class Request(BaseHTTPRequestHandler):
         action=data.get("action")
         folder_id=data.get("folder")
         removed=[]
+        if action=="ndi":
+            target=data.get("screen")
+            if target not in self.personal_screens():
+                raise PermissionError("Écran non autorisé.")
+            key,index=target.split(":",1)
+            return self.change_media(key,SCREENS[key],dict(action="play",folder=MEDIA_DEFAULT_FOLDER,enabled=False,outputs=[index]))
         if action=="create":
             if len(folders)>=MEDIA_FOLDER_LIMIT:
                 raise ValueError("Limite de dossiers atteinte.")
@@ -2211,6 +2232,36 @@ class Request(BaseHTTPRequestHandler):
                     raise ValueError("Le dossier général ne peut pas être supprimé.")
                 removed=folder["items"]
                 del folders[folder_id]
+            elif action=="timing":
+                folder["timing"]=media_timing(dict(image_seconds=data["image_seconds"],video_seconds=data["video_seconds"]))
+            elif action=="empty-folder":
+                removed=folder["items"]
+                folder["items"]=[]
+            elif action=="remove-files":
+                ids=data.get("files")
+                if not isinstance(ids,list) or not ids or any(not isinstance(i,str) for i in ids):
+                    raise ValueError("Sélection invalide.")
+                removed=[i for i in folder["items"] if i["id"] in ids]
+                if len(removed)!=len(set(ids)):
+                    raise ValueError("Fichier indisponible.")
+                folder["items"]=[i for i in folder["items"] if i["id"] not in ids]
+            elif action in ("move","reorder"):
+                item=next((i for i in folder["items"] if i["id"]==data.get("file")),None)
+                if item is None:
+                    raise ValueError("Fichier indisponible.")
+                if action=="move":
+                    destination=folders[data["destination"]]
+                    if destination is folder:
+                        raise ValueError("Choisis un autre dossier.")
+                    media_config(dict(enabled=False,items=[*destination["items"],item]))
+                    folder["items"].remove(item)
+                    destination["items"].append(item)
+                else:
+                    anchor=next((i for i in folder["items"] if i["id"]==data.get("anchor")),None)
+                    if anchor is None or anchor is item:
+                        raise ValueError("Déplacement invalide.")
+                    folder["items"].remove(item)
+                    folder["items"].insert(folder["items"].index(anchor),item)
             elif action in ("remove-file","rename-file"):
                 item=next((i for i in folder["items"] if i["id"]==data.get("file")),None)
                 if item is None:
@@ -2250,7 +2301,7 @@ class Request(BaseHTTPRequestHandler):
                         new={**item,"id":secrets.token_hex(16)}
                         copied.append(new)
                         shutil.copyfile(directory / item["id"],target_dir / new["id"])
-                    current[copy_id]=dict(name=("Personnel · "+owner+" · "+folder["name"])[:64],items=copied)
+                    current[copy_id]=dict(name=("Personnel · "+owner+" · "+folder["name"])[:64],items=copied,timing=folder.get("timing",{}))
                     save_media(row,current,row.get("media_folder",MEDIA_DEFAULT_FOLDER),screen_media(row)["enabled"])
                     status,result=self.change_media(key,row,dict(action="play",folder=copy_id,enabled=True,outputs=[index]))
                     if status!=200:
