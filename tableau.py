@@ -69,6 +69,30 @@ PAGE = ((ROOT / "tableau.html").read_bytes()
         .replace(b"__RESOLUTION_CONTROLS_ENABLED__", str(RESOLUTION_CONTROLS_ENABLED).lower().encode("ascii"))
         .replace(b"__PREVIEW_INTERVAL__", str(PREVIEW_AUTO_INTERVAL).encode("ascii")))
 LOGIN_PAGE = (ROOT / "acces-refuse.html").read_text(encoding="utf-8")
+USERS_PAGE = """<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Utilisateurs · SoundLive NDI</title><style>body{background:#171319;color:#fff;font:16px system-ui;margin:24px}button,input,select{font:inherit;padding:8px;margin:4px;background:#302631;color:white;border:1px solid #806070;border-radius:6px}a{color:#ffc0cd}fieldset{margin:12px 0;border:1px solid #604a59}label{display:inline-block;margin:4px}table{border-collapse:collapse}td,th{padding:6px;text-align:left}#matrix{overflow:auto}button{cursor:pointer}</style><a href="/">← Régie</a><h1>Utilisateurs et groupes</h1><p>Les droits directs et ceux des groupes se cumulent. Le compte regie reste administrateur.</p><select id="kind"><option value="users">Utilisateurs</option><option value="groups">Groupes</option></select><select id="existing"></select><form id="editor"><label>Identifiant <input id="name" required pattern="[A-Za-z0-9_.-]{1,32}"></label><section id="userfields"><label>Mot de passe <input id="password" type="password" autocomplete="new-password"></label><label><input id="enabled" type="checkbox" checked> Actif</label><div id="members"></div></section><h2>Droits par écran</h2><div id="matrix"></div><button>Enregistrer</button><button type="button" id="remove">Supprimer</button></form><p id="message" role="status"></p><script>
+const q=id=>document.getElementById(id), rights={view:"Voir",preview:"Aperçu",play:"Lecture/arrêt",source:"Source/qualité",audio:"Audio",media:"Diffuser médias",identify:"Identifier",maintenance:"Maintenance",configuration:"Orientation"};let db;
+async function api(path,data){const r=await fetch(path,data===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});const v=await r.json();if(!r.ok)throw Error(v.error||r.status);return v}
+function draw(){const kind=q("kind").value,n=q("existing").value,entry=db[kind][n]||{};q("name").value=n;q("name").readOnly=!!n;q("password").value="";q("enabled").checked=entry.enabled!==false;q("userfields").hidden=kind!=="users";q("members").replaceChildren();for(const g of Object.keys(db.groups)){const l=document.createElement("label"),i=document.createElement("input");i.type="checkbox";i.value=g;i.checked=(entry.groups||[]).includes(g);l.append(i,g);q("members").append(l)}const table=document.createElement("table"),head=table.insertRow();for(const title of ["Écran",...Object.values(rights)]){const th=document.createElement("th");th.textContent=title;head.append(th)}for(const [id,name] of Object.entries(db.screens)){const row=table.insertRow();row.insertCell().textContent=name;for(const p of Object.keys(rights)){const i=document.createElement("input");i.type="checkbox";i.dataset.screen=id;i.value=p;i.checked=(entry.grants?.[id]||[]).includes(p);i.setAttribute("aria-label",name+" "+rights[p]);row.insertCell().append(i)}}q("matrix").replaceChildren(table);q("remove").disabled=!n}
+async function load(){db=await api("/api/users");q("existing").replaceChildren(new Option("Nouveau",""),...Object.keys(db[q("kind").value]).map(x=>new Option(x,x)));draw()}
+q("kind").onchange=()=>load().catch(e=>q("message").textContent=e.message);q("existing").onchange=draw;
+q("editor").onsubmit=async e=>{e.preventDefault();try{const grants={};for(const i of q("matrix").querySelectorAll("input:checked"))(grants[i.dataset.screen]??=[]).push(i.value);await api("/api/users",{kind:q("kind").value,name:q("name").value,password:q("password").value,enabled:q("enabled").checked,groups:[...q("members").querySelectorAll("input:checked")].map(i=>i.value),grants});await load();q("message").textContent="Enregistré."}catch(e){q("message").textContent=e.message}};
+q("remove").onclick=async()=>{if(!confirm("Supprimer cet élément ?"))return;try{await api("/api/users",{kind:q("kind").value,name:q("existing").value,delete:true});await load()}catch(e){q("message").textContent=e.message}};load().catch(e=>q("message").textContent=e.message);
+</script></html>"""
+OPERATOR_PAGE = """<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>SoundLive NDI · Opérateur</title><style>body{background:#171319;color:#fff;font:16px system-ui;margin:20px}header{display:flex;justify-content:space-between;align-items:center}main{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}article{background:#241d26;border:1px solid #604a59;border-radius:12px;padding:16px}button,input,select{font:inherit;padding:8px;margin:4px;background:#302631;color:white;border:1px solid #806070;border-radius:6px}label{display:block}img{width:100%;max-width:480px}button{cursor:pointer}.Lecture{color:#9ce5b2}.Arrêté{color:#ffc078}</style><header><h1>SoundLive NDI</h1><button id="logout">Me déconnecter</button></header><p id="message" role="status"></p><main id="screens"></main><script>
+const q=id=>document.getElementById(id);let cards=new Map();
+async function api(path,data){const r=await fetch(path,data===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});if(r.status===401){location.href="/connexion";throw Error("Session expirée")}const v=await r.json();if(!r.ok)throw Error(v.error||r.status);return v}
+const run=f=>async()=>{try{await f();q("message").textContent=""}catch(e){q("message").textContent=e.message}};
+function build(s){const a=document.createElement("article"),title=document.createElement("h2"),status=document.createElement("p");a.append(title,status);const has=p=>s.rights.includes(p),act=(action,data={})=>api("/api/operator/action",{id:s.id,output:s.output,action,...data}),patch=changes=>act("settings",{changes}),button=(name,fn)=>{const b=document.createElement("button");b.textContent=name;b.onclick=run(fn);a.append(b);return b},select=(label,values,current,fn)=>{const l=document.createElement("label"),i=document.createElement("select");l.textContent=label;i.append(...values.map(v=>new Option(v[1],v[0])));i.value=current??"";i.onchange=run(()=>fn(i.value));l.append(i);a.append(l);return i};
+if(has("preview")){const img=document.createElement("img");img.hidden=true;let previous;button("Capture écran",async()=>{const data={screen:s.id,output:s.output,previous};let p=await api("/api/preview",data);for(let i=0;i<70&&p.state==="pending";i++){await new Promise(r=>setTimeout(r,1000));p=await api("/api/preview?"+new URLSearchParams({screen:s.id,output:s.output}))}if(!p.image)throw Error(p.error||"Capture indisponible");previous=p.id;img.src=p.image.startsWith("data:")?p.image:"data:image/png;base64,"+p.image;img.hidden=false});a.append(img)}
+if(has("play")){button("Lecture",()=>patch({enabled:true}));button("Arrêter",()=>patch({enabled:false}))}
+if(has("source")){select("Source NDI",[...new Set([s.settings.source,...s.sources].filter(Boolean))].map(x=>[x,x]),s.settings.source,x=>patch({source:x}));select("Qualité",[["0","High"],["1","Low"]],s.settings.bandwidth,x=>patch({bandwidth:x}))}
+if(has("audio")){select("Sortie audio",[["","Automatique"],...s.audio_devices.map(d=>[d.id,d.label])],s.audio_route,x=>act("audio",{target:x}));const l=document.createElement("label"),i=document.createElement("input");i.type="range";i.min=0;i.max=100;i.value=s.settings.volume??0;l.textContent="Volume "+i.value+" %";i.oninput=()=>l.firstChild.textContent="Volume "+i.value+" %";i.onchange=run(()=>patch({volume:Number(i.value)}));l.append(i);a.append(l);button("Muet",()=>patch({muted:true}));button("Activer le son",()=>patch({muted:false}))}
+if(has("configuration"))select("Orientation",[["landscape","Paysage"],["portrait-left","Portrait gauche"],["portrait-right","Portrait droite"]],s.settings.orientation,x=>patch({orientation:x}));
+if(has("media")){const folder=select("Dossier média",Object.entries(s.folders),Object.keys(s.folders)[0],()=>{});button("Diffuser le dossier",()=>act("media",{folder:folder.value,enabled:true}));button("Revenir au NDI",()=>act("media",{folder:folder.value,enabled:false}))}
+if(s.identify){button("Identifier",()=>act("identify",{enabled:true}));button("Masquer identification",()=>act("identify",{enabled:false}))}if(s.maintenance){button("Redémarrer",()=>confirm("Redémarrer le lecteur ?")&&act("reboot"));button("Éteindre",()=>confirm("Éteindre le lecteur ?")&&act("poweroff"))}return {a,title,status}}
+async function refresh(){const rows=await api("/api/operator/screens"),keys=new Set();for(const s of rows){const k=s.id+":"+s.output;keys.add(k);const signature=JSON.stringify([s.rights,s.sources,s.audio_devices,s.folders,s.identify,s.maintenance,s.settings,s.audio_route]);let c=cards.get(k);if(!c||c.signature!==signature&&!c.a.contains(document.activeElement)){const n=build(s);n.signature=signature;if(c)c.a.replaceWith(n.a);else q("screens").append(n.a);cards.set(k,n);c=n}c.title.textContent=s.name;c.status.textContent=s.status;c.status.className=s.status}for(const [k,c] of cards)if(!keys.has(k)){c.a.remove();cards.delete(k)}}
+q("logout").onclick=run(async()=>{await api("/api/session/deconnexion",{});location.href="/connexion"});refresh().catch(e=>q("message").textContent=e.message);setInterval(()=>refresh().catch(e=>q("message").textContent=e.message),3000);
+</script></html>"""
 TERMINAL_PAGE = (ROOT / "terminal.html").read_bytes()
 BLOCKED_MESSAGE = "Cette adresse IP est bloquée sur la régie. Contacte la régie pour demander le déblocage."
 LOGIN_NOTICES = {
@@ -1197,7 +1221,11 @@ class Request(BaseHTTPRequestHandler):
             return True
         reason, self.session_remaining = connections.observe(address, self.remote_session)
         if not reason:
-            return True
+            self.principal = connections.principal(self.remote_session)
+            self.grants = None if self.principal == USERNAME else self.server.grants(self.principal)
+            if self.principal == USERNAME or self.grants is not None:
+                return True
+            reason = "remote_disconnected"
         if reason == "remote_blocked":
             self.refuse_blocked(page)
         elif page:
@@ -1235,7 +1263,7 @@ class Request(BaseHTTPRequestHandler):
             self.login_page(401, error="Identifiant ou mot de passe incorrect.")
             return
         connections = self.server.remote_connections
-        session = connections.issue(self.client_address[0], self.headers.get("User-Agent", ""))
+        session = connections.issue(self.client_address[0], self.headers.get("User-Agent", ""), username)
         if session is None:
             self.refuse_blocked(True)
             return
@@ -1264,7 +1292,41 @@ class Request(BaseHTTPRequestHandler):
             return
         if not self.dashboard(path):
             return
-        if path == "/api/media-preview":
+        if remote and getattr(self,"grants",None) is not None:
+            if path == "/":
+                self.reply(200, OPERATOR_PAGE.encode("utf-8"))
+            elif path == "/api/operator/screens":
+                with LOCK:
+                    self.reply(200,self.operator_screens())
+            elif path == "/api/session":
+                self.session_status()
+            elif path == "/api/preview":
+                try:
+                    query = {k:v[0] for k,v in parse_qs(url.query,max_num_fields=4).items()}
+                    target,_ = preview_target(query)
+                    if target[0] != "screen" or not self.allowed(target[1],target[2] if len(target)==3 else "0","preview"):
+                        raise PermissionError()
+                    with LOCK:
+                        preview_prune(time.time())
+                        job = PREVIEWS.get(target)
+                        self.reply(200,preview_status(job) if job else {"state":"empty"})
+                except PermissionError:
+                    self.reply(403,{"error":"Accès refusé."})
+                except (KeyError,ValueError):
+                    self.reply(400,{"error":"Aperçu invalide."})
+            else:
+                self.reply(403,{"error":"Accès réservé à l’administration."})
+            return
+        if path == "/utilisateurs":
+            self.reply(200, USERS_PAGE.encode("utf-8"))
+        elif path == "/api/users":
+            if not remote:
+                self.reply(409,{"error":"Connecte-toi à la régie HTTPS en tant que regie."})
+            else:
+                with LOCK:
+                    screens = {key+":"+i:row["name"]+" · Écran "+str(int(i)+1) for key,row in SCREENS.items() if row.get("token") for i in physical_outputs(row)}
+                self.reply(200,{**self.server.public_accounts(),"screens":screens})
+        elif path == "/api/media-preview":
             self.send_media(url.query, preview=True)
         elif path == "/api/media-download":
             self.send_media_archive(url.query)
@@ -1380,6 +1442,9 @@ class Request(BaseHTTPRequestHandler):
             length = 0
         if path == "/api/media-upload":
             if self.dashboard(path, write=True):
+                if getattr(self,"grants",None) is not None:
+                    self.reply(403,{"error":"Import réservé à l’administration."})
+                    return
                 try:
                     self.upload_media(url.query, length)
                 except (ValueError, KeyError) as error:
@@ -1410,6 +1475,20 @@ class Request(BaseHTTPRequestHandler):
             value = json.loads(payload)
             if not isinstance(value, dict):
                 raise ValueError("Requête invalide.")
+            if path == "/api/users":
+                if not remote or getattr(self,"grants",None) is not None:
+                    self.reply(403,{"error":"Accès refusé."})
+                else:
+                    with LOCK:
+                        valid = {key+":"+i for key,row in SCREENS.items() if row.get("token") for i in physical_outputs(row)}
+                    self.server.edit_accounts(value,valid)
+                    self.reply(200,{"ok":True})
+                return
+            if remote and getattr(self,"grants",None) is not None and path not in ("/api/session/prolonger","/api/session/deconnexion"):
+                with LOCK:
+                    status,result = self.operator_action(path,value)
+                self.reply(status,result)
+                return
             if path == "/api/regie-network":
                 self.change_network(value)
                 return
@@ -1558,6 +1637,70 @@ class Request(BaseHTTPRequestHandler):
             print(error, flush=True)
             status, result = 500, {"error": "Le serveur n’a pas pu terminer la demande."}
         self.reply(status, result)
+
+    def allowed(self, key, index, right):
+        return isinstance(key,str) and isinstance(index,str) and right in self.grants.get(key+":"+index,set())
+
+    def operator_screens(self):
+        rows=[]
+        for key,row in SCREENS.items():
+            if not row.get("token"):
+                continue
+            report=row.get("report",{})
+            online=time.time()-report.get("seen",0)<ONLINE_AGE
+            for index in physical_outputs(row):
+                if not self.allowed(key,index,"view"):
+                    continue
+                settings=dict(row.get("options",{}) if index=="0" else row.get("extra_outputs",{}).get(index,{}))
+                if settings.get("mode")=="same":
+                    settings["source"]=row.get("options",{}).get("source","")
+                out=next((o for o in report.get("outputs",[]) if o["id"]==index),{})
+                playing=out.get("playing",report.get("state")=="Lecture" if index=="0" else False)
+                perms=sorted(self.grants[key+":"+index])
+                whole=lambda right: all(self.allowed(key,i,right) for i in physical_outputs(row))
+                rows.append(dict(id=key,output=index,name=row.get("output_names",{}).get(index) or row["name"]+" · Écran "+str(int(index)+1),
+                                 status="Hors ligne" if not online else "Lecture" if playing else "En attente" if settings.get("enabled") else "Arrêté",
+                                 settings=settings,rights=perms,sources=report.get("sources",[]) if "source" in perms else [],
+                                 audio_devices=report.get("audio_devices",[]) if "audio" in perms else [],
+                                 audio_route=row.get("audio_routes",{}).get(index,""),
+                                 folders={k:v["name"] for k,v in media_folders(row).items()} if "media" in perms else {},
+                                 maintenance=whole("maintenance"),identify=whole("identify"),identified=row.get("identify") is True))
+        return rows
+
+    def operator_action(self,path,data):
+        denied=(403,{"error":"Action non autorisée."})
+        if path == "/api/preview":
+            target,_=preview_target(data)
+            if target[0]!="screen" or not self.allowed(target[1],target[2] if len(target)==3 else "0","preview"):
+                return denied
+            return request_preview(data,time.time())
+        if path != "/api/operator/action":
+            return denied
+        key,index,action=data.get("id"),data.get("output"),data.get("action")
+        if not self.allowed(key,index,"view"):
+            return denied
+        row=SCREENS.get(key)
+        if not row or index not in physical_outputs(row) or not row.get("token"):
+            return 404,{"error":"Écran indisponible."}
+        if action=="settings":
+            patch=data.get("changes")
+            fields={"enabled":"play","source":"source","bandwidth":"source","volume":"audio","muted":"audio","orientation":"configuration"}
+            if not isinstance(patch,dict) or not patch or any(k not in fields or not self.allowed(key,index,fields[k]) for k in patch):
+                return denied
+            return physical_batch([key+":"+index],{"changes":patch},time.time())
+        if action=="audio" and self.allowed(key,index,"audio"):
+            return self.apply("/api/audio-route",{"id":key,"output":index,"target":data.get("target")})
+        if action in ("reboot","poweroff","identify"):
+            right="identify" if action=="identify" else "maintenance"
+            if not all(self.allowed(key,i,right) for i in physical_outputs(row)):
+                return denied
+            return self.apply("/api/"+action,{"id":key,"enabled":data.get("enabled")})
+        if action=="media" and self.allowed(key,index,"media"):
+            # The reader library is shared; operators may only select existing folders.
+            if type(data.get("enabled")) is not bool:
+                return 400,{"error":"État média invalide."}
+            return self.change_media(key,row,{"action":"play","folder":data.get("folder"),"enabled":data["enabled"],"output":index})
+        return denied
 
     def change_network(self, value):
         network = self.server.network_control

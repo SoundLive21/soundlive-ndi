@@ -255,7 +255,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
 </style>
 </head>
 <body>
-<header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release" id="regie-version" aria-live="polite">v<span id="regie-release">__SOFTWARE_VERSION__</span><span id="regie-version-status"></span></span><span id="count">Écrans connectés</span><button id="logout" type="button" __REMOTE_ONLY__>Me déconnecter</button></header>
+<header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release" id="regie-version" aria-live="polite">v<span id="regie-release">__SOFTWARE_VERSION__</span><span id="regie-version-status"></span></span><span id="count">Écrans connectés</span><button type="button" __REMOTE_ONLY__ onclick="location.href=\'/utilisateurs\'">Utilisateurs</button><button id="logout" type="button" __REMOTE_ONLY__>Me déconnecter</button></header>
 <div id="toasts" popover="manual" hidden></div>
 <template id="toast-template">
   <div class="toast">
@@ -314,7 +314,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
       <button type="button" id="regie-system-open">Informations système de la régie</button>
       <button type="button" id="network-open">Gestion réseau</button>
       <button type="button" id="identify-manager-open" aria-haspopup="dialog" disabled>Identifier les écrans…</button>
-      <button type="button" id="identify-all" aria-pressed="false" disabled>Identifier tous les écrans</button>
+
       <button type="button" id="ssh-group-open" aria-haspopup="dialog" disabled>SSH groupé</button>
     </div>
   </section>
@@ -857,7 +857,7 @@ const connectionsButton = document.querySelector("#open-connections");
 const connectionsDialog = document.querySelector("#remote-connections");
 const dialog = document.querySelector("#pair");
 const cards = new Map();
-const identifyAll = document.querySelector("#identify-all");
+
 const identifyManagerOpen = document.querySelector("#identify-manager-open");
 const identifyManager = document.querySelector("#identify-manager");
 const identifyManagerList = document.querySelector("#identify-manager-list");
@@ -867,11 +867,11 @@ let identifyRows = [];
 function identifyControls() {
   const active = identifyRows.filter(row => row.identify).length;
   const all = identifyRows.length > 0 && active === identifyRows.length;
-  identifyAll.disabled = identifyBusy || !identifyRows.length;
+
   identifyManagerOpen.disabled = identifyBusy || !identifyRows.length;
   if (identifyManager.open) renderIdentifyManager();
-  identifyAll.setAttribute("aria-pressed", all ? "true" : active ? "mixed" : "false");
-  identifyAll.textContent = all ? "Masquer toutes les identifications" : "Identifier tous les écrans";
+
+
   for (const card of cards.values()) {
     if (card.data) card.ui.identify.disabled = identifyBusy || !card.data.paired;
   }
@@ -893,7 +893,7 @@ async function changeIdentification(enabled, id) {
     identifyControls();
   }
 }
-identifyAll.onclick = action(() => changeIdentification(!identifyControls()));
+
 function renderIdentifyManager() {
   const selected = new Set([...identifyManagerList.querySelectorAll('input[type="checkbox"]:checked')].map(x => x.value));
   const firstOpen = !identifyManagerList.hasChildNodes();

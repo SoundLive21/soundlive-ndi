@@ -10,6 +10,7 @@ from ipaddress import IPv4Address, IPv4Network
 import json
 from pathlib import Path
 import secrets
+import re
 from tempfile import NamedTemporaryFile
 from threading import Lock
 from time import monotonic, time
@@ -146,7 +147,7 @@ class RemoteConnections:
         except FileNotFoundError:
             self.blocked = set()
 
-    def issue(self, address, user_agent):
+    def issue(self, address, user_agent, username=USERNAME):
         agent = "".join(char for char in user_agent[:180] if char.isprintable())
         identifier = secrets.token_urlsafe(32)
         with self.lock:
@@ -157,7 +158,7 @@ class RemoteConnections:
             if len(self.rows) >= 200:
                 oldest = min(self.rows, key=lambda key: self.rows[key]["activity"])
                 del self.rows[oldest]
-            self.rows[identifier] = dict(ip=address, agent=agent, seen=time(), activity=now,
+            self.rows[identifier] = dict(ip=address, agent=agent, username=username, seen=time(), activity=now,
                                          expires=now + SESSION_DURATION)
             return identifier
 
@@ -181,6 +182,16 @@ class RemoteConnections:
             row["activity"] = now
             row["seen"] = time()
             return None, max(1, int((row["expires"] - now) * 1000))
+
+    def principal(self, identifier):
+        with self.lock:
+            return self.rows.get(identifier, {}).get("username")
+
+    def revoke_user(self, username):
+        with self.lock:
+            for key, row in list(self.rows.items()):
+                if row.get("username") == username:
+                    del self.rows[key]
 
     def disconnect(self, identifier):
         with self.lock:
@@ -237,6 +248,7 @@ class RemoteDashboard(ThreadingHTTPServer):
         self.receiver_port = receiver_port
         self.credentials = settings["credentials"]
         self.auth_lock = Lock()
+        self.accounts_path = folder / "utilisateurs.json"
         # L'interface et les restrictions d'adresses LAN restent inchangées.
         # Le certificat externe est rechargé à la prochaine connexion TLS
         # quand son fichier PEM est renouvelé par le client ACME.
@@ -249,7 +261,74 @@ class RemoteDashboard(ThreadingHTTPServer):
 
     def authenticate(self, username, password):
         with self.auth_lock:
-            return credentials_valid(username, password, self.credentials)
+            if username == USERNAME:
+                return credentials_valid(username, password, self.credentials)
+            account = self.accounts()["users"].get(username)
+            return bool(account and account.get("enabled") and credentials_valid(USERNAME, password, account["hash"]))
+
+    def accounts(self):
+        try:
+            return json.loads(self.accounts_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {"users": {}, "groups": {}}
+
+    def grants(self, username):
+        db = self.accounts()
+        user = db["users"].get(username)
+        if not user or not user.get("enabled"):
+            return None
+        result = {}
+        for entry in [user, *(db["groups"][g] for g in user.get("groups", []) if g in db["groups"])]:
+            for screen, rights in entry.get("grants", {}).items():
+                result.setdefault(screen, set()).update(rights)
+        return result
+
+    def edit_accounts(self, data, valid_screens):
+        rights = {"view", "preview", "play", "source", "audio", "media", "identify", "maintenance", "configuration"}
+        name = data.get("name")
+        kind = data.get("kind")
+        if not isinstance(name,str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,32}",name) or name == USERNAME or kind not in ("users","groups"):
+            raise ValueError("Identifiant invalide ou réservé.")
+        with self.auth_lock:
+            db = self.accounts()
+            if data.get("delete") is True:
+                db[kind].pop(name,None)
+                if kind == "groups":
+                    for user in db["users"].values():
+                        user["groups"] = [g for g in user.get("groups",[]) if g != name]
+            else:
+                grants = data.get("grants",{})
+                if not isinstance(grants,dict) or any(k not in valid_screens or not isinstance(v,list) or any(not isinstance(p,str) or p not in rights for p in v) for k,v in grants.items()):
+                    raise ValueError("Écran ou permission invalide.")
+                entry = {"grants": {k:sorted(set(v)|{"view"}) for k,v in grants.items() if v}}
+                if kind == "users":
+                    groups = data.get("groups",[])
+                    if not isinstance(groups,list) or any(not isinstance(g,str) or g not in db["groups"] for g in groups):
+                        raise ValueError("Groupe inconnu.")
+                    entry.update(groups=sorted(set(groups)),enabled=data.get("enabled") is True)
+                    password = data.get("password","")
+                    old = db[kind].get(name,{})
+                    if password:
+                        if not isinstance(password,str) or not 8 <= len(password.encode("utf-8")) <= 256 or not password.isprintable():
+                            raise ValueError("Mot de passe : 8 caractères minimum, 256 octets maximum.")
+                        entry["hash"] = password_hash(password)
+                    elif old.get("hash"):
+                        entry["hash"] = old["hash"]
+                    else:
+                        raise ValueError("Mot de passe obligatoire.")
+                db[kind][name] = entry
+            with NamedTemporaryFile(dir=self.accounts_path.parent, delete=False) as tmp:
+                tmp.write(json.dumps(db).encode("utf-8"))
+            try:
+                Path(tmp.name).replace(self.accounts_path)
+            finally:
+                Path(tmp.name).unlink(missing_ok=True)
+            if kind == "users":
+                self.remote_connections.revoke_user(name)
+
+    def public_accounts(self):
+        db = self.accounts()
+        return {"groups":db["groups"],"users":{k:{f:v for f,v in u.items() if f!="hash"} for k,u in db["users"].items()}}
 
     def finish_request(self, request, client_address):
         request.settimeout(8)
