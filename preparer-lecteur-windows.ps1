@@ -312,6 +312,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Utilise une distribution FFplay Windows autonome.' }
 
     function Register-WifiProfile([string]$XmlFile) {
+        # Le nouveau XML est prêt, y compris lorsque la clé provient de l'ancien profil.
+        # Supprimer uniquement le profil dédié de cette interface, pas les autres réseaux.
+        & netsh.exe wlan delete profile "name=$wifiName" "interface=$($wireless.Name)" | Out-Null
         & netsh.exe wlan add profile "filename=$XmlFile" "interface=$($wireless.Name)" user=all | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Import du profil Wi-Fi impossible.' }
     }
@@ -471,6 +474,13 @@ try {
     else { $arguments += @($Regie.AbsoluteUri, $Code) }
     & $python (Join-Path $PSScriptRoot 'installer-client-windows.py') @arguments
     if ($LASTEXITCODE -ne 0) { throw 'Installation ou association du lecteur Windows impossible.' }
+    if (-not $wifiEnabled) {
+        foreach ($adapter in @(Get-NetAdapter -Physical | Where-Object InterfaceType -eq 71)) {
+            if ($adapter.Name -notmatch '[*?]') {
+                & netsh.exe wlan delete profile "name=$wifiName" "interface=$($adapter.Name)" | Out-Null
+            }
+        }
+    }
     if ($previous) {
         try {
             $otherAdapters = Get-NetAdapter -IncludeHidden | Where-Object {

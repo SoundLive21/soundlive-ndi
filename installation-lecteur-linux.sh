@@ -74,14 +74,12 @@ prepare_remote_access() {
 clean_reader_profiles() {
     local previous=$1 ethernet=$2 wifi=$3
     local -a nm=(sudo env LC_ALL=C nmcli)
-    local active profiles uuid kind name managed
+    local profiles uuid kind name managed failed=0
     local uuid_pattern='^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'
     [[ $ethernet =~ $uuid_pattern && ( -z $wifi || $wifi =~ $uuid_pattern ) ]] || return 1
-    active=$("${nm[@]}" -t -e no -f UUID connection show --active) || return 1
     profiles=$("${nm[@]}" -t -e no -f UUID,TYPE,NAME connection show) || return 1
     while IFS=: read -r uuid kind name; do
         [[ $uuid =~ $uuid_pattern && $uuid != "$ethernet" && $uuid != "$wifi" ]] || continue
-        if grep -Fqx -- "$uuid" <<< "$active"; then continue; fi
         managed=false
         if grep -Fqx -- "$uuid" <<< "$previous"; then
             managed=true
@@ -94,10 +92,16 @@ clean_reader_profiles() {
                 managed=true
             fi
         fi
-        if $managed && ! "${nm[@]}" connection delete uuid "$uuid" >/dev/null; then
-            printf 'Profil SoundLive à nettoyer manuellement : %s (%s).\n' "$name" "$uuid" >&2
+        if $managed; then
+            if "${nm[@]}" connection delete uuid "$uuid" >/dev/null; then
+                printf 'Ancien profil SoundLive supprimé : %s (%s).\n' "$name" "$uuid"
+            else
+                printf 'Profil SoundLive à nettoyer manuellement : %s (%s).\n' "$name" "$uuid" >&2
+                failed=1
+            fi
         fi
     done <<< "$profiles"
+    return "$failed"
 }
 
 install_pairing_launcher() {

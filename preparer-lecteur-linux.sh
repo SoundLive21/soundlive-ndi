@@ -369,7 +369,8 @@ fi
 source "$base/installation-lecteur-linux.sh"
 mapfile -t network < "$SOUNDLIVE_NETWORK_PREPARATION.actifs"
 if ! clean_reader_profiles "$(cat "$SOUNDLIVE_NETWORK_PREPARATION.anciens")" "${network[2]}" "${network[3]}"; then
-    printf 'Impossible de vérifier les profils réseau à nettoyer.\n' >&2
+    printf 'Nettoyage des anciens profils SoundLive incomplet. Redémarrage annulé.\n' >&2
+    exit 1
 fi
 if [[ -n $ssh_public ]]; then
     printf 'Cible SSH : %s@%s\nEmpreinte de ce lecteur :\n' "$(id -un)" "${ip%/*}"
