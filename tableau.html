@@ -4097,8 +4097,8 @@ pairForm.onsubmit = action(() => {
       return {
         title:"Code créé pour « " + name + " »",
         detail:kind === "windows"
-          ? "Lance la commande depuis le kit dans PowerShell en administrateur sous le compte du lecteur. Le code est valable 15 minutes."
-          : "Lance la commande depuis le kit 1.4.77 ou plus récent sur le lecteur. Le code est valable 15 minutes.",
+          ? "Copie la commande complète dans PowerShell en administrateur, depuis le kit et sous le compte du lecteur. Elle applique les paramètres réseau choisis et raccorde le lecteur. Le code est valable 15 minutes."
+          : "Copie la commande complète ci-dessous dans le terminal du lecteur, depuis le kit. Elle applique les paramètres réseau choisis et raccorde le lecteur. Le code est valable 15 minutes.",
         command:installationCommand(values, port, code, fingerprint)
       };
     }

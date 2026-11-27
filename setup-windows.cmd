@@ -15,13 +15,13 @@ if errorlevel 2 goto player
 call "%~dp0installer-regie-windows.cmd"
 exit /b %errorlevel%
 :player
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0setup-reseau-windows.ps1"
+call "%~dp0installer-client.cmd" --installer-seul
 if errorlevel 1 (
   echo Installation interrompue. Verifie les prerequis et le message ci-dessus.
   pause
   exit /b 1
 )
-echo Installation terminee. Ouvre SoundLive-NDI - Raccorder le lecteur dans le menu Demarrer.
+echo Installation terminee. Conserve ce kit et execute la commande complete generee par Ajouter un ecran dans la regie.
 pause
 
 exit /b 0
