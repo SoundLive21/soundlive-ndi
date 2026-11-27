@@ -287,10 +287,12 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
 #users-dialog .users-message{color:var(--green);min-height:1.3em}
 #users-dialog [hidden]{display:none!important}
 @media(max-width:720px){#users-dialog .users-layout,#users-dialog .users-fields{grid-template-columns:1fr}#users-dialog .users-list{max-height:160px}}
+.connected-user{font-size:.85rem;color:var(--sub);padding:5px 10px;border:1px solid var(--edge);border-radius:20px}.connected-user strong{font-size:inherit;color:var(--text)}
+#remote-connections{width:min(760px,94vw)}#connections-list li,#connection-accounts li{padding:12px;border:1px solid var(--edge);border-radius:10px;margin:8px 0;overflow-wrap:anywhere}#remote-connections .connection-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}#remote-connections .connection-meta{color:var(--sub);font-size:.82rem}#remote-connections .locked{color:#ffc078}
 </style>
 </head>
 <body>
-<header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release" id="regie-version" aria-live="polite">v<span id="regie-release">__SOFTWARE_VERSION__</span><span id="regie-version-status"></span></span><span id="count">Écrans connectés</span><button type="button" id="open-users">Utilisateurs</button><button id="logout" type="button" __REMOTE_ONLY__>Me déconnecter</button></header>
+<header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release" id="regie-version" aria-live="polite">v<span id="regie-release">__SOFTWARE_VERSION__</span><span id="regie-version-status"></span></span><span class="connected-user">Connecté : <strong>__CONNECTED_USER__</strong></span><span id="count">Écrans connectés</span><button type="button" id="open-users">Utilisateurs</button><button id="logout" type="button" __REMOTE_ONLY__>Me déconnecter</button></header>
 <div id="toasts" popover="manual" hidden></div>
 <template id="toast-template">
   <div class="toast">
@@ -353,7 +355,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
       <button type="button" id="ssh-group-open" aria-haspopup="dialog" disabled>SSH groupé</button>
     </div>
   </section>
-  <details class="preview-section" id="source-previews">
+  <details class="preview-section" id="source-previews" open>
     <summary>Aperçu des sources NDI disponibles</summary>
     <label class="check preview-auto"><input type="checkbox" id="preview-auto" checked> Actualiser automatiquement les aperçus visibles</label>
     <p class="small" id="sources-empty">Aucun flux détecté par un lecteur en ligne.</p>
@@ -406,7 +408,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
   <form method="dialog" class="dialog-body">
     <h2 id="connections-title">Connexions à la régie distante</h2>
     <p id="connections-empty">Aucun navigateur distant actif.</p>
-    <ul class="interfaces" id="connections-list"></ul>
+    <ul class="interfaces" id="connections-list"></ul><h3>Comptes utilisateurs</h3><p class="small">Verrouiller un compte ferme toutes ses sessions et empêche toute nouvelle connexion.</p><ul class="interfaces" id="connection-accounts"></ul><p id="connections-feedback" role="status"></p>
     <div class="actions"><button type="submit">Fermer</button></div>
   </form>
 </dialog>
@@ -862,7 +864,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
     <p class="small error reader-error" role="status" hidden></p>
     <button class="os-upgrade" type="button" hidden>Mettre à jour le système</button>
     <button class="client-upgrade full-action" type="button" hidden>Mettre à jour le lecteur</button>
-    <details class="screen-controls">
+    <details class="screen-controls" open>
       <summary>Commandes et réglages</summary>
       <section class="pending"></section>
       <form class="config">
@@ -3037,7 +3039,7 @@ function cardFor(id) {
   card.preview = createPreview(select(el, ".screen-preview"), "Capture de l’écran", id, true);
   card.extraPreviews = new Map();
   const controls = select(el, "details");
-  try { controls.open = localStorage.getItem("soundlive-controls-" + id) === "open"; }
+  try { controls.open = true; }
   catch { /* Storage can be unavailable in private mode. */ }
   controls.addEventListener("toggle", () => {
     try { localStorage.setItem("soundlive-controls-" + id, controls.open ? "open" : "closed"); }
@@ -4550,20 +4552,28 @@ async function refreshConnections() {
   const empty = select(connectionsDialog, "#connections-empty");
   const list = select(connectionsDialog, "#connections-list");
   try {
-    const {enabled, connections} = await call("/api/remote-connections");
+    const {enabled, connections, users={}} = await call("/api/remote-connections");
     connectionsButton.hidden = !enabled;
-    connectionsButton.textContent = "Accès distant · " + connections.length;
+    connectionsButton.textContent = "Accès distant · " + connections.filter(c=>c.active).length;
     if (!connectionsDialog.open) return;
     empty.hidden = connections.length > 0;
     empty.textContent = enabled ? "Aucun navigateur distant actif." : "Accès distant désactivé.";
-    list.replaceChildren(...connections.map(({ip, agent, seen}) => {
-      const item = document.createElement("li");
-      const address = document.createElement("strong");
-      address.textContent = ip + " · " + new Date(seen * 1000).toLocaleTimeString("fr-FR");
-      item.append(address);
-      if (agent) item.append(document.createElement("br"), agent);
-      return item;
+    const feedback=select(connectionsDialog,"#connections-feedback");
+    const manage=async (path,data)=>{try{await call(path,data);feedback.textContent="Modification enregistrée.";await refreshConnections()}catch(e){feedback.textContent=e.message}};
+    const lock=(name,locked)=>{if(confirm((locked?"Verrouiller ":"Déverrouiller ")+name+" ?"))manage("/api/users",{kind:"users",name,locked})};
+    list.replaceChildren(...connections.map(({id,ip,agent,seen,username,active}) => {
+      const item=document.createElement("li"),name=document.createElement("strong"),meta=document.createElement("p"),actions=document.createElement("div"),disconnect=document.createElement("button");
+      name.textContent=username||"regie";meta.className="connection-meta";meta.textContent=ip+" · "+(active?"Actif":"Inactif")+" · "+new Date(seen*1000).toLocaleTimeString("fr-FR")+(agent?" · "+agent:"");
+      actions.className="connection-actions";disconnect.type="button";disconnect.textContent="Fermer la session";disconnect.onclick=()=>{if(confirm("Déconnecter "+name.textContent+" de cette session ?"))manage("/api/remote-connections/disconnect",{id})};actions.append(disconnect);
+      if(username!=="regie"&&users[username]){const button=document.createElement("button");button.type="button";button.textContent=users[username].enabled?"Verrouiller le compte":"Déverrouiller le compte";button.onclick=()=>lock(username,users[username].enabled);actions.append(button)}
+      item.append(name,meta,actions);return item;
     }));
+    const accounts=select(connectionsDialog,"#connection-accounts");
+    accounts.replaceChildren(...Object.entries(users).sort((a,b)=>a[0].localeCompare(b[0])).map(([name,account])=>{
+      const item=document.createElement("li"),title=document.createElement("strong"),button=document.createElement("button"),actions=document.createElement("div");title.textContent=name+" · "+(account.enabled?"Actif":"Verrouillé");if(!account.enabled)title.className="locked";button.type="button";button.textContent=account.enabled?"Verrouiller":"Déverrouiller";button.onclick=()=>lock(name,account.enabled);actions.className="connection-actions";actions.append(button);item.append(title,actions);return item
+    }));
+    if(!Object.keys(users).length){const li=document.createElement("li");li.textContent="Aucun compte utilisateur. Le compte regie est protégé.";accounts.append(li)}
+
   } catch {
     list.replaceChildren();
     empty.hidden = false;

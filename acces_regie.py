@@ -229,13 +229,24 @@ class RemoteConnections:
             if row["expires"] <= now:
                 del self.rows[key]
 
+    @staticmethod
+    def public_session_id(identifier):
+        return hashlib.sha256(identifier.encode("ascii")).hexdigest()
+
+    def revoke_session(self, public_id):
+        with self.lock:
+            for identifier in list(self.rows):
+                if hmac.compare_digest(self.public_session_id(identifier), public_id):
+                    del self.rows[identifier]
+                    return True
+        return False
+
     def snapshot(self):
         with self.lock:
             now = monotonic()
             self.prune(now)
-            return [dict(id=identifier, ip=row["ip"], agent=row["agent"], seen=row["seen"])
-                    for identifier, row in sorted(self.rows.items(), key=lambda item: item[1]["seen"], reverse=True)
-                    if now - row["activity"] < CONNECTION_AGE]
+            return [dict(id=self.public_session_id(identifier), ip=row["ip"], agent=row["agent"], seen=row["seen"], username=row["username"], active=now-row["activity"] < CONNECTION_AGE)
+                    for identifier, row in sorted(self.rows.items(), key=lambda item: item[1]["seen"], reverse=True)]
 
 
 class RemoteDashboard(ThreadingHTTPServer):
@@ -291,7 +302,11 @@ class RemoteDashboard(ThreadingHTTPServer):
             raise ValueError("Identifiant invalide ou réservé.")
         with self.auth_lock:
             db = self.accounts()
-            if data.get("delete") is True:
+            if "locked" in data:
+                if kind != "users" or type(data["locked"]) is not bool or name not in db["users"]:
+                    raise ValueError("Compte utilisateur invalide.")
+                db["users"][name]["enabled"] = not data["locked"]
+            elif data.get("delete") is True:
                 db[kind].pop(name,None)
                 if kind == "groups":
                     for user in db["users"].values():

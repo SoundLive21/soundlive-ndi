@@ -80,7 +80,7 @@ q("remove").onclick=async()=>{if(!confirm("Supprimer cet élément ?"))return;tr
 </script></html>"""
 OPERATOR_PAGE = """<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>SoundLive NDI · Opérateur</title><style>__SHARED_STYLE__
 .operator-controls{display:grid;gap:8px}.operator-controls label{margin:8px 0}.operator-preview img{display:block;width:100%;max-height:280px;object-fit:contain;border-radius:8px;background:#100d12}.operator-preview img[hidden]{display:none}.operator-output{margin-top:16px}.operator-output legend{font-weight:600}.operator-output .actions{margin-top:8px}.operator-header-statuses{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}.operator-preview{margin:8px 0}.operator-preview button{width:100%}.operator-card h2{min-width:0}.operator-card .badge{white-space:nowrap}.operator-controls button{white-space:normal}
-</style><header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release">v__OP_VERSION__</span><span id="count"></span><button id="logout">Me déconnecter</button></header><main><div class="heading"><h1>Gestion des écrans NDI</h1><div class="heading-actions"><button id="organize">Organiser les écrans</button><button id="group-action">Actions de groupe</button></div></div><details class="preview-section" id="source-previews" hidden><summary>Aperçu des sources NDI disponibles</summary><label class="check"><input type="checkbox" id="auto-previews" checked> Actualiser automatiquement les aperçus visibles</label><div class="preview-grid" id="source-grid"></div></details><p id="message" role="status"></p><div id="screens"></div></main><footer class="project-credits">© 2026 Société SoundLive · Auteur : DUVERNOY Matthieu &amp; ChatGPT · <a href="mailto:contact@soundlive.fr">contact@soundlive.fr</a></footer><dialog id="organizer" style="width:min(640px,92vw)"><div class="dialog-body"><h2>Organiser les écrans</h2><p>Personnalise l’ordre des groupes et des encarts dans ton navigateur.</p><div id="organizer-list"></div><div class="actions"><button id="reset-layout">Réinitialiser</button><button id="close-organizer" class="primary">Fermer</button></div></div></dialog><dialog id="group-dialog" style="width:min(650px,92vw)"><div class="dialog-body"><h2>Actions de groupe</h2><label>Action<select id="group-operation"><option value="start">Lecture</option><option value="stop">Arrêter</option><option value="mute">Couper le son</option><option value="unmute">Activer le son</option><option value="volume">Volume</option><option value="source">Source NDI</option><option value="quality">Qualité</option><option value="orientation">Orientation</option></select></label><label id="group-value-label" hidden>Valeur<select id="group-value"></select></label><label id="group-volume-label" hidden>Volume en %<input id="group-volume" type="number" min="0" max="100" value="50"></label><div class="actions"><button id="group-all">Tout sélectionner</button><button id="group-none">Tout désélectionner</button></div><div id="group-choices"></div><p id="group-error" role="status"></p><div class="actions"><button id="close-group">Fermer</button><button id="apply-group" class="primary">Appliquer</button></div></div></dialog>__SHARED_TEMPLATES__<script>
+</style><header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release">v__OP_VERSION__</span><span class="connected-user">Connecté : <strong>__CONNECTED_USER__</strong></span><span id="count"></span><button id="logout">Me déconnecter</button></header><main><div class="heading"><h1>Gestion des écrans NDI</h1><div class="heading-actions"><button id="organize">Organiser les écrans</button><button id="group-action">Actions de groupe</button></div></div><details class="preview-section" id="source-previews" open hidden><summary>Aperçu des sources NDI disponibles</summary><label class="check"><input type="checkbox" id="auto-previews" checked> Actualiser automatiquement les aperçus visibles</label><div class="preview-grid" id="source-grid"></div></details><p id="message" role="status"></p><div id="screens"></div></main><footer class="project-credits">© 2026 Société SoundLive · Auteur : DUVERNOY Matthieu &amp; ChatGPT · <a href="mailto:contact@soundlive.fr">contact@soundlive.fr</a></footer><dialog id="organizer" style="width:min(640px,92vw)"><div class="dialog-body"><h2>Organiser les écrans</h2><p>Personnalise l’ordre des groupes et des encarts dans ton navigateur.</p><div id="organizer-list"></div><div class="actions"><button id="reset-layout">Réinitialiser</button><button id="close-organizer" class="primary">Fermer</button></div></div></dialog><dialog id="group-dialog" style="width:min(650px,92vw)"><div class="dialog-body"><h2>Actions de groupe</h2><label>Action<select id="group-operation"><option value="start">Lecture</option><option value="stop">Arrêter</option><option value="mute">Couper le son</option><option value="unmute">Activer le son</option><option value="volume">Volume</option><option value="source">Source NDI</option><option value="quality">Qualité</option><option value="orientation">Orientation</option></select></label><label id="group-value-label" hidden>Valeur<select id="group-value"></select></label><label id="group-volume-label" hidden>Volume en %<input id="group-volume" type="number" min="0" max="100" value="50"></label><div class="actions"><button id="group-all">Tout sélectionner</button><button id="group-none">Tout désélectionner</button></div><div id="group-choices"></div><p id="group-error" role="status"></p><div class="actions"><button id="close-group">Fermer</button><button id="apply-group" class="primary">Appliquer</button></div></div></dialog>__SHARED_TEMPLATES__<script>
 const q=id=>document.getElementById(id);let cards=new Map(),latestRows=[];
 async function api(path,data){const r=await fetch(path,data===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});if(r.status===401){location.href="/connexion";throw Error("Session expirée")}const v=await r.json();if(!r.ok)throw Error(v.error||r.status);return v}
 const run=f=>async()=>{try{await f();q("message").textContent=""}catch(e){q("message").textContent=e.message}};
@@ -153,7 +153,7 @@ function getReader(s){
   el.classList.add("operator-card");head.querySelector(".rename-reader").remove();statuses.className="header-statuses";head.append(statuses);
   for(const child of [...el.children])if(![head,details].includes(child))child.remove();
   for(const child of [...details.children])if(child!==body&&child.tagName!=="SUMMARY")child.remove();
-  body.replaceChildren();body.onsubmit=e=>e.preventDefault();
+  details.open=true;body.replaceChildren();body.onsubmit=e=>e.preventDefault();
   getGroup(s.group||"").grid.append(el);r={el,title,badge,statuses,body,key,group:s.group||""};readerCards.set(key,r);head.insertBefore(dragHandle(el,key,"screens",r.group),badge)
  }return r
 }
@@ -1350,7 +1350,7 @@ class Request(BaseHTTPRequestHandler):
         self.reply(303, b"", location="/", session=session)
 
     def session_status(self):
-        self.reply(200, {"remaining_ms": self.session_remaining, "warning_ms": SESSION_WARNING * 1000})
+        self.reply(200, {"remaining_ms": self.session_remaining, "warning_ms": SESSION_WARNING * 1000, "username": getattr(self,"principal",USERNAME)})
 
     def do_GET(self):
         url = urlsplit(self.path)
@@ -1372,7 +1372,7 @@ class Request(BaseHTTPRequestHandler):
             return
         if remote and getattr(self,"grants",None) is not None:
             if path == "/":
-                self.reply(200, OPERATOR_PAGE.encode("utf-8"))
+                self.reply(200, OPERATOR_PAGE.replace("__CONNECTED_USER__", escape(self.principal)).encode("utf-8"))
             elif path == "/api/operator/screens":
                 with LOCK:
                     self.reply(200,self.operator_screens())
@@ -1406,7 +1406,7 @@ class Request(BaseHTTPRequestHandler):
         elif path == "/api/media-download":
             self.send_media_archive(url.query)
         elif path == "/":
-            self.reply(200, PAGE.replace(b"__REMOTE_ONLY__", b"" if remote else b"hidden"))
+            self.reply(200, PAGE.replace(b"__REMOTE_ONLY__", b"" if remote else b"hidden").replace(b"__CONNECTED_USER__", escape(getattr(self,"principal",USERNAME)).encode("utf-8")))
         elif path == "/terminal":
             self.reply(200, TERMINAL_PAGE)
         elif path == "/setup":
@@ -1460,8 +1460,8 @@ class Request(BaseHTTPRequestHandler):
         elif path == "/api/remote-connections":
             connections = getattr(self.server, "remote_connections", None)
             self.reply(200, dict(enabled=connections is not None,
-                                 connections=[{key: row[key] for key in ("ip", "agent", "seen")}
-                                              for row in connections.snapshot()] if connections else []))
+                                 connections=connections.snapshot() if connections else [],
+                                 users={name: {"enabled": account.get("enabled",False)} for name,account in self.server.accounts()["users"].items()}))
         elif path == "/api/screens":
             now = time.time()
             key_exists = UPDATE_KEY.is_file()
@@ -1550,6 +1550,18 @@ class Request(BaseHTTPRequestHandler):
             value = json.loads(payload)
             if not isinstance(value, dict):
                 raise ValueError("Requête invalide.")
+            if path == "/api/remote-connections/disconnect":
+                if getattr(self,"grants",None) is not None:
+                    self.reply(403,{"error":"Accès refusé."})
+                    return
+                identifier=value.get("id")
+                if not isinstance(identifier,str) or len(identifier)!=64 or any(c not in "0123456789abcdef" for c in identifier):
+                    raise ValueError("Session invalide.")
+                connections=getattr(self.server,"remote_connections",None)
+                if connections:
+                    connections.revoke_session(identifier)
+                self.reply(200,{"ok":True})
+                return
             if path == "/api/users":
                 if getattr(self,"grants",None) is not None:
                     self.reply(403,{"error":"Accès refusé."})
