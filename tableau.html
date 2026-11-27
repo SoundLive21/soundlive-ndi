@@ -37,6 +37,8 @@ main{width:min(1120px,90vw);margin:55px auto 80px}h1{margin:0;font-size:clamp(1.
 .drag-handle svg{width:16px;height:16px;display:block;fill:currentColor}
 .screen-group-title .drag-handle{display:inline-flex;vertical-align:middle;margin-left:8px}
 .card-heading .drag-handle{margin-left:auto}
+.card-heading .rename-reader{padding:5px;flex:none;background:transparent;color:var(--sub);line-height:1}
+.rename-reader svg{width:16px;height:16px;display:block;fill:none;stroke:currentColor;stroke-width:1.7}
 .drop-target{outline:2px solid #a9d6ff;outline-offset:2px;border-radius:8px}
 article{border:1px solid var(--edge);border-radius:16px;background:var(--panel);padding:22px;min-width:0}
 .card-heading,.row{display:flex;gap:12px;align-items:center;justify-content:space-between}
@@ -638,6 +640,15 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
     </div>
   </form>
 </dialog>
+<dialog id="rename-reader-dialog" aria-labelledby="rename-reader-title">
+  <form class="dialog-body">
+    <h2 id="rename-reader-title">Renommer le lecteur</h2>
+    <label>Nom du lecteur<input name="name" maxlength="80" required autocomplete="off" autofocus></label>
+    <p class="small">Le nom sera utilisé pour tous les écrans de ce lecteur.</p>
+    <p class="small error" role="alert" hidden></p>
+    <div class="actions"><button type="button">Annuler</button><button type="submit" class="primary">Enregistrer</button></div>
+  </form>
+</dialog>
 <dialog id="confirm-action" aria-labelledby="confirm-title" aria-describedby="confirm-detail">
   <form class="dialog-body" method="dialog">
     <div class="dialog-heading">
@@ -734,7 +745,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
 </template>
 <template id="card">
   <article>
-    <div class="card-heading"><h2></h2><span class="badge"></span></div>
+    <div class="card-heading"><h2></h2><button type="button" class="rename-reader" title="Renommer le lecteur" aria-label="Renommer le lecteur"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5 4 4M4 20l5-1L20 8a2.8 2.8 0 0 0-4-4L5 15z"/></svg></button><span class="badge"></span></div>
     <div class="device-meta">
       <div class="device-meta-info">
         <span class="device-kind"></span>
@@ -2801,6 +2812,46 @@ async function sendMediaFiles(targets, files, bytes) {
     detail:status + "\n" + outcome.detail};
 }
 
+const renameReaderDialog = document.querySelector("#rename-reader-dialog");
+const renameReaderForm = select(renameReaderDialog,"form");
+const renameReaderInput = renameReaderForm.elements.namedItem("name");
+const renameReaderError = select(renameReaderForm,"[role=alert]");
+const renameReaderSubmit = select(renameReaderForm,"button[type=submit]");
+const renameReaderCancel = select(renameReaderForm,"button[type=button]");
+let renameReaderId = null;
+let renameReaderBusy = false;
+function openRenameReader(row) {
+  if (!row || renameReaderBusy || renameReaderDialog.open) return;
+  renameReaderId = row.id;
+  renameReaderInput.value = row.name;
+  renameReaderError.hidden = true;
+  renameReaderDialog.showModal();
+  renameReaderInput.focus();
+  renameReaderInput.select();
+}
+renameReaderCancel.onclick = () => renameReaderDialog.close();
+renameReaderDialog.addEventListener("cancel",event=>{if(renameReaderBusy)event.preventDefault();});
+renameReaderForm.onsubmit = async event => {
+  event.preventDefault();
+  if (renameReaderBusy) return;
+  const name = renameReaderInput.value.trim();
+  if (!name) {renameReaderError.textContent="Saisis un nom valide.";renameReaderError.hidden=false;return;}
+  renameReaderBusy=true;
+  renameReaderSubmit.disabled=renameReaderCancel.disabled=renameReaderInput.disabled=true;
+  renameReaderError.hidden=true;
+  try {
+    await call("/api/rename",{id:renameReaderId,name});
+    renameReaderDialog.close();
+    await refresh(true);
+    showToast("Lecteur renommé","success",name);
+  } catch(error) {
+    if (renameReaderDialog.open) {renameReaderError.textContent=error.message;renameReaderError.hidden=false;}
+    else noticeError(error);
+  } finally {
+    renameReaderBusy=false;
+    renameReaderSubmit.disabled=renameReaderCancel.disabled=renameReaderInput.disabled=false;
+  }
+};
 function cardFor(id) {
   if (cards.has(id)) return cards.get(id);
   const el = document.querySelector("#card").content.firstElementChild.cloneNode(true);
@@ -2827,6 +2878,7 @@ function cardFor(id) {
       card.data.group || ""), "Déplacer l’écran");
   heading.insertBefore(handle, ui.badge);
   ui["return-ndi"].onclick = action(() => confirmOutputNdi(card.data,"0"));
+  select(el,".rename-reader").onclick = () => openRenameReader(card.data);
   ui.identify.onclick = action(() => changeIdentification(!card.data.identify, id));
   card.preview = createPreview(select(el, ".screen-preview"), "Capture de l’écran", id, true);
   card.extraPreviews = new Map();
@@ -3072,6 +3124,7 @@ function renderExtraOutputs(card, row) {
       select(el,".remove").onclick=()=>card.ui.remove.click();
       select(el,".reboot").onclick=()=>card.ui.reboot.click();
       select(el,".poweroff").onclick=()=>card.ui.poweroff.click();
+      select(el,".rename-reader").onclick=()=>openRenameReader(card.data);
       select(el,".identify").onclick=action(()=>changeIdentification(!card.data.identify,row.id));
       entry={el,title,badge,preview,controls,body,readerId:row.id};
       try { controls.open=localStorage.getItem("soundlive-controls-"+item.id)==="open"; } catch {}

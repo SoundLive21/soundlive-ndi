@@ -2169,6 +2169,16 @@ class Request(BaseHTTPRequestHandler):
                              latency_test=test["id"] if test else None,
                              client_update=job["id"] if can_update and not maintaining and job and result is None
                              and now < job["until"] else None)
+        if path == "/api/rename":
+            name = safe_text(data.get("name"))
+            previous = row["name"]
+            row["name"] = name
+            try:
+                save()
+            except OSError:
+                row["name"] = previous
+                raise
+            return 200, {"name": name}
         if path == "/api/remove":
             remove_screens({key: row})
             return 200, {"ok": True}
