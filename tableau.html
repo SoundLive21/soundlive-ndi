@@ -1889,15 +1889,17 @@ function renderDiagnostics(card) {
   const multiple = outputs.length > 1;
   const primary = outputs.find(o => o.id === "0");
   const outputResolution = o => displayResolution({width:o.resolution_width || o.width, height:o.resolution_height || o.height});
+  const primaryInfo = report.display && (!multiple || (primary?.connector && primary.connector === report.display.connector)) ? report.display : null;
   const facts = [
     ["Récepteur", deviceLabels[row.kind] || "—"],
     [multiple ? "Résolution de l’écran 1" : "Résolution de l’écran", primary ? outputResolution(primary) : displayResolution(report.display)],
-    [multiple ? "Type / modèle de l’écran 1" : "Type / modèle de l’écran", primary?.model || (!multiple ? report.display?.model : "") || "—"],
+    [multiple ? "Type / modèle de l’écran 1" : "Type / modèle de l’écran", primary?.model || primaryInfo?.model || "—"],
+    [multiple ? "Sortie d’affichage de l’écran 1" : "Sortie d’affichage", primary?.connector || primaryInfo?.connector || "—"],
     ...outputs.filter(o => o.id !== "0").flatMap(o => [
       ["Résolution de l’écran " + (Number(o.id) + 1), outputResolution(o)],
-      ["Type / modèle de l’écran " + (Number(o.id) + 1), o.model || "—"]
+      ["Type / modèle de l’écran " + (Number(o.id) + 1), o.model || "—"],
+      ["Sortie d’affichage de l’écran " + (Number(o.id) + 1), o.connector || "—"]
     ]),
-    ["Sortie d’affichage", report.display?.connector || "—"],
     ...systemFacts(data, "Disque système"),
   ];
   renderFacts(select(diagnostics, ".facts"), facts);
