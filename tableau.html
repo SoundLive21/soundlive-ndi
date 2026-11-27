@@ -2275,7 +2275,7 @@ function mediaOutputName(ids) {
   return ids.map(id => "Écran " + (Number(id) + 1)).join(" + ");
 }
 function mediaOutputFolder(row, id) {
-  return id === "0" ? (row.media.enabled ? row.media_folder : null) : row.extra_media?.[id];
+  return id === "0" ? (row.media?.enabled ? row.media_folder : null) : row.extra_media?.[id];
 }
 function renderMediaManager(preferFolder) {
   if (!mediaDialog.open) return;
@@ -3146,7 +3146,7 @@ function render(row) {
     playing ? "Source configurée · lecture signalée" : "Source configurée";
   select(stream, "strong").textContent = (playing && (row.report.active_media || row.report.active_source)) ||
     (row.media?.enabled ? "" : row.options?.source || "");
-  ui.error.textContent = row.report.error || "";
+  ui.error.textContent = [row.report.error, ...(row.report.outputs || []).filter(o => o.id !== "0" && o.media_error).map(o => "Écran " + (Number(o.id)+1) + " · " + o.media_error)].filter(Boolean).join(" · ");
   ui.error.hidden = !ui.error.textContent;
   const osStatus = select(el, ".os-update-status");
   const maintenance = row.os_update;
