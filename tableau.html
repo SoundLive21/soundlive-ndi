@@ -260,7 +260,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
 </style>
 </head>
 <body>
-<header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release" id="regie-version" aria-live="polite">v<span id="regie-release">__SOFTWARE_VERSION__</span><span id="regie-version-status"></span></span><span id="count">Écrans connectés</span><button type="button" __REMOTE_ONLY__ onclick="location.href=\'/utilisateurs\'">Utilisateurs</button><button id="logout" type="button" __REMOTE_ONLY__>Me déconnecter</button></header>
+<header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release" id="regie-version" aria-live="polite">v<span id="regie-release">__SOFTWARE_VERSION__</span><span id="regie-version-status"></span></span><span id="count">Écrans connectés</span><button type="button" id="open-users">Utilisateurs</button><button id="logout" type="button" __REMOTE_ONLY__>Me déconnecter</button></header>
 <div id="toasts" popover="manual" hidden></div>
 <template id="toast-template">
   <div class="toast">
@@ -1473,6 +1473,7 @@ function renderSourceGallery(rows) {
   }
 }
 
+document.querySelector("#open-users").onclick = () => { location.assign("/utilisateurs"); };
 const logoutButton = document.querySelector("#logout");
 const sessionDialog = document.querySelector("#session-warning");
 const sessionLogout = document.querySelector("#session-logout");

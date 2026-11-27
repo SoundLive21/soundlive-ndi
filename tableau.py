@@ -1320,12 +1320,9 @@ class Request(BaseHTTPRequestHandler):
         if path == "/utilisateurs":
             self.reply(200, USERS_PAGE.encode("utf-8"))
         elif path == "/api/users":
-            if not remote:
-                self.reply(409,{"error":"Connecte-toi à la régie HTTPS en tant que regie."})
-            else:
-                with LOCK:
-                    screens = {key+":"+i:row["name"]+" · Écran "+str(int(i)+1) for key,row in SCREENS.items() if row.get("token") for i in physical_outputs(row)}
-                self.reply(200,{**self.server.public_accounts(),"screens":screens})
+            with LOCK:
+                screens = {key+":"+i:row["name"]+" · Écran "+str(int(i)+1) for key,row in SCREENS.items() if row.get("token") for i in physical_outputs(row)}
+            self.reply(200,{**self.server.public_accounts(),"screens":screens})
         elif path == "/api/media-preview":
             self.send_media(url.query, preview=True)
         elif path == "/api/media-download":
@@ -1476,7 +1473,7 @@ class Request(BaseHTTPRequestHandler):
             if not isinstance(value, dict):
                 raise ValueError("Requête invalide.")
             if path == "/api/users":
-                if not remote or getattr(self,"grants",None) is not None:
+                if getattr(self,"grants",None) is not None:
                     self.reply(403,{"error":"Accès refusé."})
                 else:
                     with LOCK:
@@ -2466,6 +2463,11 @@ class Regie:
         self.connections = None
         self.server = ThreadingHTTPServer(("0.0.0.0", port), Request)
         self.server.receiver_port = self.server.server_port
+        self.server.accounts_path = REMOTE_ACCESS / "utilisateurs.json"
+        self.server.auth_lock = threading.Lock()
+        self.server.accounts = RemoteDashboard.accounts.__get__(self.server)
+        self.server.public_accounts = RemoteDashboard.public_accounts.__get__(self.server)
+        self.server.edit_accounts = RemoteDashboard.edit_accounts.__get__(self.server)
         self.server.terminals = Terminals()
         self.server.os_update_check = OsUpdateCheck()
         self.server.network_control = network_control
@@ -2504,6 +2506,7 @@ class Regie:
                 formatted = f"[{public_address}]" if ":" in public_address else public_address
                 self.remote_url = f"https://{formatted}:{self.remote.server_port}"
                 self.server.remote_connections = self.remote.remote_connections = self.connections
+                self.server.auth_lock = self.remote.auth_lock
                 self.remote.publication_status = self.server.publication_status
         except BaseException:
             self.server.terminals.close()

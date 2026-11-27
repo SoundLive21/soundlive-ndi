@@ -317,13 +317,14 @@ class RemoteDashboard(ThreadingHTTPServer):
                     else:
                         raise ValueError("Mot de passe obligatoire.")
                 db[kind][name] = entry
+            self.accounts_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             with NamedTemporaryFile(dir=self.accounts_path.parent, delete=False) as tmp:
                 tmp.write(json.dumps(db).encode("utf-8"))
             try:
                 Path(tmp.name).replace(self.accounts_path)
             finally:
                 Path(tmp.name).unlink(missing_ok=True)
-            if kind == "users":
+            if kind == "users" and getattr(self,"remote_connections",None):
                 self.remote_connections.revoke_user(name)
 
     def public_accounts(self):
