@@ -2752,8 +2752,7 @@ def desktop():
             for index, output in active.items():
                 monitor = self.output_monitor(output)
                 if monitor is None:
-                    if index in self.extra_waiting:
-                        self.extra_waiting.pop(index)[0].destroy()
+                    # Preserve an existing waiting window during a transient monitor lookup failure.
                     continue
                 if index not in self.extra_waiting:
                     window = Gtk.Window(decorated=False, accept_focus=False, focus_on_map=False)
@@ -2805,8 +2804,9 @@ def desktop():
                 labels[4].set_markup(self.regie_label.get_label())
                 qr.set_from_pixbuf(self.qr_image.get_pixbuf())
                 if not window.get_visible():
-                    window.fullscreen_on_monitor(window.get_screen(), monitor)
                     window.show_all()
+                    window.fullscreen_on_monitor(window.get_screen(), monitor)
+                    window.present()
                 labels[2].set_visible(bool(texts[2]))
                 labels[7].set_visible(self.update_label.get_visible())
                 qr.set_visible(self.qr_panel.get_visible())
@@ -2864,7 +2864,9 @@ def desktop():
             now = time.monotonic()
             if self.output_request and self.output_request.done():
                 try:
-                    self.outputs = self.output_request.result()
+                    discovered = self.output_request.result()
+                    if discovered:
+                        self.outputs = discovered
                     # GTK monitor enumeration runs on the GUI thread.
                     display = self.window.get_display()
                     for output in self.outputs:
@@ -2876,11 +2878,21 @@ def desktop():
                         output["resolution_width"] = output["width"] * monitor.get_scale_factor()
                         output["resolution_height"] = output["height"] * monitor.get_scale_factor()
                 except (OSError, ValueError, subprocess.SubprocessError):
-                    self.outputs = []
+                    # A failed probe is not a monitor disconnection.
+                    pass
                 self.output_request = None
             if not self.output_request and now >= self.next_outputs:
                 self.output_request = self.work.submit(self.discover_outputs)
                 self.next_outputs = now + 10
+            display = self.window.get_display()
+            # Keep the last verified SDL IDs during a network interruption.
+            # Remove an output only if its physical geometry no longer exists.
+            geometries = set()
+            for i in range(display.get_n_monitors()):
+                rect = display.get_monitor(i).get_geometry()
+                geometries.add((rect.x, rect.y, rect.width, rect.height))
+            if geometries:
+                self.outputs = [o for o in self.outputs if tuple(o[k] for k in ("x", "y", "width", "height")) in geometries]
             wanted = {}
             if not self.maintenance.active and len(self.outputs) > 1:
                 for output in self.outputs:
@@ -3622,9 +3634,11 @@ def run_windows_screen(tk, log):
             if now >= next_displays:
                 next_displays = now + 10
                 try:
-                    displays = detect_displays()
+                    detected = detect_displays()
+                    if detected:
+                        displays = detected
                 except (OSError, ValueError, subprocess.SubprocessError):
-                    displays = []
+                    pass  # Keep the last known monitor layout on transient discovery errors.
             if media.tick():
                 stop_player()
                 media.prune()
