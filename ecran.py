@@ -1855,6 +1855,7 @@ class DashboardClient:
         token = self.identity["token"]
         local_video = report.get("local_video") is True
         uses_internal = self.internal_preview is not None and not local_video
+        primary_render = UBUNTU and not WINDOWS and not local_video and report.get("state") == "Lecture"
         uses_portal = (image_preview is None and not self.internal_preview_required and self.portal is not None
                        and self.display_info.get("portal") is True)
         monitor_capture, monitor_error = self.local_screen_capture or (self.display_info.get("capture") is True, "")
@@ -1868,9 +1869,9 @@ class DashboardClient:
                       update_issue=self.update_issue,
                       update_has_engine=self.has_versioned_engine,
                       orientation_status=self.orientation_report,
-                      display=self.display_info, display_capture=bool(image_preview or uses_internal or uses_portal or uses_monitor or physical_primary),
-                      display_preview_kind="player" if image_preview or (self.internal_preview_required and not local_video) else "monitor",
-                      display_preview_error=("" if image_preview or physical_primary else
+                      display=self.display_info, display_capture=bool(image_preview or primary_render or uses_internal or uses_portal or uses_monitor or physical_primary),
+                      display_preview_kind="player" if image_preview or primary_render or (self.internal_preview_required and not local_video) else "monitor",
+                      display_preview_error=("" if image_preview or physical_primary or primary_render else
                                              "Aperçu de la vidéo locale indisponible dans cette session Wayland."
                                              if local_video and self.internal_preview_required else
                                              self.internal_preview_error if self.internal_preview_required else monitor_error),
@@ -1921,6 +1922,8 @@ class DashboardClient:
                             " ".join(str(target[k]) for k in ("x", "y", "width", "height")))
                     else:
                         mode, argument = "--capture-sortie", " ".join(str(target[k]) for k in ("x", "y", "width", "height"))
+                elif screen and primary_render:
+                    mode, argument = "primary-player", (RENDER_PREVIEW, " ".join(str(primary_output[k]) for k in ("x", "y", "width", "height")) if primary_output else None)
                 elif screen and physical_primary:
                     mode, argument = "--capture-sortie", " ".join(str(primary_output[k]) for k in ("x", "y", "width", "height"))
                 elif screen and image_preview:
@@ -1968,6 +1971,13 @@ class DashboardClient:
         try:
             if mode == "player":
                 png = player_render_preview()
+            elif mode == "primary-player":
+                try:
+                    png = player_render_preview(argument[0])
+                except (OSError, RuntimeError, ValueError):
+                    if argument[1] is None:
+                        raise
+                    png = self.client_command("--capture-sortie", argument[1], 7)
             elif mode == "secondary-player":
                 try:
                     png = player_render_preview(argument[0])
@@ -2933,7 +2943,9 @@ def desktop():
                 env = None
                 if self.identification_output == "texture":
                     env = {**os.environ, "SOUNDLIVE_IDENTIFICATION_TEXTURE": str(IDENTIFICATION_TEXTURE)}
-                if not local and self.dashboard and self.dashboard.internal_preview is not None:
+                if not local and UBUNTU:
+                    RENDER_PREVIEW.with_suffix(".request").unlink(missing_ok=True)
+                    RENDER_PREVIEW.with_suffix(".rgb").unlink(missing_ok=True)
                     env = {**(env or os.environ), "SOUNDLIVE_RENDER_PREVIEW": str(RENDER_PREVIEW)}
                 if UBUNTU and not local and self.outputs:
                     env = {**(env or os.environ), "SOUNDLIVE_DISPLAY_INDEX": "0"}
