@@ -3146,7 +3146,7 @@ function audioRouteControl(row, index) {
   label.append("Sortie audio");
   const input = document.createElement("select");
   const current = row.audio_routes?.[index] || "";
-  input.append(new Option("Automatique (HDMI prioritaire)", ""));
+  input.append(new Option("Automatique (selon l’écran)", ""));
   for (const device of devices) input.append(new Option(device.label + " · " + device.id, device.id));
   if (current && !devices.some(d=>d.id===current)) input.append(new Option("Indisponible · " + current,current));
   input.value = current;

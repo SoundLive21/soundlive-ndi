@@ -97,26 +97,36 @@ REGIE_REPAIR = ("Réassociation à la régie nécessaire", "#ffacb8")
 MUTTER_DISPLAY = "org.gnome.Mutter.DisplayConfig"
 MUTTER_DISPLAY_PATH = "/org/gnome/Mutter/DisplayConfig"
 
+def pulse_json(kind):
+    return json.loads(subprocess.run(["pactl", "-f", "json", "list", kind],
+                      capture_output=True, text=True, check=True, timeout=3).stdout)
+
+
 def prefer_hdmi_audio():
-    """Select HDMI in the desktop session, without changing hardware volume."""
+    """Expose simultaneous outputs before playback; never change the global default."""
     if WINDOWS or not shutil.which("pactl"):
         return
     try:
-        def pactl(*args):
-            return subprocess.run(["pactl", *args], capture_output=True, text=True,
-                                  check=True, timeout=3).stdout.strip()
-        sinks = [line.split() for line in pactl("list", "short", "sinks").splitlines()]
-        hdmi = [row[1] for row in sinks if len(row) >= 2 and "hdmi" in row[1].lower()]
-        if not hdmi:
-            return
-        current = pactl("get-default-sink")
-        target = current if current in hdmi else hdmi[0]
-        if current != target:
-            pactl("set-default-sink", target)
-        os.environ["PULSE_SINK"] = target
-        print("SoundLive audio : sortie HDMI " + target, flush=True)
-    except (OSError, subprocess.SubprocessError):
-        # Audio discovery must never prevent video playback.
+        for card in pulse_json("cards"):
+            profiles = card.get("profiles", {})
+            if isinstance(profiles, list):
+                profiles = {p["name"]: p for p in profiles}
+            active = card.get("active_profile")
+            if isinstance(active, dict):
+                active = active.get("name")
+            ports = card.get("ports", {})
+            if isinstance(ports, list):
+                ports = {p["name"]: p for p in ports}
+            hdmi = any("hdmi" in name.lower() and p.get("availability") != "not available"
+                       for name, p in ports.items())
+            pro = profiles.get("pro-audio", {})
+            if hdmi and active != "pro-audio" and pro.get("available") != "no" and int(pro.get("n_sinks", 0)) > 1:
+                subprocess.run(["pactl", "set-card-profile", card["name"], "pro-audio"],
+                               check=True, capture_output=True, timeout=5)
+            elif hdmi and active != "pro-audio" and "hdmi" not in str(active) and "output:hdmi-stereo" in profiles:
+                subprocess.run(["pactl", "set-card-profile", card["name"], "output:hdmi-stereo"],
+                               check=True, capture_output=True, timeout=5)
+    except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError):
         pass
 
 
@@ -124,12 +134,34 @@ def audio_sinks():
     if WINDOWS or not shutil.which("pactl"):
         return []
     try:
-        result = subprocess.run(["pactl", "-f", "json", "list", "sinks"],
-                                capture_output=True, text=True, check=True, timeout=2)
-        return [dict(id=s["name"], label=s.get("description") or s["name"],
-                     model=(s.get("properties") or {}).get("device.product.name", ""))
-                for s in json.loads(result.stdout) if isinstance(s.get("name"), str)]
-    except (OSError, ValueError, subprocess.SubprocessError):
+        result = []
+        for sink in pulse_json("sinks"):
+            name = sink.get("name")
+            if not isinstance(name, str):
+                continue
+            props = sink.get("properties") or {}
+            label = sink.get("description") or name
+            model = props.get("device.product.name", "")
+            hdmi = "hdmi" in name.lower()
+            card = props.get("api.alsa.card") or props.get("alsa.card")
+            device = props.get("api.alsa.pcm.device") or props.get("alsa.device")
+            match = re.search(r"pro-output-(\d+)$", name)
+            if device is None and match:
+                device = match.group(1)
+            if card is not None and device is not None and str(card).isdigit() and str(device).isdigit():
+                pcm = Path(f"/proc/asound/card{card}/pcm{device}p/info")
+                try:
+                    info = pcm.read_text()
+                    hdmi = hdmi or "HDMI" in info.upper()
+                    if hdmi:
+                        label = "HDMI / DisplayPort · " + label
+                    elif "ANALOG" in info.upper():
+                        label = "Haut-parleurs / jack · " + label
+                except OSError:
+                    pass
+            result.append(dict(id=name, label=label, model=model, hdmi=hdmi))
+        return result
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError):
         return []
 
 
@@ -138,12 +170,16 @@ def audio_target(output, routes, sinks):
     chosen = routes.get(index)
     if chosen:
         return chosen if any(s["id"] == chosen for s in sinks) else None
-    hdmi = [s for s in sinks if "hdmi" in s["id"].lower()]
-    model = output.get("model", "").strip().casefold()
-    matches = [s for s in hdmi if model and model in (s["model"].casefold(), s["label"].casefold())]
-    if len(matches) == 1:
-        return matches[0]["id"]
-    if len(hdmi) == 1:
+    hdmi = [s for s in sinks if s.get("hdmi")]
+    analog = [s for s in sinks if not s.get("hdmi")]
+    connector = output.get("connector", "").lower()
+    if connector.startswith(("edp", "lvds", "dsi")) and len(analog) == 1:
+        return analog[0]["id"]
+    if connector.startswith(("hdmi", "dp", "displayport")) and len(hdmi) == 1:
+        return hdmi[0]["id"]
+    if len(sinks) == 1:
+        return sinks[0]["id"]
+    if not connector and len(hdmi) == 1:
         return hdmi[0]["id"]
     return None
 
@@ -681,6 +717,7 @@ class PortalCapture:
         self.session = None
         self.stream = None
         self.bus = None
+        self.lock = threading.Lock()
 
     def request(self, method, signature, arguments, options, timeout):
         from gi.repository import Gio, GLib
@@ -737,7 +774,11 @@ class PortalCapture:
         except GLib.Error:
             pass
 
-    def snapshot(self, allow_prompt):
+    def snapshot(self, allow_prompt, geometry=None):
+        with self.lock:
+            return self.snapshot_locked(allow_prompt, geometry)
+
+    def snapshot_locked(self, allow_prompt, geometry):
         from gi.repository import Gio, GLib
 
         gst = shutil.which("gst-launch-1.0")
@@ -752,17 +793,27 @@ class PortalCapture:
                                        {"session_handle_token": GLib.Variant("s", "ndi_" + secrets.token_hex(12))}, 4)
                 self.session = session["session_handle"]
                 self.request("SelectSources", "(oa{sv})", (self.session,),
-                             {"types": GLib.Variant("u", 1), "multiple": GLib.Variant("b", False)}, 4)
+                             {"types": GLib.Variant("u", 1), "multiple": GLib.Variant("b", True)}, 4)
                 result = self.request("Start", "(osa{sv})", (self.session, ""), {}, 55)
-                [(node, props)] = result["streams"]
-                self.stream = (node, props.get("pipewire-serial"))
+                self.stream = result["streams"]
             response, fds = self.bus.call_with_unix_fd_list_sync(
                 self.name, self.path, self.interface, "OpenPipeWireRemote",
                 GLib.Variant("(oa{sv})", (self.session, {})), GLib.VariantType.new("(h)"),
                 Gio.DBusCallFlags.NONE, 3000, None, None)
             fd = fds.get(response.unpack()[0])
             try:
-                node, serial = self.stream
+                streams = self.stream
+                if geometry is not None:
+                    x, y, width, height = geometry
+                    matches = [(n,p) for n,p in streams if tuple(p.get("position", ())) == (x,y)]
+                    if len(matches) != 1:
+                        raise RuntimeError("Moniteur non autorisé ou position non identifiable. Autorise tous les écrans dans le portail.")
+                    node, props = matches[0]
+                elif len(streams) == 1:
+                    node, props = streams[0]
+                else:
+                    raise RuntimeError("Moniteur principal non identifiable.")
+                serial = props.get("pipewire-serial")
                 target = f"target-object={serial}" if serial is not None else f"path={node}"
                 result = subprocess.run(
                     [gst, "-q", "pipewiresrc", f"fd={fd}", target, "num-buffers=1",
@@ -1853,29 +1904,19 @@ class DashboardClient:
     def poll(self, report, display_pid=0, image_preview=None):
         server = self.identity["server"]
         token = self.identity["token"]
-        local_video = report.get("local_video") is True
-        uses_internal = self.internal_preview is not None and not local_video
-        primary_render = UBUNTU and not WINDOWS and not local_video and report.get("state") == "Lecture"
-        uses_portal = (image_preview is None and not self.internal_preview_required and self.portal is not None
-                       and self.display_info.get("portal") is True)
+        uses_portal = not WINDOWS and self.portal is not None and "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper() and os.environ.get("XDG_SESSION_TYPE") == "wayland"
         monitor_capture, monitor_error = self.local_screen_capture or (self.display_info.get("capture") is True, "")
-        primary_output = next((o for o in report.get("outputs", []) if o["id"] == "0"), None)
-        physical_primary = bool(primary_output and primary_output.get("local") and primary_output.get("playing")
-                                and (WINDOWS or shutil.which("grim") or not self.internal_preview_required and monitor_capture))
-        uses_monitor = not self.internal_preview_required and monitor_capture
+        physical_available = WINDOWS or uses_portal or monitor_capture or bool(shutil.which("grim"))
         report.update(kind=DEVICE_KIND, latency_ms=self.latency_ms, latency_test=self.latency_test,
                       diagnostic=self.diagnostic.sample(server), can_update=self.can_update,
                       client_version=self.version, client_release=SOFTWARE_VERSION, update_target=self.target,
                       update_issue=self.update_issue,
                       update_has_engine=self.has_versioned_engine,
                       orientation_status=self.orientation_report,
-                      display=self.display_info, display_capture=bool(image_preview or primary_render or uses_internal or uses_portal or uses_monitor or physical_primary),
-                      display_preview_kind="player" if image_preview or primary_render or (self.internal_preview_required and not local_video) else "monitor",
-                      display_preview_error=("" if image_preview or physical_primary or primary_render else
-                                             "Aperçu de la vidéo locale indisponible dans cette session Wayland."
-                                             if local_video and self.internal_preview_required else
-                                             self.internal_preview_error if self.internal_preview_required else monitor_error),
-                      capture_needs_consent=uses_portal and not physical_primary and self.portal.stream is None)
+                      display=self.display_info, display_capture=bool(physical_available),
+                      display_preview_kind="monitor",
+                      display_preview_error="" if physical_available else monitor_error,
+                      capture_needs_consent=uses_portal and self.portal.stream is None)
         if (report.get("os_result") or {}).get("state") not in OsMaintenance.pending:
             report["os_health"] = self.os_update_check.report()
         if self.can_update:
@@ -1913,27 +1954,19 @@ class DashboardClient:
                 self.preview_job = job
                 argument = str(display_pid) if screen else source
                 output = preview.get("output", "0")
-                if screen and output != "0":
+                if screen:
                     target = next((o for o in report.get("outputs", []) if o["id"] == output), None)
-                    if target is None:
+                    geometry = tuple(target[k] for k in ("x", "y", "width", "height")) if target else None
+                    if output != "0" and target is None:
                         mode, argument = "missing-output", None
-                    elif target.get("playing") and not target.get("local") and not WINDOWS:
-                        mode, argument = "secondary-player", (STATE / ("rendu-sortie-" + output),
-                            " ".join(str(target[k]) for k in ("x", "y", "width", "height")))
+                    elif uses_portal:
+                        mode, argument = "portal", geometry
+                    elif geometry:
+                        mode, argument = "--capture-sortie", " ".join(map(str, geometry))
                     else:
-                        mode, argument = "--capture-sortie", " ".join(str(target[k]) for k in ("x", "y", "width", "height"))
-                elif screen and primary_render:
-                    mode, argument = "primary-player", (RENDER_PREVIEW, " ".join(str(primary_output[k]) for k in ("x", "y", "width", "height")) if primary_output else None)
-                elif screen and physical_primary:
-                    mode, argument = "--capture-sortie", " ".join(str(primary_output[k]) for k in ("x", "y", "width", "height"))
-                elif screen and image_preview:
-                    mode, argument = "local-image", image_preview
-                elif screen and uses_internal:
-                    mode = "waiting" if report["state"] != "Lecture" else "player"
-                elif screen and self.internal_preview_required:
-                    mode = "unavailable"
+                        mode, argument = "--capture-ecran", str(display_pid)
                 else:
-                    mode = "portal" if screen and uses_portal else "--capture-ecran" if screen else "--apercu-ndi"
+                    mode, argument = "--apercu-ndi", source
                 threading.Thread(target=self.send_preview,
                                  args=(job, mode, argument, screen, preview.get("automatic") is not True),
                                  daemon=True).start()
@@ -1992,7 +2025,7 @@ class DashboardClient:
             elif mode == "waiting":
                 png = self.internal_preview()
             elif mode == "portal":
-                png = self.portal.snapshot(allow_prompt)
+                png = self.portal.snapshot(allow_prompt, argument)
             else:
                 png = self.client_command(mode, argument, 11 if screen else 9)
             if 0 < len(png) <= PREVIEW_LIMIT:
@@ -2133,9 +2166,7 @@ def desktop():
             self.identification_popup = self.make_identification_popup(wayland)
             if UBUNTU:
                 self.video_engine = updated_identification_player(PLAYER, self.log)
-            if self.dashboard and UBUNTU and wayland:
-                self.dashboard.internal_preview_required = True
-                self.prepare_internal_preview()
+            # Physical captures use the compositor portal on GNOME Wayland.
             replace_overlay_file(IDENTIFICATION_TEXT, b"")
             IDENTIFICATION_TEXTURE.unlink(missing_ok=True)
             for path in STATE.glob("identification-sortie-*.rgba"):

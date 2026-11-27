@@ -48,7 +48,7 @@ from terminal_ssh import GROUP_LIMIT, USER as SSH_USER, HostKeyCheck, Terminals
 from versions_regie import PublicationStatus
 
 ROOT = Path(__file__).resolve().parent
-SOFTWARE_VERSION = "1.4.135"
+SOFTWARE_VERSION = "1.4.136"
 # Publication : arrêt indépendant des sorties vidéo.
 RESOLUTION_CONTROLS_ENABLED = False
 PREVIEW_AUTO_INTERVAL = 30
@@ -202,7 +202,7 @@ def request_preview(data, now):
     if screen and output == "0" and online[0][1].get("display_capture") is not True:
         return 409, {"error": "La capture de l’affichage est indisponible sur ce lecteur."}
     automatic = data.get("automatic") is True
-    consent = screen and output == "0" and online[0][1].get("capture_needs_consent") is True
+    consent = screen and online[0][1].get("capture_needs_consent") is True
     if automatic and consent:
         return 409, {"error": "Autorise le partage sur le lecteur Ubuntu avant de lancer la capture automatique."}
     if existing:
