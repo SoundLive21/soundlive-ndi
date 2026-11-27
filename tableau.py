@@ -1344,7 +1344,7 @@ class Request(BaseHTTPRequestHandler):
                                                 (report.get("diagnostic") or {}).get("desktop_protocol"),
                                                 (report.get("diagnostic") or {}).get("desktop_services")),
                         desktop_ports=(report.get("diagnostic") or {}).get("desktop_services", {}),
-                        group=row.get("group"), output_groups=row.get("output_groups", {}), physical_outputs=physical_outputs(row),
+                        group=row.get("group"), output_groups=row.get("output_groups", {}), output_names=row.get("output_names", {}), physical_outputs=physical_outputs(row),
                         physical_order={index: dict(group=group_order.get(physical_group(row,index) or ""), screen=screen_order.get(physical_group(row,index) or "", {}).get(key if index=="0" else key+":"+index)) for index in physical_outputs(row)}, identify=row.get("identify") is True,
                         resolution_limit=row.get("resolution_limit"),
                         group_order=group_order.get(group), screen_order=screen_order.get(group, {}).get(key),
@@ -2171,14 +2171,29 @@ class Request(BaseHTTPRequestHandler):
                              and now < job["until"] else None)
         if path == "/api/rename":
             name = safe_text(data.get("name"))
-            previous = row["name"]
-            row["name"] = name
+            names = data.get("output_names", {})
+            if not isinstance(names, dict) or any(index not in physical_outputs(row) for index in names):
+                raise ValueError("Écran inconnu.")
+            updated = dict(row.get("output_names", {}))
+            for index, value in names.items():
+                if not isinstance(value, str) or len(value) > 80:
+                    raise ValueError("Nom d’écran invalide.")
+                if value.strip():
+                    updated[index] = safe_text(value)
+                else:
+                    updated.pop(index, None)
+            previous = row["name"], row.get("output_names")
+            row["name"], row["output_names"] = name, updated
             try:
                 save()
             except OSError:
-                row["name"] = previous
+                row["name"] = previous[0]
+                if previous[1] is None:
+                    row.pop("output_names", None)
+                else:
+                    row["output_names"] = previous[1]
                 raise
-            return 200, {"name": name}
+            return 200, {"name": name, "output_names": updated}
         if path == "/api/remove":
             remove_screens({key: row})
             return 200, {"ok": True}

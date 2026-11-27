@@ -644,7 +644,8 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
   <form class="dialog-body">
     <h2 id="rename-reader-title">Renommer le lecteur</h2>
     <label>Nom du lecteur<input name="name" maxlength="80" required autocomplete="off" autofocus></label>
-    <p class="small">Le nom sera utilisé pour tous les écrans de ce lecteur.</p>
+    <div id="rename-output-names"></div>
+    <p class="small">Les noms des écrans sont facultatifs. Laisse un champ vide pour conserver uniquement son numéro.</p>
     <p class="small error" role="alert" hidden></p>
     <div class="actions"><button type="button">Annuler</button><button type="submit" class="primary">Enregistrer</button></div>
   </form>
@@ -2824,6 +2825,17 @@ function openRenameReader(row) {
   if (!row || renameReaderBusy || renameReaderDialog.open) return;
   renameReaderId = row.id;
   renameReaderInput.value = row.name;
+  const fields = select(renameReaderForm,"#rename-output-names");
+  fields.replaceChildren(...physicalRows([row],true).map(screen=>{
+    const label=document.createElement("label");
+    label.textContent="Écran "+(Number(screen.output)+1);
+    const input=document.createElement("input");
+    input.type="text";input.maxLength=80;input.autocomplete="off";
+    input.dataset.outputName=screen.output;
+    input.value=row.output_names?.[screen.output]||"";
+    label.append(input);
+    return label;
+  }));
   renameReaderError.hidden = true;
   renameReaderDialog.showModal();
   renameReaderInput.focus();
@@ -2836,11 +2848,14 @@ renameReaderForm.onsubmit = async event => {
   if (renameReaderBusy) return;
   const name = renameReaderInput.value.trim();
   if (!name) {renameReaderError.textContent="Saisis un nom valide.";renameReaderError.hidden=false;return;}
+  const fields = [...renameReaderForm.querySelectorAll("[data-output-name]")];
+  const output_names=Object.fromEntries(fields.map(input=>[input.dataset.outputName,input.value.trim()]));
+  fields.forEach(input=>input.disabled=true);
   renameReaderBusy=true;
   renameReaderSubmit.disabled=renameReaderCancel.disabled=renameReaderInput.disabled=true;
   renameReaderError.hidden=true;
   try {
-    await call("/api/rename",{id:renameReaderId,name});
+    await call("/api/rename",{id:renameReaderId,name,output_names});
     renameReaderDialog.close();
     await refresh(true);
     showToast("Lecteur renommé","success",name);
@@ -2848,6 +2863,7 @@ renameReaderForm.onsubmit = async event => {
     if (renameReaderDialog.open) {renameReaderError.textContent=error.message;renameReaderError.hidden=false;}
     else noticeError(error);
   } finally {
+    fields.forEach(input=>input.disabled=false);
     renameReaderBusy=false;
     renameReaderSubmit.disabled=renameReaderCancel.disabled=renameReaderInput.disabled=false;
   }
@@ -3068,7 +3084,8 @@ function syncSourceChoice(card) {
     && !available[activeResolution]?.includes(ui.source.value)
     ? "Cette source n’est pas détectée ou sa résolution n’est pas validée sur cet écran." : "");
 }
-function outputLegend(legend, number, output) {
+function outputLabel(number, name) {return "Écran "+number+(name?" ("+name+")":"");}
+function outputLegend(legend, number, output, name) {
   const title = document.createElement("span");
   title.className = "output-title";
   const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -3077,7 +3094,7 @@ function outputLegend(legend, number, output) {
   const path = document.createElementNS(icon.namespaceURI, "path");
   path.setAttribute("d", "M3 4h18v13H3z M12 17v4 M8 21h8");
   icon.append(path);
-  title.append(icon, document.createTextNode("Écran " + number));
+  title.append(icon, document.createTextNode(outputLabel(number,name)));
   if (output) {
     const size = document.createElement("small");
     size.textContent = output.width + " × " + output.height;
@@ -3101,7 +3118,7 @@ function renderExtraOutputs(card, row) {
   const physical = physicalRows([row]).filter(o=>o.output!=="0");
   const primaryGroup = row.group || "";
   box.hidden = !physical.some(o=>(o.group || "")===primaryGroup);
-  const signature = JSON.stringify([physical.map(o=>o.id),outputs, row.extra_outputs, row.extra_media, row.report.sources, row.media?.enabled,row.output_groups,row.online,row.name,row.identify]);
+  const signature = JSON.stringify([physical.map(o=>o.id),outputs, row.extra_outputs, row.extra_media, row.report.sources, row.media?.enabled,row.output_groups,row.output_names,row.online,row.name,row.identify]);
   if (box.dataset.signature === signature) return;
   box.dataset.signature = signature;
   box.replaceChildren();
@@ -3144,7 +3161,7 @@ function renderExtraOutputs(card, row) {
     const line = document.createElement("fieldset");
     const heading = document.createElement("legend");
     line.className = "video-output";
-    outputLegend(heading, Number(output.id) + 1, output);
+    outputLegend(heading, Number(output.id) + 1, output,row.output_names?.[output.id]);
     const source = document.createElement("select");
     const sources = [...new Set([current.source, ...(row.report.sources || [])].filter(Boolean))];
     source.append(new Option("Ne pas diffuser de flux", "off"),
@@ -3268,7 +3285,7 @@ function render(row) {
   card.data = row;
   renderExtraOutputs(card, row);
   const primary = (row.report.outputs || []).find(o => o.id === "0");
-  outputLegend(select(form, ".primary-output legend"), 1, primary);
+  outputLegend(select(form, ".primary-output legend"), 1, primary,row.output_names?.["0"]);
   const handle = select(el, ".card-heading .drag-handle");
   handle.title = "Déplacer " + row.name + " · Glisser ou utiliser les flèches";
   handle.setAttribute("aria-label",handle.title);
@@ -3456,7 +3473,7 @@ function physicalRows(rows, explicitPrimary = false) {
     const multiple = (row.physical_outputs || ["0", ...(row.report.outputs || []).filter(o=>o.id!=="0").map(o=>o.id)]).length > 1;
     return {...row, readerId:row.id, output,
       id:output === "0" && !explicitPrimary ? row.id : row.id + ":" + output,
-      name:row.name + (multiple ? " · Écran " + (Number(output)+1) : ""),
+      name:row.name + (multiple || row.output_names?.[output] ? " · " + outputLabel(Number(output)+1,row.output_names?.[output]) : ""),
       group:output==="0" ? row.group : Object.hasOwn(row.output_groups || {},output) ? row.output_groups[output] : row.group,
       group_order:row.physical_order ? row.physical_order[output]?.group : row.group_order,
       screen_order:row.physical_order?.[output]?.screen ?? (output==="0" ? row.screen_order : null)};
