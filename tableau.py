@@ -447,6 +447,44 @@ def batch(path, data, now):
         raise ValueError("Sélectionne au moins un écran.")
     targets = {key: SCREENS.get(key) for key in devices}
     if path == "/api/screen-groups":
+        if any(":" in key for key in devices):
+            selected = []
+            for key in devices:
+                reader, separator, index = key.partition(":")
+                row = SCREENS.get(reader)
+                index = index if separator else "0"
+                if not row or index not in tuple(map(str, range(8))) or (index != "0" and not any(o["id"] == index for o in row.get("report", {}).get("outputs", []))):
+                    raise ValueError("Écran physique inconnu.")
+                selected.append((reader, row, index))
+            name = data.get("group")
+            if not isinstance(name, str) or any(not char.isprintable() for char in name):
+                raise ValueError("Nom de groupe invalide.")
+            name = safe_text(name) if name.strip() else None
+            previous = {key: (row.get("group"), dict(row.get("output_groups", {}))) for key, row, _ in selected}
+            for _, row, index in selected:
+                if index == "0":
+                    # Preserve the previous inherited assignment of other connected outputs.
+                    groups = row.setdefault("output_groups", {})
+                    for output in row.get("report", {}).get("outputs", []):
+                        if output["id"] != "0":
+                            groups.setdefault(output["id"], row.get("group"))
+                    if name:
+                        row["group"] = name
+                    else:
+                        row.pop("group", None)
+                else:
+                    row.setdefault("output_groups", {})[index] = name
+            try:
+                save()
+            except OSError:
+                for key, (group, groups) in previous.items():
+                    if group is None:
+                        SCREENS[key].pop("group", None)
+                    else:
+                        SCREENS[key]["group"] = group
+                    SCREENS[key]["output_groups"] = groups
+                raise
+            return 200, {"group": name, "count": len(selected)}
         if any(row is None for row in targets.values()):
             return 409, {"error": "Un écran sélectionné a été retiré du tableau."}
         name = data.get("group")
@@ -1217,7 +1255,7 @@ class Request(BaseHTTPRequestHandler):
                                                 (report.get("diagnostic") or {}).get("desktop_protocol"),
                                                 (report.get("diagnostic") or {}).get("desktop_services")),
                         desktop_ports=(report.get("diagnostic") or {}).get("desktop_services", {}),
-                        group=row.get("group"), identify=row.get("identify") is True,
+                        group=row.get("group"), output_groups=row.get("output_groups", {}), identify=row.get("identify") is True,
                         resolution_limit=row.get("resolution_limit"),
                         group_order=group_order.get(group), screen_order=screen_order.get(group, {}).get(key),
                         resolution_sources=resolution_sources(row, now),
