@@ -1474,7 +1474,8 @@ def report_outputs(outputs, primary_ready, primary_local, players, local_players
             (local and local.ready) or (entry and entry[0].poll() is None and entry[2].exists())))
         result.append({**output, "playing": playing,
                        "local": bool(primary_local if index == "0" else local and local.ready),
-                       "media_error": local.error if local else ""})
+                       "media_error": local.error if local else "",
+                       "active_media": local.config["items"][local.index]["name"] if local and local.ready and local.config else ""})
     return result
 
 
