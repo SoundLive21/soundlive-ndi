@@ -1985,7 +1985,7 @@ function setupRemoteControls(dialog, {id, address, support = [], desktop_ports =
   ssh.hidden = !support.includes("ssh");
   ssh.disabled = ssh.hidden || !online;
   ssh.onclick = ssh.disabled ? null : () =>
-    window.open("/terminal?id=" + encodeURIComponent(id), "_blank", "popup,noopener,width=980,height=735");
+    window.open("/terminal?id=" + encodeURIComponent(id), "_blank", "popup,noopener,width=980,height=825");
   const validIP = typeof address === "string" && /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(address);
   const connections = [];
   for (const [protocol, label, defaultPort] of [["rdp", "RDP", 3389], ["vnc", "VNC", 5900]]) {
