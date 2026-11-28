@@ -56,6 +56,7 @@ button{padding:9px 13px;cursor:pointer;background:#2b222f;font-weight:600;white-
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}button.remove{color:#efacb7}.check{display:flex;align-items:center;gap:6px}
 .video-output{min-width:0;margin:12px 0;padding:12px 14px 16px;border:1px solid #59404e;border-radius:12px;background:#17121b}
 .video-output legend{padding:0 8px;color:#f5d1df;font-size:1rem;font-weight:700}
+.video-output .output-status{display:block;width:max-content;margin:4px 0 10px}.video-output .output-status[hidden]{display:none}
 .video-output legend .output-title{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
 .video-output legend svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .video-output legend small{font-size:.78rem;font-weight:400;color:var(--sub)}
@@ -3265,12 +3266,12 @@ function paintPhysicalStatus(badge, state) {
   badge.classList.toggle("waiting", state === "En attente" || state === "Démarrage");
   badge.classList.toggle("stopped", state === "Arrêté");
 }
-function outputStatusLegend(legend, row, index) {
-  const badge = document.createElement("span");
-  badge.className = "badge output-status";
-  badge.style.marginInlineStart = "8px";
-  paintPhysicalStatus(badge, physicalStatus(row,index));
-  legend.append(badge);
+function outputStatusBadge(field, row, index, visible, before=null) {
+  let badge = field.querySelector(".output-status");
+  if (!badge) {badge=document.createElement("span");badge.className="badge output-status";}
+  badge.hidden=!visible;
+  paintPhysicalStatus(badge,physicalStatus(row,index));
+  if(before)before.before(badge);else field.querySelector("legend").after(badge);
 }
 function audioRouteControl(row, index) {
   const devices = row.report.audio_devices || [];
@@ -3357,7 +3358,6 @@ function renderExtraOutputs(card, row) {
     line.className = "video-output";
     outputLegend(heading, Number(output.id) + 1, output,row.output_names?.[output.id]);
     line.dataset.outputId = output.id;
-    outputStatusLegend(heading,row,output.id);
     const source = document.createElement("select");
     const sources = [...new Set([current.source, ...(row.report.sources || [])].filter(Boolean))];
     source.append(new Option("Ne pas diffuser de flux", "off"),
@@ -3451,6 +3451,7 @@ function renderExtraOutputs(card, row) {
     actions.append(save, toggle);
     line.append(heading, label("Sources NDI détectées", source),
       label("Qualité", bandwidth), label("Orientation de l’écran", orientation), audioRouteControl(row,output.id), label("Volume ", level), volume, audio, actions);
+    outputStatusBadge(line,row,output.id,inline,bandwidth.closest("label"));
     const ndi = document.createElement("button");
     ndi.type = "button"; ndi.className = "primary full-action";
     ndi.textContent = "Revenir à la diffusion NDI";
@@ -3486,7 +3487,6 @@ function render(row) {
   const primaryDisplay = (row.report.outputs || []).length <= 1 ? row.report.display : null;
   const primaryDetails = primary ? {...primary, connector:primary.connector || primaryDisplay?.connector} : primaryDisplay;
   outputLegend(select(form, ".primary-output legend"), 1, primaryDetails,row.output_names?.["0"]);
-  outputStatusLegend(select(form, ".primary-output legend"),row,"0");
   const audioField = select(form, ".primary-output");
   const oldAudio = select(audioField, ".audio-route");
   const audioSignature = JSON.stringify([row.report.audio_devices,row.audio_routes?.["0"],row.online]);
@@ -3521,6 +3521,7 @@ function render(row) {
     ui.badge.after(headerStatuses);
   }
   const multiHeader = headerOutputs.length > 1;
+  outputStatusBadge(audioField,row,"0",multiHeader,select(audioField,".bandwidth").closest("label"));
   ui.badge.hidden = multiHeader;
   headerStatuses.hidden = !multiHeader;
   paintPhysicalStatus(ui.badge,physicalStatus(row,"0"));
