@@ -718,6 +718,36 @@ class PortalCapture:
         self.stream = None
         self.bus = None
         self.lock = threading.Lock()
+        self.token_path = STATE / "screen-cast-restore-token"
+        self.restore_token = None
+        try:
+            token = self.token_path.read_text(encoding="utf-8").strip()
+            if token and len(token) <= 4096:
+                self.restore_token = token
+        except (OSError, ValueError):
+            pass
+
+    def save_restore_token(self, token):
+        self.restore_token = token if isinstance(token, str) and token else None
+        try:
+            if not self.restore_token:
+                self.token_path.unlink(missing_ok=True)
+                return
+            self.token_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.token_path.with_name(self.token_path.name + "." + secrets.token_hex(8))
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                    stream.write(self.restore_token)
+                os.replace(temporary, self.token_path)
+            finally:
+                temporary.unlink(missing_ok=True)
+        except OSError as error:
+            print("Capture Wayland : sauvegarde de l’autorisation impossible : " + str(error), flush=True)
+
+    @property
+    def needs_consent(self):
+        return not self.stream and not self.restore_token
 
     def request(self, method, signature, arguments, options, timeout):
         from gi.repository import Gio, GLib
@@ -786,16 +816,30 @@ class PortalCapture:
             raise RuntimeError("Installe les dépendances GStreamer sur le lecteur Ubuntu.")
         try:
             if self.session is None:
-                if not allow_prompt:
+                if not allow_prompt and not self.restore_token:
                     raise RuntimeError("Clique sur Autoriser la capture puis valide le partage sur Ubuntu.")
                 self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+                version = self.bus.call_sync(self.name, self.path, "org.freedesktop.DBus.Properties", "Get",
+                                             GLib.Variant("(ss)", (self.interface, "version")),
+                                             GLib.VariantType.new("(v)"), Gio.DBusCallFlags.NONE, 3000, None).unpack()[0]
+                if version < 4 and not allow_prompt:
+                    self.save_restore_token(None)
+                    raise RuntimeError("Le portail ne permet pas de restaurer l’autorisation. Autorise la capture sur Ubuntu.")
                 session = self.request("CreateSession", "(a{sv})", (),
                                        {"session_handle_token": GLib.Variant("s", "ndi_" + secrets.token_hex(12))}, 4)
                 self.session = session["session_handle"]
-                self.request("SelectSources", "(oa{sv})", (self.session,),
-                             {"types": GLib.Variant("u", 1), "multiple": GLib.Variant("b", True)}, 4)
+                selection = {"types": GLib.Variant("u", 1), "multiple": GLib.Variant("b", True)}
+                if version >= 4:
+                    selection["persist_mode"] = GLib.Variant("u", 2)
+                    if self.restore_token:
+                        selection["restore_token"] = GLib.Variant("s", self.restore_token)
+                # Restore tokens are single-use. Keep only the replacement returned by Start.
+                self.save_restore_token(None)
+                self.request("SelectSources", "(oa{sv})", (self.session,), selection, 4)
                 result = self.request("Start", "(osa{sv})", (self.session, ""), {}, 55)
                 self.stream = result["streams"]
+                if self.stream and version >= 4:
+                    self.save_restore_token(result.get("restore_token"))
                 print("Capture Wayland : moniteurs autorisés " + repr(self.stream), flush=True)
                 if not self.stream:
                     raise RuntimeError("Aucun moniteur autorisé par le portail.")
@@ -1926,7 +1970,7 @@ class DashboardClient:
                       display=self.display_info, display_capture=bool(physical_available),
                       display_preview_kind="monitor",
                       display_preview_error="" if physical_available else monitor_error,
-                      capture_needs_consent=uses_portal and self.portal.stream is None)
+                      capture_needs_consent=uses_portal and self.portal.needs_consent)
         if (report.get("os_result") or {}).get("state") not in OsMaintenance.pending:
             report["os_health"] = self.os_update_check.report()
         if self.can_update:
