@@ -1531,6 +1531,14 @@ class Request(BaseHTTPRequestHandler):
             connections.disconnect_if_owned(self.client_address[0], self.remote_session)
         self.reply(303, b"", location="/", session=session)
 
+    def connected_user_label(self):
+        username = getattr(self,"principal",USERNAME)
+        if getattr(self,"grants",None) is None:
+            return username
+        account = self.server.public_accounts()["users"].get(username,{})
+        groups = account.get("groups",[])
+        return username + (" (" + ", ".join(groups) + ")" if groups else "")
+
     def session_status(self):
         self.reply(200, {"remaining_ms": self.session_remaining, "warning_ms": SESSION_WARNING * 1000, "username": getattr(self,"principal",USERNAME)})
 
@@ -1554,14 +1562,14 @@ class Request(BaseHTTPRequestHandler):
             return
         if path == "/medias-personnels":
             style = _dashboard_markup.split("<style>",1)[1].split("</style>",1)[0]
-            self.reply(200,PERSONAL_MEDIA_PAGE.replace("__SHARED_STYLE__",style).replace("__CONNECTED_USER__",escape(getattr(self,"principal",USERNAME))).encode("utf-8"))
+            self.reply(200,PERSONAL_MEDIA_PAGE.replace("__SHARED_STYLE__",style).replace("__CONNECTED_USER__",escape(self.connected_user_label())).encode("utf-8"))
             return
         if path in ("/api/personal-media","/api/personal-media/file"):
             self.personal_get(path,url.query)
             return
         if remote and getattr(self,"grants",None) is not None:
             if path == "/":
-                self.reply(200, OPERATOR_PAGE.replace("__CONNECTED_USER__", escape(self.principal)).encode("utf-8"))
+                self.reply(200, OPERATOR_PAGE.replace("__CONNECTED_USER__", escape(self.connected_user_label())).encode("utf-8"))
             elif path == "/api/operator/screens":
                 with LOCK:
                     self.reply(200,self.operator_screens())
