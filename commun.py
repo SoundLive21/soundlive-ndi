@@ -14,7 +14,7 @@ import sys
 DEFAULT_SOURCE = "OBS (Programme)"
 APP_NAME = "SoundLive-NDI"
 COPYRIGHT = "© 2026 Société SoundLive"
-SOFTWARE_VERSION = "1.4.154"
+SOFTWARE_VERSION = "1.4.155"
 PREVIEW_LIMIT = 160 * 1024
 ORIENTATIONS = ("landscape", "portrait-left", "portrait-right")
 MEDIA_FILE_LIMIT = 256 * 1024 * 1024
