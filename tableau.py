@@ -169,7 +169,7 @@ q("remove").onclick=async()=>{if(!confirm("Supprimer cet élément ?"))return;tr
 </script></html>"""
 OPERATOR_PAGE = """<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>SoundLive NDI · Opérateur</title><style>__SHARED_STYLE__
 .operator-controls{display:grid;gap:8px}.operator-controls label{margin:8px 0}.operator-preview img{display:block;width:100%;max-height:280px;object-fit:contain;border-radius:8px;background:#100d12}.operator-preview img[hidden]{display:none}.operator-output{margin-top:16px}.operator-output legend{font-weight:600}.operator-output .actions{margin-top:8px}.operator-header-statuses{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}.operator-preview{margin:8px 0}.operator-preview button{width:100%}.operator-card h2{min-width:0}.operator-card .badge{white-space:nowrap}.operator-controls button{white-space:normal}
-</style><header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release">v__OP_VERSION__</span><span id="count"></span><button type="button" data-personal-media>Mes médias</button><span class="connected-user">Connecté : <strong>__CONNECTED_USER__</strong></span><button id="logout">Me déconnecter</button></header><main><div class="heading"><h1>Gestion des écrans NDI</h1><div class="heading-actions"><button id="organize">Organiser les écrans</button><button id="group-action">Actions de groupe</button><button type="button" id="identify-manager-open" aria-haspopup="dialog" disabled>Identifier les écrans…</button></div></div><details class="preview-section" id="source-previews" open hidden><summary>Aperçu des sources NDI disponibles</summary><label class="check"><input type="checkbox" id="auto-previews" checked> Actualiser automatiquement les aperçus visibles</label><p id="source-empty" class="muted" hidden>Aucune source NDI détectée par les lecteurs connectés.</p><div class="preview-grid" id="source-grid"></div></details><p id="message" role="status"></p><div id="screens"></div></main><footer class="project-credits">© 2026 Société SoundLive · Auteur : DUVERNOY Matthieu &amp; ChatGPT · <a href="mailto:contact@soundlive.fr">contact@soundlive.fr</a></footer><dialog id="organizer" style="width:min(640px,92vw)"><div class="dialog-body"><h2>Organiser les écrans</h2><p>Personnalise l’ordre des groupes et des encarts dans ton navigateur.</p><div id="organizer-list"></div><div class="actions"><button id="reset-layout">Réinitialiser</button><button id="close-organizer" class="primary">Fermer</button></div></div></dialog><dialog id="group-dialog" aria-labelledby="group-title">
+</style><header><span class="mark" aria-hidden="true"></span><strong>SoundLive-NDI</strong><span class="release">v__OP_VERSION__</span><span id="count"></span><button type="button" data-personal-media>Mes médias</button><span class="connected-user">Connecté : <strong>__CONNECTED_USER__</strong></span><button id="logout">Me déconnecter</button></header><main><div class="heading"><h1>Gestion des écrans NDI</h1><div class="heading-actions"><button id="personal-groups">Gérer mes groupes</button><button id="organize">Organiser les écrans</button><button id="group-action">Actions de groupe</button><button type="button" id="identify-manager-open" aria-haspopup="dialog" disabled>Identifier les écrans…</button></div></div><details class="preview-section" id="source-previews" open hidden><summary>Aperçu des sources NDI disponibles</summary><label class="check"><input type="checkbox" id="auto-previews" checked> Actualiser automatiquement les aperçus visibles</label><p id="source-empty" class="muted" hidden>Aucune source NDI détectée par les lecteurs connectés.</p><div class="preview-grid" id="source-grid"></div></details><p id="message" role="status"></p><div id="screens"></div></main><footer class="project-credits">© 2026 Société SoundLive · Auteur : DUVERNOY Matthieu &amp; ChatGPT · <a href="mailto:contact@soundlive.fr">contact@soundlive.fr</a></footer><dialog id="organizer" style="width:min(640px,92vw)"><div class="dialog-body"><h2>Organiser les écrans</h2><p>Personnalise l’ordre des groupes et des encarts pour ton compte.</p><div id="organizer-list"></div><div class="actions"><button id="reset-layout">Réinitialiser</button><button id="close-organizer" class="primary">Fermer</button></div></div></dialog><dialog id="personal-groups-dialog" aria-labelledby="personal-groups-title" style="width:min(680px,94vw)"><div class="dialog-body"><h2 id="personal-groups-title">Mes groupes d’écrans</h2><p class="small">Les modifications concernent uniquement ton compte.</p><fieldset class="group-targets"><legend>Écrans à déplacer</legend><div class="group-controls"><button id="pg-all">Tout sélectionner</button><button id="pg-none">Tout désélectionner</button></div><div id="pg-list" class="group-choices"></div></fieldset><label>Groupe de destination<select id="pg-target"></select></label><label id="pg-new-label" hidden>Nom du nouveau groupe<input id="pg-new" maxlength="80"></label><div class="actions"><button id="pg-rename">Renommer un groupe</button><button id="pg-remove">Supprimer un groupe</button></div><div class="actions"><button id="pg-close">Fermer</button><button id="pg-save" class="primary">Enregistrer</button></div></div></dialog><dialog id="group-dialog" aria-labelledby="group-title">
   <form id="group-form" class="dialog-body">
     <h2 id="group-title">Actions de groupe</h2>
     <fieldset class="group-targets">
@@ -274,8 +274,8 @@ async function captureSource(v,automatic=false){if(v.pending||!v.available||auto
 setInterval(()=>{if(!q("source-previews").open||!q("auto-previews").checked||[...previewViews.values()].some(v=>v.pending))return;const v=[...previewViews.values()].find(v=>v.available&&v.next<=Date.now()&&v.el.getBoundingClientRect().bottom>0&&v.el.getBoundingClientRect().top<innerHeight);if(v)captureSource(v,true)},3000);
 function badge(node,state,label=""){node.className="badge"+(state==="Lecture"?" online":state==="Arrêté"?" stopped":(state==="En attente"||state==="Démarrage")?" waiting":"");node.textContent=label+state}
 const groups=new Map(), readerCards=new Map();
-let layout={groups:[],screens:{}};try{layout=JSON.parse(localStorage.getItem("soundlive-operator-layout")||"null")||layout}catch{}
-const saveLayout=()=>{try{localStorage.setItem("soundlive-operator-layout",JSON.stringify(layout))}catch{}};
+let layout={groups:[],screens:{}},layoutLoaded=false,layoutQueue=Promise.resolve();
+const saveLayout=()=>{const snapshot=JSON.parse(JSON.stringify(layout));layoutQueue=layoutQueue.catch(()=>{}).then(()=>api("/api/operator/layout",{layout:snapshot})).catch(e=>slResult(e.message,true));return layoutQueue};
 function rank(order,key){const i=order.indexOf(key);return i<0?1e9:i}
 function reorder(){for(const [name,g] of [...groups].sort((a,b)=>rank(layout.groups,a[0])-rank(layout.groups,b[0])))q("screens").append(g.section);for(const [name,g] of groups){const order=layout.screens[name]||[];for(const r of [...readerCards.values()].filter(r=>r.group===name).sort((a,b)=>rank(order,a.key)-rank(order,b.key)))g.grid.append(r.el)}}
 function move(order,source,dest){const a=order.indexOf(source),b=order.indexOf(dest);if(a<0||b<0)return order;const copy=[...order];copy.splice(a,1);copy.splice(b,0,source);return copy}
@@ -288,7 +288,7 @@ function dragHandle(target,key,scope,group=""){
  target.dataset.orderKey=key;target.ondragover=e=>{if(dragging&&dragging.scope===scope&&dragging.group===group){e.preventDefault();target.classList.add("drop-target")}};target.ondragleave=()=>target.classList.remove("drop-target");target.ondrop=e=>{if(dragging&&dragging.scope===scope&&dragging.group===group){e.preventDefault();e.stopPropagation();apply(dragging.key,key);dragging=null}target.classList.remove("drop-target")};
  b.onkeydown=e=>{if(!["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key))return;e.preventDefault();const k=keys(),i=k.indexOf(key)+(e.key==="ArrowUp"||e.key==="ArrowLeft"?-1:1);if(k[i]!==undefined)apply(key,k[i])};return b;
 }
-function drawOrganizer(){const box=q("organizer-list");box.replaceChildren();for(const section of q("screens").children){const name=section.dataset.orderKey,g=groups.get(name),p=document.createElement("p");p.textContent=name||"Sans groupe";box.append(p);for(const el of g.grid.children){const r=readerCards.get(el.dataset.orderKey),line=document.createElement("div");line.className="row";line.textContent=r.title.textContent;for(const [symbol,delta] of [["↑",-1],["↓",1]]){const b=document.createElement("button");b.textContent=symbol;b.onclick=()=>{const k=[...g.grid.children].map(x=>x.dataset.orderKey),i=k.indexOf(r.key)+delta;if(k[i]!==undefined){layout.screens[name]=move(k,r.key,k[i]);saveLayout();reorder();drawOrganizer()}};line.append(b)}box.append(line)}}}
+function drawOrganizer(){const box=q("organizer-list");box.replaceChildren();for(const section of q("screens").children){const name=section.dataset.orderKey,g=groups.get(name);if(!g)continue;const p=document.createElement("p");p.textContent=name||"Sans groupe";for(const [symbol,delta] of [["↑",-1],["↓",1]]){const b=document.createElement("button");b.textContent=symbol;b.onclick=()=>{const k=[...q("screens").children].filter(x=>groups.has(x.dataset.orderKey)).map(x=>x.dataset.orderKey),i=k.indexOf(name)+delta;if(k[i]!==undefined){layout.groups=move(k,name,k[i]);saveLayout();reorder();drawOrganizer()}};p.append(b)}box.append(p);for(const el of g.grid.children){const r=readerCards.get(el.dataset.orderKey),line=document.createElement("div");line.className="row";line.textContent=r.title.textContent;for(const [symbol,delta] of [["↑",-1],["↓",1]]){const b=document.createElement("button");b.textContent=symbol;b.onclick=()=>{const k=[...g.grid.children].map(x=>x.dataset.orderKey),i=k.indexOf(r.key)+delta;if(k[i]!==undefined){layout.screens[name]=move(k,r.key,k[i]);saveLayout();reorder();drawOrganizer()}};line.append(b)}box.append(line)}}}
 q("organize").onclick=()=>{drawOrganizer();q("organizer").showModal()};q("close-organizer").onclick=()=>q("organizer").close();q("reset-layout").onclick=()=>{layout={groups:[],screens:{}};saveLayout();for(const [name,g] of [...groups].sort((a,b)=>a[0].localeCompare(b[0])))q("screens").append(g.section);for(const g of groups.values())for(const el of [...g.grid.children].sort((a,b)=>readerCards.get(a.dataset.orderKey).title.textContent.localeCompare(readerCards.get(b.dataset.orderKey).title.textContent)))g.grid.append(el);drawOrganizer()};
 const groupRights={play:"play",stop:"play",mute:"audio",unmute:"audio",volume:"audio",source:"source",bandwidth:"source",orientation:"configuration"};
 const groupDialog=q("group-dialog"),groupForm=q("group-form"),groupList=q("group-screens");let groupBusy=false;
@@ -301,6 +301,12 @@ q("group-operation").onchange=()=>groupChoices();q("group-close").onclick=()=>{i
 groupForm.onsubmit=async e=>{e.preventDefault();if(groupBusy)return;const op=q("group-operation").value,ids=groupSelection(),form=new FormData(groupForm);if(!ids.length)return;const changes=op==="play"?{enabled:true}:op==="stop"?{enabled:false}:op==="mute"?{muted:true}:op==="unmute"?{muted:false}:op==="volume"?{volume:Number(form.get("volume"))}:op==="source"?{source:form.get("source").trim()}:op==="bandwidth"?{bandwidth:form.get("bandwidth")}:{orientation:form.get("orientation")};const names=latestRows.filter(s=>ids.includes(s.id+":"+s.output)).map(s=>s.name).join(", ");groupBusy=true;groupFields();try{if(!await slConfirm(ids.length+" écran(s) · "+names,q("group-operation").selectedOptions[0].textContent))return;await api("/api/operator/group",{ids,changes});groupDialog.close();await refresh();slResult("Les réglages de groupe ont été transmis.")}catch(e){slResult(e.message,true)}finally{groupBusy=false;groupFields()}};
 
 
+const pg=q("personal-groups-dialog");let pgBusy=false;
+function pgDraw(){const list=q("pg-list");list.replaceChildren();const names=[...new Set(latestRows.map(s=>s.group||""))].sort((a,b)=>a.localeCompare(b,"fr"));for(const name of names){const field=document.createElement("fieldset"),legend=document.createElement("legend"),label=document.createElement("label"),all=document.createElement("input");field.className="group-section";label.className="check";all.type="checkbox";all.className="group-choice";label.append(all,name||"Sans groupe");legend.append(label);field.append(legend);for(const row of latestRows.filter(s=>(s.group||"")===name)){const l=document.createElement("label"),box=document.createElement("input");l.className="check";box.type="checkbox";box.className="screen-choice";box.value=row.id+":"+row.output;l.append(box,row.name);field.append(l)}field.onchange=e=>{if(e.target===all)field.querySelectorAll(".screen-choice").forEach(b=>b.checked=all.checked);syncGroupChoice(field)};list.append(field)}q("pg-target").replaceChildren(new Option("Sans groupe","none"),...names.filter(Boolean).map(n=>new Option(n,"group:"+n)),new Option("Nouveau groupe…","new"),new Option("Organisation de la régie","default"));q("pg-new-label").hidden=true}
+q("personal-groups").onclick=()=>{pgDraw();pg.showModal()};q("pg-close").onclick=()=>{if(!pgBusy)pg.close()};pg.addEventListener("cancel",e=>{if(pgBusy)e.preventDefault()});q("pg-target").onchange=()=>q("pg-new-label").hidden=q("pg-target").value!=="new";for(const [id,on] of [["pg-all",true],["pg-none",false]])q(id).onclick=()=>{q("pg-list").querySelectorAll(".screen-choice").forEach(b=>b.checked=on);q("pg-list").querySelectorAll(".group-section").forEach(syncGroupChoice)};
+async function pgApply(action,extra){if(pgBusy)return;pgBusy=true;try{await layoutQueue;layout=await api("/api/operator/layout",{action,...extra});await refresh();pgDraw();slResult("Organisation personnelle enregistrée.")}catch(e){slResult(e.message,true)}finally{pgBusy=false}}
+q("pg-save").onclick=async()=>{const ids=[...q("pg-list").querySelectorAll(".screen-choice:checked")].map(b=>b.value),target=q("pg-target").value;if(!ids.length)return slResult("Sélectionne au moins un écran.",true);const name=target==="new"?q("pg-new").value.trim():target.startsWith("group:")?target.slice(6):"";if(target==="new"&&!name)return slResult("Renseigne le nom du groupe.",true);if(await slConfirm("Déplacer "+ids.length+" écran(s) dans "+(target==="default"?"l’organisation de la régie":name||"Sans groupe")+" ?"))await pgApply("assign",{ids,name,reset:target==="default"})};
+q("pg-rename").onclick=async()=>{const target=q("pg-target").value;if(!target.startsWith("group:"))return slResult("Choisis un groupe existant.",true);const old=target.slice(6),name=await slPrompt("Renommer le groupe",old);if(name&&name!==old)await pgApply("rename",{old,name})};q("pg-remove").onclick=async()=>{const target=q("pg-target").value;if(!target.startsWith("group:"))return slResult("Choisis un groupe existant.",true);const old=target.slice(6);if(await slConfirm("Supprimer le groupe "+old+" et déplacer ses écrans dans Sans groupe ?"))await pgApply("rename",{old,name:""})};
 function getGroup(name){let g=groups.get(name);if(!g){const section=document.createElement("section"),title=document.createElement("h2"),grid=document.createElement("div");section.className="screen-group";title.className="screen-group-title";title.textContent=name||"Sans groupe";grid.className="grid";section.append(title,grid);q("screens").append(section);g={section,grid};groups.set(name,g);title.append(dragHandle(section,name,"groups"))}return g}
 function renderReaderHealth(r,s){
  const el=r.el, h=s.health||{}, d=h.diagnostic||{}, online=h.online;
@@ -332,7 +338,7 @@ function getReader(s){
   getGroup(s.group||"").grid.append(el);r={el,title,badge,statuses,body,key,group:s.group||""};readerCards.set(key,r);head.insertBefore(dragHandle(el,key,"screens",r.group),badge)
  }return r
 }
-async function refresh(){const rows=await api("/api/operator/screens"),keys=new Set(),activeReaders=new Map();latestRows=rows;sourceGallery(rows);q("identify-manager-open").disabled=identifyBusy||!identifyRows().length;if(q("identify-manager").open&&!identifyBusy)renderIdentifyManager();q("group-action").disabled=!rows.some(s=>s.rights.some(p=>Object.values(groupRights).includes(p)));q("organize").disabled=!rows.length;q("count").textContent=rows.filter(s=>s.status!=="Hors ligne").length+" / "+rows.length+" écrans connectés";for(const s of rows){const k=s.id+":"+s.output;keys.add(k);const r=getReader(s);if(!activeReaders.has(r.key))activeReaders.set(r.key,[]);activeReaders.get(r.key).push(s);const signature=JSON.stringify([s.rights,s.sources,s.audio_devices,s.folders,s.identify,s.identified,s.maintenance,s.settings,s.audio_route,s.display_capture,s.capture_consent]);let c=cards.get(k);if(!c||c.signature!==signature&&!c.a.contains(document.activeElement)){const n=build(s);n.signature=signature;if(c)c.a.replaceWith(n.a);cards.set(k,n);c=n}if(c.a.parentElement!==r.body)r.body.append(c.a);c.title.textContent="Écran "+(Number(s.output)+1)+(s.output_name?" · "+s.output_name:"")+(s.width&&s.height?" · "+s.width+" × "+s.height:"")+" ";badge(c.status,s.status)}
+async function refresh(){if(!layoutLoaded){layout=await api("/api/operator/layout");layoutLoaded=true}const rows=await api("/api/operator/screens"),keys=new Set(),activeReaders=new Map();latestRows=rows;sourceGallery(rows);q("identify-manager-open").disabled=identifyBusy||!identifyRows().length;if(q("identify-manager").open&&!identifyBusy)renderIdentifyManager();q("group-action").disabled=!rows.some(s=>s.rights.some(p=>Object.values(groupRights).includes(p)));q("organize").disabled=!rows.length;q("personal-groups").disabled=!rows.length;q("count").textContent=rows.filter(s=>s.status!=="Hors ligne").length+" / "+rows.length+" écrans connectés";for(const s of rows){const k=s.id+":"+s.output;keys.add(k);const r=getReader(s);if(!activeReaders.has(r.key))activeReaders.set(r.key,[]);activeReaders.get(r.key).push(s);const signature=JSON.stringify([s.rights,s.sources,s.audio_devices,s.folders,s.identify,s.identified,s.maintenance,s.settings,s.audio_route,s.display_capture,s.capture_consent]);let c=cards.get(k);if(!c||c.signature!==signature&&!c.a.contains(document.activeElement)){const n=build(s);n.signature=signature;if(c)c.a.replaceWith(n.a);cards.set(k,n);c=n}if(c.a.parentElement!==r.body)r.body.append(c.a);c.title.textContent="Écran "+(Number(s.output)+1)+(s.output_name?" · "+s.output_name:"")+(s.width&&s.height?" · "+s.width+" × "+s.height:"")+" ";badge(c.status,s.status)}
 for(const [k,c] of cards)if(!keys.has(k)){c.a.remove();cards.delete(k)}
 for(const [k,r] of readerCards){const outputs=activeReaders.get(k);if(!outputs){r.el.remove();readerCards.delete(k);continue}r.title.textContent=outputs[0].reader_name;const target=r.el.querySelector(".identify"),ident=outputs.find(s=>s.identify);target.hidden=!ident;target.disabled=identifyBusy||!ident;target.setAttribute("aria-pressed",String(!!ident?.identified));target.title=(ident?.identified?"Masquer l’identification de ":"Identifier ")+r.title.textContent;target.setAttribute("aria-label",target.title);renderReaderHealth(r,outputs[0]);for(const s of outputs){const c=cards.get(s.id+":"+s.output);if(c)c.status.hidden=outputs.length<=1}r.badge.hidden=outputs.length>1;r.statuses.hidden=outputs.length===1;badge(r.badge,outputs[0].status);r.statuses.replaceChildren(...outputs.map(s=>{const b=document.createElement("span");badge(b,s.status,"Écran "+(Number(s.output)+1)+" : ");return b}))}
 for(const [name,g] of groups)if(!g.grid.children.length){g.section.remove();groups.delete(name)}
@@ -1620,6 +1626,9 @@ class Request(BaseHTTPRequestHandler):
             elif path == "/api/operator/screens":
                 with LOCK:
                     self.reply(200,self.operator_screens())
+            elif path == "/api/operator/layout":
+                with LOCK:
+                    self.reply(200,self.operator_layout())
             elif path == "/api/session":
                 self.session_status()
             elif path == "/api/preview":
@@ -2002,8 +2011,62 @@ class Request(BaseHTTPRequestHandler):
                     names.add(report["active_source"])
         return sorted(names, key=str.casefold)
 
+    def operator_layout(self):
+        path=REMOTE_ACCESS / "operator-layouts" / (sha256(self.principal.encode("utf-8")).hexdigest()+".json")
+        try:
+            data=json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data,dict):
+                return {"groups":data.get("groups",[]),"screens":data.get("screens",{}),"assignments":data.get("assignments",{})}
+        except (OSError,ValueError):
+            pass
+        return {"groups":[],"screens":{},"assignments":{}}
+
+    def change_operator_layout(self,data):
+        state=self.operator_layout()
+        valid={key+":"+index:physical_group(row,index) or "" for key,row in SCREENS.items() if row.get("token") for index in physical_outputs(row) if self.allowed(key,index,"view")}
+        assignments=state["assignments"]
+        action=data.get("action")
+        if action=="assign":
+            ids=data.get("ids")
+            name=data.get("name")
+            if not isinstance(ids,list) or not ids or len(ids)>250 or any(not isinstance(i,str) or i not in valid for i in ids):
+                return 403,{"error":"Écran non autorisé."}
+            if not isinstance(name,str) or len(name)>80 or (name and not name.isprintable()):
+                raise ValueError("Nom de groupe invalide.")
+            for i in ids:
+                if data.get("reset") is True:
+                    assignments.pop(i,None)
+                else:
+                    assignments[i]=name.strip()
+        elif action=="rename":
+            old,name=data.get("old"),data.get("name")
+            if not isinstance(old,str) or not old or not isinstance(name,str) or len(name)>80 or (name and not name.isprintable()):
+                raise ValueError("Nom de groupe invalide.")
+            for i,original in valid.items():
+                if assignments.get(i,original)==old:
+                    assignments[i]=name.strip()
+        elif "layout" in data:
+            layout=data["layout"]
+            if not isinstance(layout,dict):
+                raise ValueError("Organisation invalide.")
+            groups,screens=layout.get("groups"),layout.get("screens")
+            if not isinstance(groups,list) or len(groups)>250 or any(not isinstance(g,str) or len(g)>80 for g in groups) or not isinstance(screens,dict) or len(screens)>250:
+                raise ValueError("Organisation invalide.")
+            if any(not isinstance(k,str) or len(k)>80 or not isinstance(v,list) or len(v)>250 or any(not isinstance(i,str) or len(i)>256 for i in v) for k,v in screens.items()):
+                raise ValueError("Ordre invalide.")
+            state.update(groups=groups,screens=screens)
+        else:
+            raise ValueError("Action inconnue.")
+        path=REMOTE_ACCESS / "operator-layouts" / (sha256(self.principal.encode("utf-8")).hexdigest()+".json")
+        path.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+        temp=path.with_suffix(".tmp")
+        temp.write_text(json.dumps(state,ensure_ascii=False),encoding="utf-8")
+        temp.replace(path)
+        return 200,state
+
     def operator_screens(self):
         rows=[]
+        assignments=self.operator_layout().get("assignments",{})
         available_sources = self.available_ndi_sources()
         for key,row in SCREENS.items():
             if not row.get("token"):
@@ -2025,7 +2088,7 @@ class Request(BaseHTTPRequestHandler):
                             diagnostic={**{k:diagnostic.get(k) for k in ("cpu_pct","ram_used","ram_total","disk_used","disk_total","disk_free")},
                                         "interfaces":[{k:link.get(k) for k in ("name","kind","ssid","to_regie","rx_mbps","tx_mbps")} for link in diagnostic.get("interfaces",[]) if link.get("connected")]})
                 rows.append(dict(health=health,id=key,output=index,name=row.get("output_names",{}).get(index) or row["name"]+" · Écran "+str(int(index)+1),
-                                 reader_name=row["name"], output_name=row.get("output_names",{}).get(index,""), group=physical_group(row,index) or "",
+                                 reader_name=row["name"], output_name=row.get("output_names",{}).get(index,""), group=assignments.get(key+":"+index,physical_group(row,index) or ""),
                                  status="Hors ligne" if not online or index!="0" and not out else "Lecture" if playing else "Démarrage" if index=="0" and settings.get("enabled") and report.get("state")=="Démarrage" else "En attente" if settings.get("enabled") else "Arrêté",
                                  settings={k:v for k,v in settings.items() if k in {"enabled"} or k in {"source","bandwidth","mode"} and "source" in perms or k in {"volume","muted"} and "audio" in perms or k=="orientation" and "configuration" in perms},rights=perms,sources=available_sources if "source" in perms else [],
                                  preview_sources=available_sources,
@@ -2051,6 +2114,8 @@ class Request(BaseHTTPRequestHandler):
             if not self.operator_preview_allowed(target):
                 return denied
             return request_preview(data,time.time())
+        if path == "/api/operator/layout":
+            return self.change_operator_layout(data)
         if path == "/api/operator/identify":
             ids,enabled=data.get("ids"),data.get("enabled")
             if type(enabled) is not bool or not isinstance(ids,list) or not ids or len(ids)>250 or any(not isinstance(key,str) for key in ids):
