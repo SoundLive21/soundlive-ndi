@@ -18,7 +18,8 @@ if [[ $mode != pi && $mode != ubuntu ]]; then
     echo "Usage : bash installer-bureau-distant-linux.sh [pi|ubuntu]" >&2
     exit 2
 fi
-sudo -v
+noninteractive=${SOUNDLIVE_REMOTE_DESKTOP_NONINTERACTIVE:-0}
+if [[ $noninteractive == 1 ]]; then sudo -n -v; else sudo -v; fi
 install_package() {
     if ! dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -Fxq 'install ok installed'; then
         sudo apt-get update
@@ -34,8 +35,24 @@ if [[ $session != x11 && $session != wayland ]]; then
     while read -r id _; do
         [[ $(loginctl show-session "$id" -p Name --value 2>/dev/null) == "$(id -un)" ]] || continue
         type=$(loginctl show-session "$id" -p Type --value 2>/dev/null || true)
-        if [[ $type == x11 || $type == wayland ]]; then session=$type; break; fi
+        if [[ $type == x11 || $type == wayland ]]; then
+            session=$type
+            if [[ -z $desktop ]]; then
+                desktop=$(loginctl show-session "$id" -p Desktop --value 2>/dev/null || true)
+                desktop=${desktop,,}
+            fi
+            break
+        fi
     done < <(loginctl list-sessions --no-legend 2>/dev/null)
+fi
+# A remote installation may precede the first graphical login.
+if [[ $mode == ubuntu && $session != x11 && ( -z $desktop || $session != wayland ) ]]; then
+    if [[ -d /usr/share/gnome-shell ]] || dpkg-query -W -f='${Status}' gnome-shell 2>/dev/null | grep -Fxq 'install ok installed'; then
+        desktop=gnome
+        [[ $session == wayland ]] || session=wayland
+    elif [[ -d /usr/share/xsessions && ! -d /usr/share/wayland-sessions ]]; then
+        session=x11
+    fi
 fi
 if [[ $mode == pi && $session != x11 ]] && command -v raspi-config >/dev/null; then
     install_package wayvnc
@@ -46,6 +63,14 @@ elif [[ $mode == ubuntu && $session == wayland && ( $desktop == *gnome* || $desk
     # Aucun mot de passe RDP ne doit être inventé ou enregistré par l'installateur.
     install_package gnome-remote-desktop
     rm -f -- "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/soundlive-vnc.desktop"
+    export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    if [[ -S $XDG_RUNTIME_DIR/bus ]]; then
+        export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+        # Respect existing credentials and configuration. Do not enable an unauthenticated service.
+        if command -v grdctl >/dev/null && grdctl status 2>/dev/null | grep -Eiq "Status:[[:space:]]*enabled"; then
+            systemctl --user start gnome-remote-desktop.service || true
+        fi
+    fi
     echo 'Ubuntu GNOME / Wayland détecté : TigerVNC Server X11 ne peut pas partager ce bureau.'
     echo 'Active Paramètres > Système > Bureau à distance > Partage du bureau (et Contrôle à distance).'
     echo 'Définis les identifiants RDP dans les paramètres Ubuntu, puis utilise le bouton MSRDP de la régie.'
@@ -56,6 +81,10 @@ elif [[ $session == x11 ]]; then
     passfile="$HOME/.vnc/passwd"
     install -d -m 700 "$HOME/.vnc"
     if [[ ! -s $passfile ]]; then
+        if [[ $noninteractive == 1 ]]; then
+            echo 'TigerVNC Server installé. Pour activer le partage sécurisé, relance ce script localement ou dans un terminal SSH interactif et choisis le mot de passe VNC.'
+            exit 0
+        fi
         echo 'Choisis le mot de passe VNC pour cette session.'
         tigervncpasswd "$passfile"
     fi
@@ -105,6 +134,10 @@ elif [[ $session == wayland ]] && viewer=$(command -v w0vncserver || command -v 
     passfile="$HOME/.config/tigervnc/passwd"
     install -d -m 700 "$(dirname -- "$passfile")"
     if [[ ! -s $passfile ]]; then
+        if [[ $noninteractive == 1 ]]; then
+            echo 'Serveur VNC installé ; mot de passe à définir en session interactive.'
+            exit 0
+        fi
         tigervncpasswd "$passfile"
     fi
     chmod 600 "$passfile"
@@ -118,6 +151,12 @@ Exec=$viewer -PasswordFile=$passfile -rfbport=5900
 Terminal=false
 DESKTOP
     echo 'Serveur VNC Wayland configuré. Rouvre ta session et vérifie TCP 5900.'
+elif [[ $mode == ubuntu && $noninteractive == 1 ]]; then
+    # Install both supported implementations when no graphical session can be identified.
+    install_package gnome-remote-desktop
+    install_package tigervnc-scraping-server
+    install_package tigervnc-tools
+    echo 'Serveurs RDP et VNC installés. La session graphique doit être identifiée et le partage configuré avec des identifiants.'
 else
     echo "Aucun serveur VNC compatible n'a été configuré pour la session ${session:-inconnue}." >&2
     echo 'Sur Ubuntu GNOME/Wayland, utilise le partage RDP intégré de GNOME.' >&2
