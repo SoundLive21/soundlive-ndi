@@ -56,7 +56,7 @@ button{padding:9px 13px;cursor:pointer;background:#2b222f;font-weight:600;white-
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}button.remove{color:#efacb7}.check{display:flex;align-items:center;gap:6px}
 .video-output{min-width:0;margin:12px 0;padding:12px 14px 16px;border:1px solid #59404e;border-radius:12px;background:#17121b}
 .video-output legend{padding:0 8px;color:#f5d1df;font-size:1rem;font-weight:700}
-.video-output .output-status{display:block;width:max-content;margin:4px 0 10px}.video-output .output-status[hidden]{display:none}
+.screen-controls summary .summary-statuses{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;vertical-align:middle;margin-right:10px}.screen-controls summary .summary-statuses[hidden]{display:none}
 .video-output legend .output-title{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
 .video-output legend svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .video-output legend small{font-size:.78rem;font-weight:400;color:var(--sub)}
@@ -866,7 +866,7 @@ button[aria-pressed="true"].identify, #identify-all[aria-pressed="true"]{border-
     <button class="os-upgrade" type="button" hidden>Mettre à jour le système</button>
     <button class="client-upgrade full-action" type="button" hidden>Mettre à jour le lecteur</button>
     <details class="screen-controls" open>
-      <summary>Commandes et réglages</summary>
+      <summary><span class="summary-statuses" hidden></span><span>Commandes et réglages</span></summary>
       <section class="pending"></section>
       <form class="config">
       <fieldset class="primary-output video-output"><legend>Écran 1</legend>
@@ -3266,12 +3266,10 @@ function paintPhysicalStatus(badge, state) {
   badge.classList.toggle("waiting", state === "En attente" || state === "Démarrage");
   badge.classList.toggle("stopped", state === "Arrêté");
 }
-function outputStatusBadge(field, row, index, visible, before=null) {
-  let badge = field.querySelector(".output-status");
-  if (!badge) {badge=document.createElement("span");badge.className="badge output-status";}
-  badge.hidden=!visible;
-  paintPhysicalStatus(badge,physicalStatus(row,index));
-  if(before)before.before(badge);else field.querySelector("legend").after(badge);
+function renderSummaryStatuses(el,row,outputs) {
+  const holder=select(el,".summary-statuses");
+  holder.hidden=outputs.length<=1;
+  holder.replaceChildren(...(outputs.length>1?outputs.map(output=>{const badge=document.createElement("span");badge.className="badge";const state=physicalStatus(row,output.output);paintPhysicalStatus(badge,state);badge.textContent="Écran "+(Number(output.output)+1)+" : "+state;return badge}):[]));
 }
 function audioRouteControl(row, index) {
   const devices = row.report.audio_devices || [];
@@ -3451,7 +3449,6 @@ function renderExtraOutputs(card, row) {
     actions.append(save, toggle);
     line.append(heading, label("Sources NDI détectées", source),
       label("Qualité", bandwidth), label("Orientation de l’écran", orientation), audioRouteControl(row,output.id), label("Volume ", level), volume, audio, actions);
-    outputStatusBadge(line,row,output.id,inline,bandwidth.closest("label"));
     const ndi = document.createElement("button");
     ndi.type = "button"; ndi.className = "primary full-action";
     ndi.textContent = "Revenir à la diffusion NDI";
@@ -3521,7 +3518,7 @@ function render(row) {
     ui.badge.after(headerStatuses);
   }
   const multiHeader = headerOutputs.length > 1;
-  outputStatusBadge(audioField,row,"0",multiHeader,select(audioField,".bandwidth").closest("label"));
+  renderSummaryStatuses(el,row,headerOutputs);
   ui.badge.hidden = multiHeader;
   headerStatuses.hidden = !multiHeader;
   paintPhysicalStatus(ui.badge,physicalStatus(row,"0"));
