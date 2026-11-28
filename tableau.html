@@ -3805,7 +3805,8 @@ async function refreshScreens() {
     const rows = await call("/api/screens");
     reportScreenChanges(rows);
     notice("");
-    document.querySelector("#count").textContent = rows.filter(x => x.online).length + " en ligne";
+    const physicalCount = physicalRows(rows);
+    document.querySelector("#count").textContent = physicalCount.filter(x => x.online).length + " / " + physicalCount.length + " écrans connecté(s)";
     const ids = new Set(rows.map(row => row.id));
     for (const [id,card] of cards) if (!ids.has(id)) {card.el.remove();cards.delete(id);}
     for (const [id,entry] of secondaryCards) if (!ids.has(entry.readerId)) {entry.el.remove();secondaryCards.delete(id);}
