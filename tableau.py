@@ -289,6 +289,7 @@ async function refresh(){const rows=await api("/api/operator/screens"),keys=new 
 for(const [k,c] of cards)if(!keys.has(k)){c.a.remove();cards.delete(k)}
 for(const [k,r] of readerCards){const outputs=activeReaders.get(k);if(!outputs){r.el.remove();readerCards.delete(k);continue}r.title.textContent=outputs[0].reader_name;const target=r.el.querySelector(".identify"),ident=outputs.find(s=>s.identify);target.hidden=!ident;target.disabled=identifyBusy||!ident;target.setAttribute("aria-pressed",String(!!ident?.identified));target.title=(ident?.identified?"Masquer l’identification de ":"Identifier ")+r.title.textContent;target.setAttribute("aria-label",target.title);renderReaderHealth(r,outputs[0]);for(const s of outputs){const c=cards.get(s.id+":"+s.output);if(c)c.status.hidden=outputs.length<=1}r.badge.hidden=outputs.length>1;r.statuses.hidden=outputs.length===1;badge(r.badge,outputs[0].status);r.statuses.replaceChildren(...outputs.map(s=>{const b=document.createElement("span");badge(b,s.status,"Écran "+(Number(s.output)+1)+" : ");return b}))}
 for(const [name,g] of groups)if(!g.grid.children.length){g.section.remove();groups.delete(name)}
+const empty=q("screens").querySelector(".empty");if(rows.length){empty?.remove()}else if(!empty){const box=document.createElement("div");box.className="empty";box.textContent="Aucun écran associé à ton compte. Contacte la régie pour obtenir un accès aux écrans.";q("screens").append(box)}
 if(!dragging&&!document.activeElement?.closest(".operator-card"))reorder();
 }
 let identifyBusy=false;
